@@ -42,8 +42,12 @@ def calculate_supertrend(df, period=None, multiplier=None):
     st_values = np.zeros(len(df))
     st_dir = np.ones(len(df)) # 1 = Bull, -1 = Bear
     
+    # Fill NaN basic bands with 0 so they don't propagate NaN
+    basic_upper = basic_upper.fillna(0)
+    basic_lower = basic_lower.fillna(0)
+    
     for i in range(len(df)):
-        if i == 0:
+        if i == 0 or basic_upper.iloc[i] == 0:
             final_upper[i] = basic_upper.iloc[i]
             final_lower[i] = basic_lower.iloc[i]
             st_values[i] = final_upper[i]
