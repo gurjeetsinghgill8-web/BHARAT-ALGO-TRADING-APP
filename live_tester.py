@@ -20,7 +20,7 @@ def live_tester():
     print("🔬 REAL-TIME VALIDATION ENGINE STARTED")
     print("Listening to Live Market Feed (Mock Mode)... Press Ctrl+C to stop.")
     
-    main_loop.send_telegram_alert("🔬 REAL-TIME VALIDATION STARTED for today's session.")
+    main_loop.send_alert("🔬 REAL-TIME VALIDATION STARTED for today's session.")
     init_csv()
     
     while True:
@@ -52,8 +52,8 @@ def live_tester():
                 msg = f"🚨 MOCK ALERT: {signal} at {alert_time}\nSystem Price: ₹{sys_price:.2f}\nLive Price: ₹{live_price:.2f}"
                 print(msg)
                 
-                # Send to Telegram
-                main_loop.send_telegram_alert(msg)
+                # Send to Console Alert
+                main_loop.send_alert(msg)
                 
                 # 4. Log to CSV for end-of-day analysis
                 with open(LOG_FILE, mode='a', newline='') as file:
