@@ -44,12 +44,14 @@ def run_crypto_backtest(asset_ticker="BTC-USD", days=30, timeframe="1 Hour",
     trades = []
     current_pos = None
     entry_spot = 0.0
+    entry_st_line = 0.0
     entry_time = None
     delta_estimate = 0.15 
 
     for idx, row in df_st.dropna(subset=[dir_col, 'prev_dir']).iterrows():
         prev_dir = row['prev_dir']
         last_dir = row[dir_col]
+        current_st_line = round(float(row[st_val_col]), 2)
         
         # Only flip when direction actually CHANGES
         signal = None
@@ -74,8 +76,9 @@ def run_crypto_backtest(asset_ticker="BTC-USD", days=30, timeframe="1 Hour",
                     "Exit Time": idx.strftime("%Y-%m-%d %H:%M"),
                     "Type": current_pos,
                     "Entry Spot": entry_spot,
+                    "Entry ST Line": entry_st_line,
                     "Exit Spot": exit_spot,
-                    "ST Line": round(float(row[st_val_col]), 2),
+                    "Exit ST Line": current_st_line,
                     "Spot Move": round(spot_move, 2),
                     "Realized P&L": realized_pnl,
                     "Net P&L": net_pnl
@@ -83,6 +86,7 @@ def run_crypto_backtest(asset_ticker="BTC-USD", days=30, timeframe="1 Hour",
 
             current_pos = signal
             entry_spot = round(float(row['close']), 2)
+            entry_st_line = current_st_line
             entry_time = idx
 
     trades_df = pd.DataFrame(trades)

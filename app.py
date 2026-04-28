@@ -15,20 +15,20 @@ st.markdown("""
 <style>
     /* Premium Dark Theme with readable contrast */
     .stApp {
-        background-color: #0B0E14;
-        color: #E0E0E0;
+        background-color: #0E1117;
+        color: #FAFAFA;
         font-family: 'Inter', sans-serif;
     }
     
     /* Header Styling */
     h1, h2, h3 {
-        color: #FFFFFF !important;
+        color: #58A6FF !important;
         font-weight: 700 !important;
     }
     
     /* Custom Card for Metrics */
     .metric-container {
-        background-color: #161B22;
+        background-color: #1F242C;
         border: 1px solid #30363D;
         border-radius: 12px;
         padding: 20px;
@@ -275,6 +275,25 @@ with tab4:
                 
                 st.subheader("📈 Equity Growth")
                 st.line_chart(res["Equity Curve"])
+
+                st.subheader("🕯️ Price vs Supertrend (Visual Check)")
+                try:
+                    import yfinance as yf
+                    import logic
+                    interval_map = {"15 Min": "15m", "30 Min": "30m", "1 Hour": "1h", "4 Hour": "4h", "1 Day": "1d"}
+                    chart_df = yf.download(l_asset, period=f"{l_days}d", interval=interval_map.get(l_tf, "1h"), progress=False)
+                    if isinstance(chart_df.columns, pd.MultiIndex): chart_df.columns = chart_df.columns.get_level_values(0)
+                    chart_df.columns = [c.lower() for c in chart_df.columns]
+                    chart_st = logic.calculate_supertrend(chart_df, period=l_period, multiplier=l_mult)
+                    
+                    viz_df = pd.DataFrame({
+                        'Close Price': chart_st['close'],
+                        'Supertrend Line': chart_st[f"SUPERT_{int(l_period)}_{float(l_mult)}"]
+                    })
+                    st.line_chart(viz_df)
+                except Exception as e:
+                    st.info(f"Visual chart failed to load: {e}")
                 
                 st.subheader("📜 Trade Execution Log")
+                st.write("Compare the Spot with the ST Line at Entry and Exit to verify crossover logic.")
                 st.dataframe(res["Trades"], use_container_width=True)
