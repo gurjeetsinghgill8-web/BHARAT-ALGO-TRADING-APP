@@ -1,8 +1,11 @@
 """
-crypto_backtester.py - Realistic Crypto Backtest
+crypto_backtester.py - Advanced Crypto Backtester
 =================================================
-Key Fix: Uses 4H candles (not 1H) so Supertrend doesn't flip every hour.
-This matches how you actually trade - hold for DAYS, exit only on real trend flip.
+Features:
+- Flexible Timeframes (15m, 1h, 4h, 1d)
+- Custom Supertrend Parameters
+- Detailed Brokerage & Net P&L Tracking
+- Captured Spot Move & Delta-based Option Simulation
 """
 
 import pandas as pd
@@ -13,15 +16,22 @@ import db
 import os
 from datetime import datetime
 
-
-def fetch_crypto_data(asset_ticker, days):
+def fetch_crypto_data(asset_ticker, days, timeframe):
     """
-    Fetches BTC-USD or ETH-USD using 4H candles.
-    4H = fewer, higher-quality signals. Matches real trading style.
+    Fetches BTC-USD or ETH-USD using flexible timeframes.
+    Valid intervals: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
     """
-    # ALWAYS use Daily candles - matches real trading (hold 3-7 days per trade)
-    interval = "1d"
-    print(f"[CryptoLab] Downloading {asset_ticker} | {days}d | DAILY candles (real trading style)...")
+    # Map friendly UI names to yfinance intervals
+    interval_map = {
+        "15 Min": "15m",
+        "30 Min": "30m",
+        "1 Hour": "1h",
+        "4 Hour": "4h",
+        "1 Day": "1d"
+    }
+    interval = interval_map.get(timeframe, "1h")
+    
+    print(f"[CryptoLab] Downloading {asset_ticker} | {days}d | {interval} candles...")
 
     try:
         df = yf.download(asset_ticker, period=f"{days}d", interval=interval, progress=False)
@@ -36,47 +46,32 @@ def fetch_crypto_data(asset_ticker, days):
         print(f"[CryptoLab] Fetch Error: {e}")
         return pd.DataFrame()
 
-
-def run_crypto_backtest(asset_ticker="BTC-USD", days=30, otm_strikes=5, simulated_premium=200.0):
+def run_crypto_backtest(asset_ticker="BTC-USD", days=30, timeframe="1 Hour", 
+                        st_period=10, st_mult=1.5, otm_strikes=5, 
+                        simulated_premium=200.0, brokerage_per_trade=2.0):
     """
-    Realistic backtest:
-    - 4H candles (or 1D for long range) = hold positions for days not hours
-    - Exit only when Supertrend GENUINELY flips
-    - P&L based on actual spot move captured
-
-    Deep OTM BTC Options (5 strikes out):
-    - Typical strike interval: $1000 (so 5 OTM = $5000 away from spot)
-    - Delta ~ 0.08-0.15 for 5-strike OTM
-    - Wins happen when BTC moves $2000+ in your direction
-
-    Premium simulation:
-    - We pay `simulated_premium` at entry
-    - At exit: if move in right direction > break-even, we profit
-    - Break-even = premium / delta = $200 / 0.10 = $2000 BTC move
+    Advanced backtest logic with detailed P&L and brokerage.
     """
-    df = fetch_crypto_data(asset_ticker, days)
+    df = fetch_crypto_data(asset_ticker, days, timeframe)
     if df.empty:
-        return {"error": "Could not fetch data."}
+        return {"error": "Could not fetch data from Yahoo Finance."}
 
-    # Store OTM strikes setting
-    db.set_param('crypto_otm_strikes', otm_strikes)
-
-    df_st = logic.calculate_supertrend(df)
-    period = int(float(db.get_param('st_period', 10)))
-    multiplier = float(db.get_param('st_multiplier', 1.5))
-    dir_col = f"SUPERTd_{period}_{multiplier}"
+    # Calculate Supertrend with custom params
+    df_st = logic.calculate_supertrend(df, period=st_period, multiplier=st_mult)
+    dir_col = f"SUPERTd_{st_period}_{st_mult}"
 
     if dir_col not in df_st.columns:
-        return {"error": "Supertrend calculation failed."}
+        return {"error": "Supertrend calculation failed for these parameters."}
 
     df_st['prev_dir'] = df_st[dir_col].shift(1)
-
+    
     trades = []
     current_pos = None
     entry_spot = 0.0
     entry_time = None
-
-    delta_estimate = 0.15  # Deep OTM delta 5-strikes: ~0.10-0.20, use 0.15 for daily moves
+    
+    # Delta estimate for OTM options
+    delta_estimate = 0.15 
 
     for idx, row in df_st.dropna(subset=[dir_col, 'prev_dir']).iterrows():
         prev_dir = row['prev_dir']
@@ -93,69 +88,62 @@ def run_crypto_backtest(asset_ticker="BTC-USD", days=30, otm_strikes=5, simulate
             if current_pos:
                 exit_spot = round(float(row['close']), 2)
                 spot_move = exit_spot - entry_spot
-                hold_candles = len(df_st.loc[entry_time:idx]) if entry_time else 0
-                hold_days = hold_candles  # On 1D candles, each candle = 1 day
-
-                # P&L calculation
+                
+                # Option P&L simulation
                 if "CE" in current_pos:
-                    if spot_move > 0:
-                        # Moved in right direction
-                        option_pnl = round((spot_move * delta_estimate) - simulated_premium, 2)
-                    else:
-                        option_pnl = round(-simulated_premium, 2)
-                else:  # PE
-                    if spot_move < 0:
-                        option_pnl = round((abs(spot_move) * delta_estimate) - simulated_premium, 2)
-                    else:
-                        option_pnl = round(-simulated_premium, 2)
+                    raw_pnl = (spot_move * delta_estimate) - simulated_premium if spot_move > 0 else -simulated_premium
+                else: # PE
+                    raw_pnl = (abs(spot_move) * delta_estimate) - simulated_premium if spot_move < 0 else -simulated_premium
+                
+                realized_pnl = round(raw_pnl, 2)
+                net_pnl = round(realized_pnl - (brokerage_per_trade * 2), 2) # Entry + Exit brokerage
 
                 trades.append({
-                    "Date": idx.strftime("%Y-%m-%d"),
-                    "Action": f"EXIT {current_pos}",
-                    "Spot ($)": exit_spot,
-                    "BTC Move ($)": round(spot_move, 2),
-                    "Days Held": hold_days,
-                    "P&L ($)": option_pnl
+                    "Entry Time": entry_time.strftime("%Y-%m-%d %H:%M"),
+                    "Exit Time": idx.strftime("%Y-%m-%d %H:%M"),
+                    "Type": current_pos,
+                    "Entry Spot": entry_spot,
+                    "Exit Spot": exit_spot,
+                    "Spot Move": round(spot_move, 2),
+                    "Realized P&L": realized_pnl,
+                    "Brokerage": brokerage_per_trade * 2,
+                    "Net P&L": net_pnl
                 })
 
             # ── Enter new position
             current_pos = signal
             entry_spot = round(float(row['close']), 2)
             entry_time = idx
-            trades.append({
-                "Date": idx.strftime("%Y-%m-%d"),
-                "Action": f"ENTRY {current_pos} [5 OTM]",
-                "Spot ($)": entry_spot,
-                "BTC Move ($)": 0.0,
-                "Days Held": 0,
-                "P&L ($)": 0.0
-            })
 
     trades_df = pd.DataFrame(trades)
 
     if trades_df.empty:
-        return {"error": "No signals generated. Try a longer period."}
+        return {"error": "No trend flips detected. Try a shorter timeframe or longer period."}
 
-    exits = trades_df[trades_df['P&L ($)'] != 0.0]
-    total_pnl = round(exits['P&L ($)'].sum(), 2)
-    wins = len(exits[exits['P&L ($)'] > 0])
-    losses = len(exits[exits['P&L ($)'] <= 0])
-    win_rate = round(wins / len(exits) * 100, 1) if len(exits) > 0 else 0
+    # Summary Stats
+    total_realized = round(trades_df['Realized P&L'].sum(), 2)
+    total_brokerage = round(trades_df['Brokerage'].sum(), 2)
+    total_net = round(trades_df['Net P&L'].sum(), 2)
+    wins = len(trades_df[trades_df['Net P&L'] > 0])
+    losses = len(trades_df[trades_df['Net P&L'] <= 0])
+    win_rate = round(wins / len(trades_df) * 100, 1)
 
     os.makedirs('reports', exist_ok=True)
-    filename = f"reports/crypto_{asset_ticker.replace('-','_')}_{days}d.csv"
+    filename = f"reports/detailed_crypto_{asset_ticker.replace('-','_')}.csv"
     trades_df.to_csv(filename, index=False)
 
     return {
         "Asset": asset_ticker,
-        "Period": f"{days} days",
-        "Candle": "1D (Daily - Real trading style)",
-        "Total Signals": len(exits),
+        "Timeframe": timeframe,
+        "ST Params": f"({st_period}, {st_mult})",
+        "Total Trades": len(trades_df),
         "Wins": wins,
         "Losses": losses,
         "Win Rate (%)": win_rate,
-        "Total P&L ($)": total_pnl,
-        "Break-even Move Needed": f"${simulated_premium / delta_estimate:,.0f}",
+        "Total Realized ($)": total_realized,
+        "Total Brokerage ($)": total_brokerage,
+        "Total Net P&L ($)": total_net,
         "Report File": filename,
-        "Data": trades_df
+        "Trades": trades_df,
+        "Equity Curve": trades_df['Net P&L'].cumsum()
     }
