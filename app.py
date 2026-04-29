@@ -232,20 +232,22 @@ with tab3:
 
 # --- TAB 4: Crypto Lab (Upgraded) ---
 with tab4:
-    st.header("🛠️ Crypto History Lab 2.0")
-    st.write("Total flexibility: Choose your timeframe, parameters, and analyze net profits.")
+    st.header("🛠️ Crypto Lab — HYBRID KING Edition")
+    st.write("Strategy Mode | Timeframe | Parameters | Full Analytics")
     
     lab_col1, lab_col2 = st.columns(2)
     with lab_col1:
+        l_mode = st.selectbox("Strategy Mode", ["hybrid_king", "adx_only", "plain"], index=0,
+                              help="hybrid_king=ADX+RSI+ST | adx_only=ADX+ST | plain=ST only")
         l_asset = st.selectbox("Backtest Asset", ["BTC-USD", "ETH-USD"])
-        l_tf = st.selectbox("Backtest Timeframe", ["15 Min", "30 Min", "1 Hour", "4 Hour", "1 Day"], index=0)
-        l_days = st.number_input("History (Days)", value=30, min_value=1)
-        l_premium = st.number_input("Simulated Premium ($)", value=200)
+        l_tf = st.selectbox("Backtest Timeframe", ["1 Hour", "30 Min", "15 Min", "4 Hour", "1 Day"], index=0)
+        l_days = st.number_input("History (Days)", value=365, min_value=1)
 
     with lab_col2:
         l_period = st.number_input("ST Period (Lab)", value=10)
-        l_mult = st.number_input("ST Multiplier (Lab)", value=1.0, step=0.1)
-        l_otm = st.slider("OTM Strikes (Lab)", 3, 8, 5)
+        l_mult = st.number_input("ST Multiplier (Lab)", value=1.5, step=0.1)
+        l_premium = st.number_input("Simulated Premium ($)", value=500)
+        l_delta = st.number_input("Delta Estimate", value=0.55, step=0.05, help="ATM=0.55 | OTM=0.15")
         l_brokerage = st.number_input("Brokerage ($ per trade)", value=2.0)
 
     if st.button("🔬 EXECUTE DETAILED BACKTEST", use_container_width=True):
@@ -257,9 +259,10 @@ with tab4:
                 timeframe=l_tf,
                 st_period=l_period,
                 st_mult=l_mult,
-                otm_strikes=l_otm,
                 simulated_premium=l_premium,
-                brokerage_per_trade=l_brokerage
+                brokerage_per_trade=l_brokerage,
+                delta_estimate=l_delta,
+                mode=l_mode
             )
             
             if "error" in res:

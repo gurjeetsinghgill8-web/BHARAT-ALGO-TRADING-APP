@@ -51,21 +51,26 @@ def run_crypto_cycle():
     if crypto_running == 'OFF':
         return
 
-    asset_choice = db.get_param('crypto_asset', 'BTC')
-    symbol = "BTC-USD" if asset_choice == "BTC" else "ETH-USD"
+    # ONLY trade BTC as per HYBRID KING rules
+    asset_choice = "BTC" 
+    symbol = "BTC-USD"
     
-    # Fetch Data (Crypto is 24/7, no time check)
-    df = yf.download(symbol, period="2d", interval="1h", progress=False)
+    # Fetch Data (Crypto is 24/7, 1H timeframe)
+    df = yf.download(symbol, period="5d", interval="1h", progress=False)
     if df.empty: return
 
-    df.columns = [c.lower() for c in df.columns]
-    df_st = logic.calculate_supertrend(df)
+    df.columns = [str(c).lower() for c in df.columns]
     
-    # We use the same signal logic (Supertrend flip)
+    # Calculate indicators
+    df_st = logic.calculate_supertrend(df)
+    df_st['adx'] = logic.calculate_adx(df_st, 14)
+    df_st['rsi'] = logic.calculate_rsi(df_st['close'], 14)
+    
+    # HYBRID KING signal logic (Supertrend flip + ADX + RSI)
     signal = logic.get_signal(df_st)
     
     if signal in ["BUY", "SELL"]:
-        msg = f"🌌 CRYPTO SIGNAL ({asset_choice}): {signal}. Executing OTM Strategy..."
+        msg = f"🌌 HYBRID KING SIGNAL ({asset_choice}): {signal}. Executing ATM Strategy..."
         send_alert(msg)
         delta_executor.execute_crypto_trade(asset_choice, signal)
 

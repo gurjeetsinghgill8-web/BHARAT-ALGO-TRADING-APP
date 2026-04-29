@@ -122,14 +122,15 @@ def fetch_delta_option_chain(asset="BTC", expiry_date=None):
     return []
 
 # ─────────────────────────────────────────────────────────────────
-# STEP 3: SELECT 5-STRIKE OTM OPTION (The Gill Crypto Rule)
+# STEP 3: SELECT ATM/ITM OPTION (HYBRID KING RULE)
 # ─────────────────────────────────────────────────────────────────
 
 def find_gill_crypto_option(asset, direction):
     """
-    Implements the "Gill Crypto Rule":
-    - BUY signal  -> Find CALL option exactly 5 strikes ABOVE current spot
-    - SELL signal -> Find PUT option exactly 5 strikes BELOW current spot
+    Implements the "HYBRID KING Rule":
+    - Find the ATM (At-The-Money) or slightly ITM option.
+    - BUY signal  -> CALL option closest to spot
+    - SELL signal -> PUT option closest to spot
 
     Returns: (symbol, limit_price, strike_price, expiry_date) or None
     """
@@ -156,34 +157,14 @@ def find_gill_crypto_option(asset, direction):
     # Filter by option type
     option_type = "call_options" if direction == "BUY" else "put_options"
     options = [o for o in chain if o.get('contract_type') == option_type]
-    options.sort(key=lambda x: float(x.get('strike_price', 0)))
+    
+    if not options:
+        log_crypto(f"No {option_type} found in chain.")
+        return None
 
-    strikes_away = int(db.get_param('crypto_otm_strikes', 5))
-
-    if direction == "BUY":
-        # CALL OTM = Strikes ABOVE spot
-        otm_calls = [o for o in options if float(o.get('strike_price', 0)) > spot]
-        log_crypto(f"OTM Calls above spot: {len(otm_calls)}")
-        if len(otm_calls) >= strikes_away:
-            target = otm_calls[strikes_away - 1]  # 5th strike
-        elif otm_calls:
-            target = otm_calls[-1]  # Deepest available
-        else:
-            log_crypto("No OTM calls found.")
-            return None
-    else:
-        # PUT OTM = Strikes BELOW spot
-        otm_puts = [o for o in options if float(o.get('strike_price', 0)) < spot]
-        otm_puts.reverse()  # Sort descending (closest first)
-        log_crypto(f"OTM Puts below spot: {len(otm_puts)}")
-        if len(otm_puts) >= strikes_away:
-            target = otm_puts[strikes_away - 1]  # 5th strike
-        elif otm_puts:
-            target = otm_puts[-1]  # Deepest available
-        else:
-            log_crypto("No OTM puts found.")
-            return None
-
+    # Find the option with strike closest to spot (ATM)
+    target = min(options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot))
+    
     mark_price = float(target.get('mark_price', 0))
     strike = float(target.get('strike_price', 0))
     symbol = target.get('symbol', '')
@@ -195,7 +176,7 @@ def find_gill_crypto_option(asset, direction):
     # Apply 2% buffer for guaranteed fill
     limit_price = round(mark_price * 1.02, 2)
 
-    log_crypto(f"SELECTED: {symbol} | Strike: ${strike:,.0f} | Mark: ${mark_price} | Limit: ${limit_price}")
+    log_crypto(f"SELECTED HYBRID KING ATM: {symbol} | Strike: ${strike:,.0f} | Mark: ${mark_price} | Limit: ${limit_price}")
     return symbol, limit_price, strike, expiry_date
 
 # ─────────────────────────────────────────────────────────────────
