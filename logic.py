@@ -137,12 +137,12 @@ def get_signal(df):
         # ADX check
         adx = df['adx'].iloc[-2] if 'adx' in df.columns else 0
 
-        # ADX FILTER: ST flip + ADX > 25
+        # ADX FILTER: ST flip + ADX > 20 (Temporarily for Live Demo)
         if prev_dir == -1 and last_dir == 1:
-            if adx >= 25:
+            if adx >= 20:
                 return "BUY"
         if prev_dir == 1 and last_dir == -1:
-            if adx >= 25:
+            if adx >= 20:
                 return "SELL"
     except:
         pass

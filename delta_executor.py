@@ -138,11 +138,11 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("Chain empty. Cannot select option.")
         return None
 
-    # Get spot price from the first chain item (underlying_price field)
+    # Get spot price from the first chain item (spot_price field)
     spot = 0.0
     for item in chain:
-        if item.get('underlying_price'):
-            spot = float(item['underlying_price'])
+        if item.get('spot_price'):
+            spot = float(item['spot_price'])
             break
 
     if spot == 0:

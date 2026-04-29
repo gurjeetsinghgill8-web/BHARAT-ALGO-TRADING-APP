@@ -13,40 +13,41 @@ db.init_db()
 # --- Advanced Premium Theme & CSS ---
 st.markdown("""
 <style>
-    /* Premium Dark Theme with readable contrast */
+    /* Light Theme (Premium White) */
     .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
+        background-color: #FFFFFF;
+        color: #1A1A1A;
         font-family: 'Inter', sans-serif;
     }
     
     /* Header Styling */
     h1, h2, h3 {
-        color: #58A6FF !important;
+        color: #0366D6 !important;
         font-weight: 700 !important;
     }
     
     /* Custom Card for Metrics */
     .metric-container {
-        background-color: #1F242C;
-        border: 1px solid #30363D;
+        background-color: #F6F8FA;
+        border: 1px solid #D1D5DA;
         border-radius: 12px;
         padding: 20px;
         text-align: center;
         transition: transform 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .metric-container:hover {
         transform: translateY(-5px);
-        border-color: #58A6FF;
+        border-color: #0366D6;
     }
     .metric-value {
         font-size: 28px;
         font-weight: bold;
-        color: #58A6FF;
+        color: #0366D6;
     }
     .metric-label {
         font-size: 14px;
-        color: #8B949E;
+        color: #586069;
         text-transform: uppercase;
         letter-spacing: 1px;
     }
@@ -58,8 +59,8 @@ st.markdown("""
         font-weight: bold;
         font-size: 14px;
     }
-    .status-running { background-color: #238636; color: white; }
-    .status-stopped { background-color: #DA3633; color: white; }
+    .status-running { background-color: #28A745; color: white; }
+    .status-stopped { background-color: #D73A49; color: white; }
 
     /* Button Styling */
     .stButton>button {
@@ -70,8 +71,8 @@ st.markdown("""
     
     /* Sidebar styling */
     section[data-testid="stSidebar"] {
-        background-color: #0D1117;
-        border-right: 1px solid #30363D;
+        background-color: #F6F8FA;
+        border-right: 1px solid #D1D5DA;
     }
 
     /* Tabs styling */
@@ -80,15 +81,15 @@ st.markdown("""
     }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
-        background-color: #161B22;
+        background-color: #EBEEF2;
         border-radius: 8px 8px 0 0;
-        color: #8B949E;
+        color: #586069;
         padding: 0 20px;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #1F242C !important;
-        color: #58A6FF !important;
-        border-bottom: 2px solid #58A6FF !important;
+        background-color: #FFFFFF !important;
+        color: #0366D6 !important;
+        border-bottom: 2px solid #0366D6 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -109,6 +110,14 @@ with st.sidebar:
             db.set_param('upstox_api_key', api_key)
             db.set_param('upstox_api_secret', api_secret)
             st.success("Upstox Keys Saved")
+
+    with st.expander("🔑 Delta API Credentials (CRYPTO)"):
+        d_key = st.text_input("Delta API Key", type="password", value=db.get_param('delta_api_key', ''))
+        d_sec = st.text_input("Delta API Secret", type="password", value=db.get_param('delta_api_secret', ''))
+        if st.button("Save Delta Keys"):
+            db.set_param('delta_api_key', d_key)
+            db.set_param('delta_api_secret', d_sec)
+            st.success("Delta Keys Saved")
 
     st.markdown("---")
     st.subheader("📊 Indicator Params")
@@ -219,16 +228,9 @@ with tab3:
 
     with rules_col:
         st.subheader("🎯 ADX MAX PROFIT Strategy")
-        st.info("Strategy: Supertrend (10, 1.5) + ADX > 25")
+        st.info("Strategy: Supertrend (10, 1.5) + ADX > 20")
         st.write("Asset: BTC (ATM Options, 3-Day Expiry)")
-        
-        with st.expander("🔑 Delta API Settings", expanded=True):
-            d_key = st.text_input("Delta API Key", type="password", value=db.get_param('delta_api_key', ''))
-            d_sec = st.text_input("Delta API Secret", type="password", value=db.get_param('delta_api_secret', ''))
-            if st.button("Save Delta Keys"):
-                db.set_param('delta_api_key', d_key)
-                db.set_param('delta_api_secret', d_sec)
-                st.success("Keys Saved")
+        st.warning("Note: ADX threshold lowered to 20 for Live Demo.")
 
 # --- TAB 4: Crypto Lab (Upgraded) ---
 with tab4:

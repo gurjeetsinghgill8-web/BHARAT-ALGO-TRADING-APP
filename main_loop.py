@@ -73,6 +73,8 @@ def run_crypto_cycle():
         msg = f"[ADX FILTER SIGNAL] ({asset_choice}): {signal}. Executing ATM Strategy..."
         send_alert(msg)
         delta_executor.execute_crypto_trade(asset_choice, signal)
+    else:
+        print(f"[SCAN] {datetime.datetime.now().strftime('%H:%M:%S')} - No Signal (ADX: {df_st['adx'].iloc[-1]:.2f})")
 
 def main():
     send_alert("[SYSTEM] Algoverse Engine Started (Nifty + Crypto)")
