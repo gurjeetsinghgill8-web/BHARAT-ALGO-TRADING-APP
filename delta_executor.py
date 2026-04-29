@@ -110,7 +110,7 @@ def fetch_delta_option_chain(asset="BTC", expiry_date=None):
     try:
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
-            data = resp.json().get('data', [])
+            data = resp.json().get('result', [])
             log_crypto(f"Chain fetched: {len(data)} contracts for {asset} expiry {expiry_date}")
             return data
         else:
@@ -168,6 +168,7 @@ def find_gill_crypto_option(asset, direction):
     mark_price = float(target.get('mark_price', 0))
     strike = float(target.get('strike_price', 0))
     symbol = target.get('symbol', '')
+    product_id = target.get('product_id', 0)
 
     if mark_price <= 0:
         log_crypto(f"Invalid mark price ({mark_price}) for {symbol}. Skipping.")
@@ -177,7 +178,7 @@ def find_gill_crypto_option(asset, direction):
     limit_price = round(mark_price * 1.02, 2)
 
     log_crypto(f"SELECTED HYBRID KING ATM: {symbol} | Strike: ${strike:,.0f} | Mark: ${mark_price} | Limit: ${limit_price}")
-    return symbol, limit_price, strike, expiry_date
+    return symbol, limit_price, strike, expiry_date, product_id
 
 # ─────────────────────────────────────────────────────────────────
 # STEP 4: SQUARE OFF EXISTING POSITION
@@ -186,22 +187,34 @@ def find_gill_crypto_option(asset, direction):
 def square_off_crypto():
     """
     Closes any existing open crypto position BEFORE placing a new order.
-    Paper: Clears memory.
-    Live: Would send a SELL order to Delta Exchange (placeholder).
+    Live: Sends a MARKET SELL order to Delta Exchange.
     """
     active_symbol = db.get_param("crypto_active_symbol", "")
-    if not active_symbol:
+    active_product_id = db.get_param("crypto_active_product_id", "")
+    mode = db.get_param('crypto_mode', 'Paper')
+
+    if not active_symbol or not active_product_id:
         return
 
-    log_crypto(f"SQUARING OFF: {active_symbol}")
+    log_crypto(f"SQUARING OFF: {active_symbol} (Product ID: {active_product_id})")
 
-    # Live square-off logic would go here:
-    # POST /v2/orders with side='sell' and close_on_trigger=True
+    if mode == "Live":
+        try:
+            url = "https://api.delta.exchange/v2/orders"
+            # To close, we place a sell order for the position size. 
+            # Assuming 1 contract size for now.
+            payload = '{"product_id":' + str(active_product_id) + ',"size":1,"side":"sell","order_type":"market_order","close_on_trigger":true}'
+            headers = get_delta_auth_headers(method="POST", endpoint="/v2/orders", payload=payload)
+            resp = requests.post(url, headers=headers, data=payload, timeout=10)
+            log_crypto(f"Square Off API Response: {resp.status_code} - {resp.text[:150]}")
+        except Exception as e:
+            log_crypto(f"Square Off Exception: {e}")
 
     # Clear memory
     db.set_param("crypto_active_symbol", "")
     db.set_param("crypto_active_strike", "")
     db.set_param("crypto_active_expiry", "")
+    db.set_param("crypto_active_product_id", "")
     log_crypto("Position cleared from memory.")
 
 # ─────────────────────────────────────────────────────────────────

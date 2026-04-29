@@ -66,11 +66,11 @@ def run_crypto_cycle():
     df_st['adx'] = logic.calculate_adx(df_st, 14)
     df_st['rsi'] = logic.calculate_rsi(df_st['close'], 14)
     
-    # HYBRID KING signal logic (Supertrend flip + ADX + RSI)
+    # ADX FILTER signal logic (Supertrend flip + ADX)
     signal = logic.get_signal(df_st)
     
     if signal in ["BUY", "SELL"]:
-        msg = f"🌌 HYBRID KING SIGNAL ({asset_choice}): {signal}. Executing ATM Strategy..."
+        msg = f"🌌 ADX FILTER SIGNAL ({asset_choice}): {signal}. Executing ATM Strategy..."
         send_alert(msg)
         delta_executor.execute_crypto_trade(asset_choice, signal)
 

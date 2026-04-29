@@ -120,10 +120,10 @@ def calculate_adx(df, period=14):
     return adx
 
 # ============================================================
-# HYBRID KING SIGNAL (ADX + RSI + Supertrend)
+# ADX FILTER SIGNAL (Supertrend + ADX > 25) - MAX PROFIT
 # ============================================================
 def get_signal(df):
-    """Returns BUY, SELL, or WAIT using the HYBRID KING logic."""
+    """Returns BUY, SELL, or WAIT using the ADX Filter logic."""
     period     = int(float(db.get_param('st_period', 10)))
     multiplier = float(db.get_param('st_multiplier', 1.5))
     dir_col    = f"SUPERTd_{period}_{multiplier}"
@@ -136,15 +136,13 @@ def get_signal(df):
         
         # ADX check
         adx = df['adx'].iloc[-2] if 'adx' in df.columns else 0
-        # RSI check
-        rsi = df['rsi'].iloc[-2] if 'rsi' in df.columns else 50
 
-        # HYBRID KING: All 3 filters must pass
+        # ADX FILTER: ST flip + ADX > 25
         if prev_dir == -1 and last_dir == 1:
-            if adx >= 25 and rsi < 65:
+            if adx >= 25:
                 return "BUY"
         if prev_dir == 1 and last_dir == -1:
-            if adx >= 25 and rsi > 35:
+            if adx >= 25:
                 return "SELL"
     except:
         pass
