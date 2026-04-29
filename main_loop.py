@@ -16,7 +16,7 @@ import db
 import pytz
 
 def send_alert(message):
-    print(f"🔔 ALERT: {message}")
+    print(f"[ALERT] {message}")
 
 def run_nifty_cycle():
     """Logic for Nifty 50 Trading."""
@@ -35,13 +35,13 @@ def run_nifty_cycle():
     df = yf.download("^NSEI", period="5d", interval=timeframe, progress=False)
     if df.empty: return
 
-    df.columns = [c.lower() for c in df.columns]
+    df.columns = [str(c).lower() for c in df.columns]
     df_st = logic.calculate_supertrend(df)
     signal = logic.get_signal(df_st)
     spot_price = df['close'].iloc[-1]
 
     if signal in ["BUY", "SELL"]:
-        msg = f"🎯 NIFTY SIGNAL: {signal} @ {spot_price}. Executing..."
+        msg = f"[NIFTY SIGNAL] {signal} @ {spot_price}. Executing..."
         send_alert(msg)
         executor.place_order(signal, spot_price)
 
@@ -70,12 +70,12 @@ def run_crypto_cycle():
     signal = logic.get_signal(df_st)
     
     if signal in ["BUY", "SELL"]:
-        msg = f"🌌 ADX FILTER SIGNAL ({asset_choice}): {signal}. Executing ATM Strategy..."
+        msg = f"[ADX FILTER SIGNAL] ({asset_choice}): {signal}. Executing ATM Strategy..."
         send_alert(msg)
         delta_executor.execute_crypto_trade(asset_choice, signal)
 
 def main():
-    send_alert("🚀 Algoverse Engine Started (Nifty + Crypto)")
+    send_alert("[SYSTEM] Algoverse Engine Started (Nifty + Crypto)")
     
     while True:
         try:
@@ -89,7 +89,7 @@ def main():
             time.sleep(60)
             
         except Exception as e:
-            send_alert(f"⚠️ System Error: {e}")
+            send_alert(f"[ERROR] System Error: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":

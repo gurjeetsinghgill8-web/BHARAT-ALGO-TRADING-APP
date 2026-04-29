@@ -115,7 +115,7 @@ with st.sidebar:
     
     cur_period = int(float(db.get_param('st_period', 10)))
     cur_mult = float(db.get_param('st_multiplier', 1.5))
-    cur_tf = db.get_param('timeframe', '15m')
+    cur_tf = db.get_param('timeframe', '1h')
     
     st_period = st.number_input("Supertrend Period", min_value=1, max_value=50, value=cur_period)
     st_multiplier = st.number_input("Multiplier", min_value=0.1, max_value=10.0, step=0.1, value=cur_mult)
@@ -218,13 +218,13 @@ with tab3:
             st.rerun()
 
     with rules_col:
-        st.subheader("🎯 OTM Strategy")
-        otm = st.slider("OTM Strikes", 3, 8, int(db.get_param('crypto_otm_strikes', 5)))
-        db.set_param('crypto_otm_strikes', otm)
+        st.subheader("🎯 ADX MAX PROFIT Strategy")
+        st.info("Strategy: Supertrend (10, 1.5) + ADX > 25")
+        st.write("Asset: BTC (ATM Options, 3-Day Expiry)")
         
-        with st.expander("🔑 Delta API Settings"):
-            d_key = st.text_input("Delta API Key", type="password")
-            d_sec = st.text_input("Delta API Secret", type="password")
+        with st.expander("🔑 Delta API Settings", expanded=True):
+            d_key = st.text_input("Delta API Key", type="password", value=db.get_param('delta_api_key', ''))
+            d_sec = st.text_input("Delta API Secret", type="password", value=db.get_param('delta_api_secret', ''))
             if st.button("Save Delta Keys"):
                 db.set_param('delta_api_key', d_key)
                 db.set_param('delta_api_secret', d_sec)
@@ -232,7 +232,7 @@ with tab3:
 
 # --- TAB 4: Crypto Lab (Upgraded) ---
 with tab4:
-    st.header("🛠️ Crypto Lab — HYBRID KING Edition")
+    st.header("🛠️ Crypto Lab — ADX FILTER Edition")
     st.write("Strategy Mode | Timeframe | Parameters | Full Analytics")
     
     lab_col1, lab_col2 = st.columns(2)

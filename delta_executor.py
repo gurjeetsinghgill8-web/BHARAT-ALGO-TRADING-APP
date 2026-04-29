@@ -2,18 +2,15 @@
 delta_executor.py - "GILL CRYPTO" Professional Option Engine
 ============================================================
 Rules (from Dr. Saab's conversations):
-- Asset: BTC or ETH (Delta Exchange)
+- Asset: BTC (Delta Exchange)
 - Supertrend (10, 1.5) on 1h candles - 24/7
-- Signal: Supertrend FLIP = action
+- Signal: Supertrend FLIP + ADX > 25 (ADX Filter)
 - Mandatory Square Off of existing position before new entry
-- Strike Selection: EXACTLY 5 strikes OTM
-  - BUY (Green/Bullish) -> CALL option 5 strikes ABOVE spot
-  - SELL (Red/Bearish)  -> PUT option 5 strikes BELOW spot
+- Strike Selection: ATM (At-The-Money)
 - Expiry: Next Friday (7-day weekly cycle)
 - Order: LIMIT at mark_price * 1.02 (2% buffer for fast fill)
 - Paper Mode: $20,000 virtual balance (default)
 - Live Mode: Requires Delta API Key + Secret from DB
-- Logging: Every trade logs timestamp, symbol, strike, expiry, price, mode
 """
 
 import time
@@ -223,13 +220,11 @@ def square_off_crypto():
 
 def execute_crypto_trade(asset, direction):
     """
-    Full 'Gill Crypto Rule' execution workflow:
+    Full 'ADX Filter' execution workflow:
     1. Square off any existing position.
-    2. Find the 5-strike OTM option (CE or PE).
+    2. Find the ATM option (CE or PE).
     3. Place LIMIT order with 2% buffer.
     4. Log everything to DB with full detail.
-
-    Called from main_loop.py when Supertrend flips.
     """
     log_crypto(f"=== SIGNAL: {direction} | Asset: {asset} ===")
 
@@ -238,25 +233,37 @@ def execute_crypto_trade(asset, direction):
     # Step 1: Square off
     square_off_crypto()
 
-    # Step 2: Find OTM option
+    # Step 2: Find ATM option
     result = find_gill_crypto_option(asset, direction)
 
     if not result:
         # Paper fallback if API fails
         log_crypto("Using PAPER FALLBACK (API unavailable).")
-        symbol = f"{asset}-PAPER-{direction}-5OTM"
+        symbol = f"{asset}-PAPER-{direction}-ATM"
         limit_price = 100.0
         strike = 0.0
         expiry_date = get_next_friday_expiry()
+        product_id = 0
         mode_status = "PAPER_FALLBACK"
     else:
-        symbol, limit_price, strike, expiry_date = result
+        symbol, limit_price, strike, expiry_date, product_id = result
         mode_status = f"{mode}_TRADE"
+
+        if mode == "Live":
+            try:
+                url = "https://api.delta.exchange/v2/orders"
+                payload = '{"product_id":' + str(product_id) + ',"size":1,"side":"buy","order_type":"limit_order","limit_price":"' + str(limit_price) + '"}'
+                headers = get_delta_auth_headers(method="POST", endpoint="/v2/orders", payload=payload)
+                resp = requests.post(url, headers=headers, data=payload, timeout=10)
+                log_crypto(f"Order Placement API Response: {resp.status_code} - {resp.text[:150]}")
+            except Exception as e:
+                log_crypto(f"Order Placement Exception: {e}")
 
     # Step 3: Save position to memory
     db.set_param("crypto_active_symbol", symbol)
     db.set_param("crypto_active_strike", str(strike))
     db.set_param("crypto_active_expiry", expiry_date)
+    db.set_param("crypto_active_product_id", str(product_id))
 
     # Step 4: Log trade to DB
     conn = sqlite3.connect(db.DB_NAME)
