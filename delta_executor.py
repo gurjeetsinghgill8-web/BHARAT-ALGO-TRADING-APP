@@ -46,7 +46,8 @@ def get_delta_auth_headers(method="GET", endpoint="", payload=""):
         return {'Accept': 'application/json', 'Content-Type': 'application/json'}
 
     timestamp = str(int(time.time()))
-    # Delta Exchange signature format: METHOD + timestamp + path + body
+    # Delta Exchange signature format: METHOD + timestamp + path + query_string + body
+    # Since we have no query string for POST orders, it's empty.
     signature_data = method + timestamp + endpoint + payload
     signature = hmac.new(
         api_secret.encode('utf-8'),
@@ -61,6 +62,23 @@ def get_delta_auth_headers(method="GET", endpoint="", payload=""):
         'signature': signature,
         'timestamp': timestamp
     }
+
+def get_delta_balance():
+    """
+    Fetches the actual USDT balance from Delta India account.
+    """
+    try:
+        url = "https://api.india.delta.exchange/v2/wallet/balances"
+        headers = get_delta_auth_headers(method="GET", endpoint="/v2/wallet/balances")
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            balances = resp.json().get('result', [])
+            for b in balances:
+                if b.get('asset_symbol') == 'USDT' or b.get('asset_symbol') == 'USD':
+                    return float(b.get('available_balance', 0))
+        return 0.0
+    except:
+        return 0.0
 
 # ─────────────────────────────────────────────────────────────────
 # STEP 1: EXPIRY CALCULATION (Next Friday)
@@ -86,7 +104,7 @@ def get_next_friday_expiry():
 
 def fetch_delta_option_chain(asset="BTC", expiry_date=None):
     """
-    Fetches the full option chain for BTC or ETH from Delta Exchange.
+    Fetches the full option chain for BTC or ETH from Delta India Exchange.
     - Public API: No auth needed for market data.
     - Endpoint: GET /v2/tickers
     - contract_types: 'call_options,put_options'
@@ -97,7 +115,7 @@ def fetch_delta_option_chain(asset="BTC", expiry_date=None):
     if not expiry_date:
         expiry_date = get_next_friday_expiry()
 
-    url = "https://api.delta.exchange/v2/tickers"
+    url = "https://api.india.delta.exchange/v2/tickers"
     params = {
         'contract_types': 'call_options,put_options',
         'underlying_asset_symbols': asset,
@@ -197,7 +215,7 @@ def square_off_crypto():
 
     if mode == "Live":
         try:
-            url = "https://api.delta.exchange/v2/orders"
+            url = "https://api.india.delta.exchange/v2/orders"
             # To close, we place a sell order for the position size. 
             # Assuming 1 contract size for now.
             payload = '{"product_id":' + str(active_product_id) + ',"size":1,"side":"sell","order_type":"market_order","close_on_trigger":true}'
@@ -249,15 +267,20 @@ def execute_crypto_trade(asset, direction):
         symbol, limit_price, strike, expiry_date, product_id = result
         mode_status = f"{mode}_TRADE"
 
-        if mode == "Live":
-            try:
-                url = "https://api.delta.exchange/v2/orders"
-                payload = '{"product_id":' + str(product_id) + ',"size":1,"side":"buy","order_type":"limit_order","limit_price":"' + str(limit_price) + '"}'
-                headers = get_delta_auth_headers(method="POST", endpoint="/v2/orders", payload=payload)
-                resp = requests.post(url, headers=headers, data=payload, timeout=10)
-                log_crypto(f"Order Placement API Response: {resp.status_code} - {resp.text[:150]}")
-            except Exception as e:
-                log_crypto(f"Order Placement Exception: {e}")
+    # Get Dynamic Size from Risk Management
+    size = int(db.get_param('crypto_trade_size', '1'))
+
+    if mode == "Live":
+        try:
+            url = "https://api.india.delta.exchange/v2/orders"
+            payload = '{"product_id":' + str(product_id) + ',"size":' + str(size) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(limit_price) + '"}'
+            headers = get_delta_auth_headers(method="POST", endpoint="/v2/orders", payload=payload)
+            resp = requests.post(url, headers=headers, data=payload, timeout=10)
+            log_crypto(f"Order Placement API Response: {resp.status_code} - {resp.text[:150]}")
+            if resp.status_code == 200:
+                db.set_param("crypto_active_entry_price", str(limit_price))
+        except Exception as e:
+            log_crypto(f"Order Placement Exception: {e}")
 
     # Step 3: Save position to memory
     db.set_param("crypto_active_symbol", symbol)

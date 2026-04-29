@@ -31,6 +31,19 @@ def get_headers():
         'Authorization': f'Bearer {token}'
     }
 
+def get_upstox_balance():
+    """Fetches real account balance (margin) from Upstox."""
+    url = "https://api.upstox.com/v2/user/get-funds-and-margin"
+    try:
+        resp = requests.get(url, headers=get_headers(), timeout=5)
+        if resp.status_code == 200:
+            data = resp.json().get('data', {})
+            equity = data.get('equity', {})
+            return float(equity.get('available_margin', 0))
+        return 0.0
+    except:
+        return 0.0
+
 def get_next_thursday():
     """
     Calculates the date string (YYYY-MM-DD) for NEXT WEEK's Thursday (expiry day).
@@ -157,23 +170,26 @@ def square_off_existing():
 
     log(f"SQUARING OFF: {active_symbol} at MARKET price. P&L will be logged.")
 
-    # --- REAL UPSTOX SQUARE OFF ORDER ---
-    # payload = {
-    #     "quantity": 50,
-    #     "product": "D",
-    #     "validity": "DAY",
-    #     "price": 0,
-    #     "instrument_token": active_key,
-    #     "order_type": "MARKET",
-    #     "transaction_type": "SELL",
-    #     "is_amo": False
-    # }
-    # try:
-    #     resp = requests.post("https://api.upstox.com/v2/order/place",
-    #                          json=payload, headers=get_headers(), timeout=8)
-    #     log(f"Square Off Response: {resp.status_code} - {resp.text[:200]}")
-    # except Exception as e:
-    #     log(f"Square Off FAILED: {e}")
+    mode = db.get_param('algo_mode', 'Paper') # Nifty mode
+    if mode == "Live":
+        # Get actual quantity from positions or use default lot size
+        qty = int(db.get_param('nifty_trade_qty', '50'))
+        payload = {
+            "quantity": qty,
+            "product": "D",
+            "validity": "DAY",
+            "price": 0,
+            "instrument_token": active_key,
+            "order_type": "MARKET",
+            "transaction_type": "SELL",
+            "is_amo": False
+        }
+        try:
+            resp = requests.post("https://api.upstox.com/v2/order/place",
+                                 json=payload, headers=get_headers(), timeout=8)
+            log(f"Square Off Response: {resp.status_code} - {resp.text[:200]}")
+        except Exception as e:
+            log(f"Square Off FAILED: {e}")
 
     # Clear memory
     db.set_param("active_position_key", "")
@@ -201,23 +217,25 @@ def place_limit_order(instrument_key, ltp, strike, direction):
     log(f"   Limit  : Rs.{limit_price} ({buffer_pct}% buffer)")
     log(f"   Key    : {instrument_key}")
 
-    # --- REAL UPSTOX ORDER ---
-    # payload = {
-    #     "quantity": 50,
-    #     "product": "D",
-    #     "validity": "DAY",
-    #     "price": limit_price,
-    #     "instrument_token": instrument_key,
-    #     "order_type": "LIMIT",
-    #     "transaction_type": "BUY",
-    #     "is_amo": False
-    # }
-    # try:
-    #     resp = requests.post("https://api.upstox.com/v2/order/place",
-    #                          json=payload, headers=get_headers(), timeout=8)
-    #     log(f"Order Response: {resp.status_code} - {resp.text[:200]}")
-    # except Exception as e:
-    #     log(f"Order Placement FAILED: {e}")
+    mode = db.get_param('algo_mode', 'Paper')
+    if mode == "Live":
+        qty = int(db.get_param('nifty_trade_qty', '50'))
+        payload = {
+            "quantity": qty,
+            "product": "D",
+            "validity": "DAY",
+            "price": limit_price,
+            "instrument_token": instrument_key,
+            "order_type": "LIMIT",
+            "transaction_type": "BUY",
+            "is_amo": False
+        }
+        try:
+            resp = requests.post("https://api.upstox.com/v2/order/place",
+                                 json=payload, headers=get_headers(), timeout=8)
+            log(f"Order Response: {resp.status_code} - {resp.text[:200]}")
+        except Exception as e:
+            log(f"Order Placement FAILED: {e}")
 
     # Save to memory
     db.set_param("active_position_key", instrument_key)
@@ -241,6 +259,39 @@ def place_limit_order(instrument_key, ltp, strike, direction):
     conn.commit()
     conn.close()
     log(f"Trade logged to DB: {symbol_name} @ Rs.{limit_price}")
+
+def check_and_roll_nifty():
+    """
+    Checks the current LTP of the active Nifty position.
+    If profit > 50% from entry, it books profit and re-enters.
+    """
+    active_key = db.get_param("active_position_key", "")
+    entry_price = float(db.get_param("active_entry_price", "0"))
+    
+    if not active_key or entry_price <= 0:
+        return
+
+    # Fetch current LTP
+    url = f"https://api.upstox.com/v2/market-quotes/ltp"
+    params = {'instrument_key': active_key}
+    try:
+        resp = requests.get(url, params=params, headers=get_headers(), timeout=5)
+        if resp.status_code == 200:
+            data = resp.json().get('data', {})
+            # Upstox LTP response is a dict with instrument key as key
+            ltp = data.get(active_key, {}).get('last_price', 0)
+            if ltp >= entry_price * 1.5:
+                log(f"!!! ROLLING PROFIT !!! LTP {ltp} reached 50% target (Entry: {entry_price}).")
+                direction = "BUY" if "CE" in db.get_param("active_position_symbol", "") else "SELL"
+                square_off_existing()
+                # Re-entry happens in next loop iteration or we can force it here
+                target_premium = float(db.get_param('target_premium', 120.0))
+                res = get_best_option(direction, target_premium)
+                if res:
+                    place_limit_order(res[0], res[1], res[2], direction)
+                    db.set_param("active_entry_price", res[1])
+    except Exception as e:
+        log(f"Rolling Check Error: {e}")
 
 # ─────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT (Called from main_loop.py)
@@ -270,6 +321,7 @@ def place_order(direction, spot_price):
     if result:
         instrument_key, ltp, strike = result
         place_limit_order(instrument_key, ltp, strike, direction)
+        db.set_param("active_entry_price", ltp)
     else:
         # PAPER TRADING FALLBACK (if API keys not set or market closed)
         log("PAPER TRADE: API unavailable. Simulating trade in memory.")

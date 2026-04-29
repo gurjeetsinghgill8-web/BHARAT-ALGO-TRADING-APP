@@ -1,143 +1,63 @@
 import streamlit as st
-import db
-import sqlite3
 import pandas as pd
-import numpy as np
+import sqlite3
+import datetime
+import db
+import logic
+import executor
+import delta_executor
 
-# Page configuration for a premium feel
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="Bharat Algoverse 2.0", layout="wide", initial_sidebar_state="expanded")
 
-# Initialize database
-db.init_db()
-
-# --- Advanced Premium Theme & CSS ---
+# --- CUSTOM CSS (Premium White Theme) ---
 st.markdown("""
 <style>
-    /* Light Theme (Premium White) */
-    .stApp {
-        background-color: #FFFFFF;
-        color: #1A1A1A;
-        font-family: 'Inter', sans-serif;
+    :root {
+        --primary-color: #28A745;
+        --secondary-color: #F8F9FA;
+        --text-color: #212529;
     }
-    
-    /* Header Styling */
-    h1, h2, h3 {
-        color: #0366D6 !important;
-        font-weight: 700 !important;
-    }
-    
-    /* Custom Card for Metrics */
-    .metric-container {
-        background-color: #F6F8FA;
-        border: 1px solid #D1D5DA;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        transition: transform 0.2s;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    .metric-container:hover {
-        transform: translateY(-5px);
-        border-color: #0366D6;
-    }
-    .metric-value {
-        font-size: 28px;
-        font-weight: bold;
-        color: #0366D6;
-    }
-    .metric-label {
-        font-size: 14px;
-        color: #586069;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    /* Status Indicators */
-    .status-pill {
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-weight: bold;
-        font-size: 14px;
-    }
-    .status-running { background-color: #28A745; color: white; }
-    .status-stopped { background-color: #D73A49; color: white; }
-
-    /* Button Styling */
-    .stButton>button {
-        border-radius: 8px;
-        font-weight: bold;
-        transition: all 0.3s;
-    }
-    
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: #F6F8FA;
-        border-right: 1px solid #D1D5DA;
-    }
-
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        background-color: #EBEEF2;
-        border-radius: 8px 8px 0 0;
-        color: #586069;
-        padding: 0 20px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #0366D6 !important;
-        border-bottom: 2px solid #0366D6 !important;
-    }
+    .main { background-color: #FFFFFF; color: var(--text-color); }
+    .stMetric { background-color: #F8F9FA; border-radius: 10px; padding: 15px; border: 1px solid #E9ECEF; }
+    .metric-container { background: #FFFFFF; border: 1px solid #E9ECEF; border-radius: 8px; padding: 20px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .metric-label { font-size: 14px; color: #6C757D; font-weight: 600; margin-bottom: 5px; }
+    .metric-value { font-size: 24px; color: #212529; font-weight: 700; }
+    .status-pill { padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 14px; }
+    .status-running { background-color: #D4EDDA; color: #155724; }
+    .status-stopped { background-color: #F8D7DA; color: #721C24; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌌 BHARAT ALGOVERSE 2.0")
-
-# --- SIDEBAR: Global Strategy Settings ---
+# --- SIDEBAR (Settings & Credentials) ---
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/galaxy.png", width=80)
-    st.header("⚙️ Global Settings")
+    st.title("⚙️ Global Settings")
     
-    with st.expander("🔑 Upstox API Credentials"):
-        cur_api_key = db.get_param('upstox_api_key', '')
-        cur_api_secret = db.get_param('upstox_api_secret', '')
-        api_key = st.text_input("API Key", value=cur_api_key, type="password")
-        api_secret = st.text_input("API Secret", value=cur_api_secret, type="password")
+    with st.expander("🔑 Upstox API Credentials", expanded=False):
+        u_key = st.text_input("API Key", value=db.get_param('upstox_api_key', ''), type="password")
+        u_sec = st.text_input("API Secret", value=db.get_param('upstox_api_secret', ''), type="password")
         if st.button("Save Upstox Keys"):
-            db.set_param('upstox_api_key', api_key)
-            db.set_param('upstox_api_secret', api_secret)
-            st.success("Upstox Keys Saved")
+            db.set_param('upstox_api_key', u_key)
+            db.set_param('upstox_api_secret', u_sec)
+            st.success("Upstox Keys Saved!")
 
-    with st.expander("🔑 Delta API Credentials (CRYPTO)"):
-        d_key = st.text_input("Delta API Key", type="password", value=db.get_param('delta_api_key', ''))
-        d_sec = st.text_input("Delta API Secret", type="password", value=db.get_param('delta_api_secret', ''))
+    with st.expander("🔑 Delta API Credentials (CRYPTO)", expanded=False):
+        d_key = st.text_input("Delta API Key", value=db.get_param('delta_api_key', ''), type="password")
+        d_sec = st.text_input("Delta API Secret", value=db.get_param('delta_api_secret', ''), type="password")
         if st.button("Save Delta Keys"):
             db.set_param('delta_api_key', d_key)
             db.set_param('delta_api_secret', d_sec)
-            st.success("Delta Keys Saved")
+            st.success("Delta Keys Saved!")
 
     st.markdown("---")
     st.subheader("📊 Indicator Params")
-    
-    cur_period = int(float(db.get_param('st_period', 10)))
-    cur_mult = float(db.get_param('st_multiplier', 1.5))
-    cur_tf = db.get_param('timeframe', '1h')
-    
-    st_period = st.number_input("Supertrend Period", min_value=1, max_value=50, value=cur_period)
-    st_multiplier = st.number_input("Multiplier", min_value=0.1, max_value=10.0, step=0.1, value=cur_mult)
-    
-    tf_options = ["15m", "30m", "1h", "1d"]
-    timeframe = st.selectbox("Live Timeframe", tf_options, index=tf_options.index(cur_tf) if cur_tf in tf_options else 0)
-    
-    # Update DB
-    db.set_param('st_period', st_period)
-    db.set_param('st_multiplier', st_multiplier)
-    db.set_param('timeframe', timeframe)
+    st_period = st.number_input("Supertrend Period", value=14)
+    st_multiplier = st.number_input("Multiplier", value=1.5, step=0.1)
+    timeframe = st.selectbox("Live Timeframe", ["15m", "30m", "1h", "1d"], index=0)
 
-# --- Tabs Implementation ---
+# --- MAIN DASHBOARD ---
+st.title("🌌 BHARAT ALGOVERSE 2.0")
+
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 NIFTY TERMINAL", 
     "🧪 NIFTY LAB", 
@@ -145,50 +65,67 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "🛠️ CRYPTO LAB"
 ])
 
-# --- TAB 1: Nifty Dashboard ---
+# --- TAB 1: Nifty Terminal ---
 with tab1:
-    col_status, col_settings = st.columns([1, 1])
+    st.header("📊 Nifty Terminal (Upstox)")
     
-    algo_status = db.get_param('algo_status', 'OFF')
+    n_paper_bal = float(db.get_param('balance', '25000.0'))
+    n_real_bal = executor.get_upstox_balance()
+    agg_status = db.get_param('nifty_agg_status', 'OFF')
+    sur_status = db.get_param('nifty_sur_status', 'OFF')
     
-    with col_status:
-        st.subheader("Engine Status")
-        if algo_status == 'ON':
-            st.markdown('<span class="status-pill status-running">🟢 ACTIVE (PAPER MODE)</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="status-pill status-stopped">🔴 STOPPED</span>', unsafe_allow_html=True)
-        
-        if st.button("START ALGO" if algo_status == 'OFF' else "STOP ALGO", use_container_width=True):
-            db.set_param('algo_status', 'ON' if algo_status == 'OFF' else 'OFF')
-            st.rerun()
-
-    with col_settings:
-        st.subheader("Nifty Settings")
-        cur_prem = float(db.get_param('target_premium', 120.0))
-        target_premium = st.number_input("Target Premium (₹)", value=cur_prem, step=5.0)
-        db.set_param('target_premium', target_premium)
+    nm_col1, nm_col2, nm_col3, nm_col4 = st.columns(4)
+    with nm_col1:
+        st.markdown(f'<div class="metric-container"><div class="metric-label">Paper Balance</div><div class="metric-value">₹{n_paper_bal:,.2f}</div></div>', unsafe_allow_html=True)
+    with nm_col2:
+        st.markdown(f'<div class="metric-container"><div class="metric-label">Real Balance</div><div class="metric-value" style="color:#28A745">₹{n_real_bal:,.2f}</div></div>', unsafe_allow_html=True)
+    with nm_col3:
+        st.markdown(f'<div class="metric-container"><div class="metric-label">AGGRESSIVE (10/1)</div><div class="metric-value" style="color:{"#28A745" if agg_status=="ON" else "#D73A49"}">{agg_status}</div></div>', unsafe_allow_html=True)
+    with nm_col4:
+        st.markdown(f'<div class="metric-container"><div class="metric-label">SURGICAL (10/2)</div><div class="metric-value" style="color:{"#28A745" if sur_status=="ON" else "#D73A49"}">{sur_status}</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    st.subheader("📈 Performance Overview")
     
+    n_ctrl_col, n_risk_col = st.columns(2)
+    with n_ctrl_col:
+        st.subheader("🚀 Controls")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("TOGGLE AGGRESSIVE", use_container_width=True, type="primary"):
+                db.set_param('nifty_agg_status', 'ON' if agg_status == 'OFF' else 'OFF')
+                st.rerun()
+        with c2:
+            if st.button("TOGGLE SURGICAL", use_container_width=True, type="primary"):
+                db.set_param('nifty_sur_status', 'ON' if sur_status == 'OFF' else 'OFF')
+                st.rerun()
+        
+        n_mode = st.radio("Nifty Mode", ["Paper", "Live"], horizontal=True, index=1 if db.get_param('algo_mode', 'Paper') == 'Live' else 0)
+        db.set_param('algo_mode', n_mode)
+
+    with n_risk_col:
+        st.subheader("🛡️ Risk Management")
+        n_qty = st.number_input("Lots (1 Lot = 50 Qty)", value=int(int(db.get_param('nifty_trade_qty', '50'))/50), min_value=1)
+        db.set_param('nifty_trade_qty', n_qty * 50)
+        target_prem = st.number_input("Target Premium (Rs.)", value=float(db.get_param('target_premium', '120.0')), step=5.0)
+        db.set_param('target_premium', target_prem)
+        st.success("🔥 GAME CHANGER: Rolling 50% Profit Booking is ENABLED.")
+
+    st.markdown("### 📈 Performance & Logs")
     try:
         conn = sqlite3.connect(db.DB_NAME)
-        trades_df = pd.read_sql_query("SELECT timestamp, symbol, direction, entry_price, exit_price, status, pnl FROM trades ORDER BY id DESC LIMIT 10", conn)
+        nifty_trades = pd.read_sql_query("SELECT * FROM trades WHERE symbol LIKE '%NIFTY%' ORDER BY id DESC", conn)
         conn.close()
-        
-        if not trades_df.empty:
-            total_pnl = trades_df['pnl'].sum()
-            st.metric("Session P&L", f"₹ {total_pnl:,.2f}", delta=f"{total_pnl}")
-            st.dataframe(trades_df, use_container_width=True)
+        if not nifty_trades.empty:
+            n_equity = nifty_trades['pnl'].fillna(0).iloc[::-1].cumsum()
+            st.line_chart(n_equity, use_container_width=True)
+            st.dataframe(nifty_trades, use_container_width=True)
         else:
             st.info("Waiting for first trade signal...")
-    except:
-        st.warning("Database empty or initializing...")
+    except: pass
 
 # --- TAB 2: Nifty Lab ---
 with tab2:
     st.header("🧪 Nifty History Lab")
-    st.write("Backtest Nifty using current Supertrend parameters.")
     if st.button("🔬 RUN NIFTY BACKTEST", use_container_width=True):
         with st.spinner("Analyzing 1 year of Nifty data..."):
             import backtester
@@ -198,107 +135,41 @@ with tab2:
 
 # --- TAB 3: Crypto Terminal ---
 with tab3:
-    st.header("🌌 Crypto Terminal (Delta Exchange)")
-    
-    c_bal = float(db.get_param('crypto_balance', '20000.0'))
+    st.header("🌌 Crypto Terminal (Delta India)")
+    c_paper_bal = float(db.get_param('crypto_balance', '20000.0'))
+    c_real_bal = delta_executor.get_delta_balance()
     c_status = db.get_param('crypto_algo_running', 'OFF')
+    active_symbol = db.get_param('crypto_active_symbol', 'None')
     
-    m_col1, m_col2, m_col3 = st.columns(3)
-    with m_col1:
-        st.markdown(f'<div class="metric-container"><div class="metric-label">Paper Balance</div><div class="metric-value">${c_bal:,.2f}</div></div>', unsafe_allow_html=True)
-    with m_col2:
-        st.markdown(f'<div class="metric-container"><div class="metric-label">Engine Status</div><div class="metric-value" style="color:{"#238636" if c_status=="ON" else "#DA3633"}">{c_status}</div></div>', unsafe_allow_html=True)
-    with m_col3:
-        st.markdown(f'<div class="metric-container"><div class="metric-label">Active Signal</div><div class="metric-value">WAIT</div></div>', unsafe_allow_html=True)
+    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    with m_col1: st.markdown(f'<div class="metric-container"><div class="metric-label">Paper Balance</div><div class="metric-value">${c_paper_bal:,.2f}</div></div>', unsafe_allow_html=True)
+    with m_col2: st.markdown(f'<div class="metric-container"><div class="metric-label">Real Balance (USDT)</div><div class="metric-value" style="color:#28A745">${c_real_bal:,.2f}</div></div>', unsafe_allow_html=True)
+    with m_col3: st.markdown(f'<div class="metric-container"><div class="metric-label">Engine Status</div><div class="metric-value" style="color:{"#28A745" if c_status=="ON" else "#D73A49"}">{c_status}</div></div>', unsafe_allow_html=True)
+    with m_col4: st.markdown(f'<div class="metric-container"><div class="metric-label">Active Symbol</div><div class="metric-value" style="font-size:18px">{active_symbol}</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    
-    ctrl_col, rules_col = st.columns(2)
+    ctrl_col, risk_col = st.columns(2)
     with ctrl_col:
         st.subheader("🚀 Controls")
-        crypto_asset = st.selectbox("Asset", ["BTC", "ETH"])
+        crypto_asset = st.selectbox("Asset", ["BTC", "ETH"], key="crypto_asset_sel")
         db.set_param('crypto_asset', crypto_asset)
-        
-        mode = st.radio("Mode", ["Paper", "Live"], horizontal=True)
+        mode = st.radio("Execution Mode", ["Paper", "Live"], horizontal=True, key="crypto_mode_sel", index=1 if db.get_param('crypto_mode', 'Paper') == 'Live' else 0)
         db.set_param('crypto_mode', mode)
-        
-        if st.button("TOGGLE ENGINE", use_container_width=True):
+        if st.button("TOGGLE CRYPTO ENGINE", use_container_width=True, type="primary"):
             db.set_param('crypto_algo_running', 'ON' if c_status == 'OFF' else 'OFF')
             st.rerun()
 
-    with rules_col:
-        st.subheader("🎯 ADX MAX PROFIT Strategy")
-        st.info("Strategy: Supertrend (10, 1.5) + ADX > 20")
-        st.write("Asset: BTC (ATM Options, 3-Day Expiry)")
-        st.warning("Note: ADX threshold lowered to 20 for Live Demo.")
+    with risk_col:
+        st.subheader("🛡️ Risk Management")
+        trade_size = st.number_input("Contracts per Trade", value=int(db.get_param('crypto_trade_size', '1')), min_value=1)
+        db.set_param('crypto_trade_size', trade_size)
+        st.info("Strategy: Supertrend (10, 1.5) + ADX > 20 (Live Demo)")
+        st.success("🔥 GAME CHANGER: Rolling 50% Profit Booking is ENABLED.")
 
-# --- TAB 4: Crypto Lab (Upgraded) ---
+# --- TAB 4: Crypto Lab ---
 with tab4:
-    st.header("🛠️ Crypto Lab — ADX FILTER Edition")
-    st.write("Strategy Mode | Timeframe | Parameters | Full Analytics")
-    
-    lab_col1, lab_col2 = st.columns(2)
-    with lab_col1:
-        l_mode = st.selectbox("Strategy Mode", ["hybrid_king", "adx_only", "plain"], index=0,
-                              help="hybrid_king=ADX+RSI+ST | adx_only=ADX+ST | plain=ST only")
-        l_asset = st.selectbox("Backtest Asset", ["BTC-USD", "ETH-USD"])
-        l_tf = st.selectbox("Backtest Timeframe", ["1 Hour", "30 Min", "15 Min", "4 Hour", "1 Day"], index=0)
-        l_days = st.number_input("History (Days)", value=365, min_value=1)
-
-    with lab_col2:
-        l_period = st.number_input("ST Period (Lab)", value=10)
-        l_mult = st.number_input("ST Multiplier (Lab)", value=1.5, step=0.1)
-        l_premium = st.number_input("Simulated Premium ($)", value=500)
-        l_delta = st.number_input("Delta Estimate", value=0.55, step=0.05, help="ATM=0.55 | OTM=0.15")
-        l_brokerage = st.number_input("Brokerage ($ per trade)", value=2.0)
-
-    if st.button("🔬 EXECUTE DETAILED BACKTEST", use_container_width=True):
-        with st.spinner("Processing deep historical data..."):
-            import crypto_backtester
-            res = crypto_backtester.run_crypto_backtest(
-                asset_ticker=l_asset,
-                days=l_days,
-                timeframe=l_tf,
-                st_period=l_period,
-                st_mult=l_mult,
-                simulated_premium=l_premium,
-                brokerage_per_trade=l_brokerage,
-                delta_estimate=l_delta,
-                mode=l_mode
-            )
-            
-            if "error" in res:
-                st.error(res["error"])
-            else:
-                st.success(f"Backtest Complete for {l_asset} on {l_tf}")
-                
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Net P&L", f"${res['Total Net P&L ($)']:,.2f}")
-                s2.metric("Win Rate", f"{res['Win Rate (%)']}%")
-                s3.metric("Realized", f"${res['Total Realized ($)']:,.2f}")
-                s4.metric("Brokerage", f"${res['Total Brokerage ($)']:,.2f}")
-                
-                st.subheader("📈 Equity Growth")
-                st.line_chart(res["Equity Curve"])
-
-                st.subheader("🕯️ Price vs Supertrend (Visual Check)")
-                try:
-                    import yfinance as yf
-                    import logic
-                    interval_map = {"15 Min": "15m", "30 Min": "30m", "1 Hour": "1h", "4 Hour": "4h", "1 Day": "1d"}
-                    chart_df = yf.download(l_asset, period=f"{l_days}d", interval=interval_map.get(l_tf, "1h"), progress=False)
-                    if isinstance(chart_df.columns, pd.MultiIndex): chart_df.columns = chart_df.columns.get_level_values(0)
-                    chart_df.columns = [c.lower() for c in chart_df.columns]
-                    chart_st = logic.calculate_supertrend(chart_df, period=l_period, multiplier=l_mult)
-                    
-                    viz_df = pd.DataFrame({
-                        'Close Price': chart_st['close'],
-                        'Supertrend Line': chart_st[f"SUPERT_{int(l_period)}_{float(l_mult)}"]
-                    })
-                    st.line_chart(viz_df)
-                except Exception as e:
-                    st.info(f"Visual chart failed to load: {e}")
-                
-                st.subheader("📜 Trade Execution Log")
-                st.write("Compare the Spot with the ST Line at Entry and Exit to verify crossover logic.")
-                st.dataframe(res["Trades"], use_container_width=True)
+    st.header("🛠️ Crypto Lab")
+    if st.button("🔬 RUN CRYPTO BACKTEST", use_container_width=True):
+        st.info("Running 6-month crypto backtest...")
+        import crypto_backtester
+        crypto_backtester.run_crypto_backtest()

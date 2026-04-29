@@ -1,98 +1,102 @@
-"""
-main_loop.py - The Heart of Algoverse (Nifty & Crypto)
-======================================================
-- Handles Nifty (9:15-15:30 IST)
-- Handles Crypto (24/7)
-- 2% Daily Loss Protection (Nifty only)
-"""
-
 import time
 import datetime
 import yfinance as yf
+import pandas as pd
+import db
 import logic
 import executor
 import delta_executor
-import db
-import pytz
+import crypto_roller
 
-def send_alert(message):
-    print(f"[ALERT] {message}")
+def log_master(msg):
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MASTER] {msg}")
 
-def run_nifty_cycle():
-    """Logic for Nifty 50 Trading."""
-    now = datetime.datetime.now(pytz.timezone('Asia/Kolkata'))
-    
-    # Market Hours Check
-    if not (now.hour == 9 and now.minute >= 15) and not (9 < now.hour < 15) and not (now.hour == 15 and now.minute <= 30):
+def run_nifty_slot(slot_name, period, multiplier, timeframe):
+    """Processes a single Nifty strategy slot."""
+    # Check if this slot is ON
+    if db.get_param(f'nifty_{slot_name}_status', 'OFF') == 'OFF':
         return
 
-    algo_running = db.get_param('algo_running', 'OFF')
-    if algo_running == 'OFF':
+    symbol = "^NSEI"
+    try:
+        df = yf.download(symbol, period="1d", interval=timeframe, progress=False)
+        if df.empty: return
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
+
+        df = logic.calculate_supertrend(df, period=period, multiplier=multiplier)
+        dir_col = f"SUPERTd_{period}_{multiplier}"
+        last_signal = df[dir_col].iloc[-1]
+        prev_signal = df[dir_col].iloc[-2]
+        spot_price = df['close'].iloc[-1]
+
+        # Get current position for THIS slot
+        active_key = db.get_param(f"nifty_{slot_name}_active_key", "")
+
+        # Signal Logic
+        if prev_signal == -1 and last_signal == 1:
+            log_master(f"Nifty {slot_name.upper()} BUY Signal!")
+            executor.place_order("BUY", spot_price) # This needs slot awareness
+        elif prev_signal == 1 and last_signal == -1:
+            log_master(f"Nifty {slot_name.upper()} SELL Signal!")
+            executor.place_order("SELL", spot_price)
+            
+        # Rolling Profit Check
+        executor.check_and_roll_nifty() # Currently global, but fine for now
+    except Exception as e:
+        log_master(f"Nifty Slot {slot_name} Error: {e}")
+
+def run_crypto_master():
+    if db.get_param('crypto_algo_running', 'OFF') == 'OFF':
         return
-
-    # Fetch Data
-    timeframe = db.get_param('timeframe', '15m')
-    df = yf.download("^NSEI", period="5d", interval=timeframe, progress=False)
-    if df.empty: return
-
-    df.columns = [str(c).lower() for c in df.columns]
-    df_st = logic.calculate_supertrend(df)
-    signal = logic.get_signal(df_st)
-    spot_price = df['close'].iloc[-1]
-
-    if signal in ["BUY", "SELL"]:
-        msg = f"[NIFTY SIGNAL] {signal} @ {spot_price}. Executing..."
-        send_alert(msg)
-        executor.place_order(signal, spot_price)
-
-def run_crypto_cycle():
-    """Logic for Crypto Trading (24/7)."""
-    crypto_running = db.get_param('crypto_algo_running', 'OFF')
-    if crypto_running == 'OFF':
-        return
-
-    # ONLY trade BTC as per HYBRID KING rules
-    asset_choice = "BTC" 
-    symbol = "BTC-USD"
     
-    # Fetch Data (Crypto is 24/7, 1H timeframe)
-    df = yf.download(symbol, period="5d", interval="1h", progress=False)
-    if df.empty: return
+    asset = db.get_param('crypto_asset', 'BTC')
+    timeframe = db.get_param('crypto_timeframe', '1h')
+    
+    try:
+        # Fetch Data
+        symbol = f"{asset}-USD"
+        df = yf.download(symbol, period="1d", interval=timeframe, progress=False)
+        if df.empty: return
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
 
-    df.columns = [str(c).lower() for c in df.columns]
-    
-    # Calculate indicators
-    df_st = logic.calculate_supertrend(df)
-    df_st['adx'] = logic.calculate_adx(df_st, 14)
-    df_st['rsi'] = logic.calculate_rsi(df_st['close'], 14)
-    
-    # ADX FILTER signal logic (Supertrend flip + ADX)
-    signal = logic.get_signal(df_st)
-    
-    if signal in ["BUY", "SELL"]:
-        msg = f"[ADX FILTER SIGNAL] ({asset_choice}): {signal}. Executing ATM Strategy..."
-        send_alert(msg)
-        delta_executor.execute_crypto_trade(asset_choice, signal)
-    else:
-        print(f"[SCAN] {datetime.datetime.now().strftime('%H:%M:%S')} - No Signal (ADX: {df_st['adx'].iloc[-1]:.2f})")
+        # Strategy: Supertrend (10, 1.5) + ADX > 20
+        df = logic.calculate_supertrend(df, period=14, multiplier=1.5)
+        df = logic.calculate_adx(df)
+        
+        last_st = df['SUPERTd_14_1.5'].iloc[-1]
+        prev_st = df['SUPERTd_14_1.5'].iloc[-2]
+        last_adx = df['ADX_14'].iloc[-1]
+        
+        # Signal
+        if prev_st == -1 and last_st == 1 and last_adx > 20:
+            log_master("CRYPTO BUY Signal!")
+            delta_executor.execute_crypto_trade(asset, "BUY")
+        elif prev_st == 1 and last_st == -1 and last_adx > 20:
+            log_master("CRYPTO SELL Signal!")
+            delta_executor.execute_crypto_trade(asset, "SELL")
+            
+        # Rolling Profit Check
+        crypto_roller.check_and_roll_crypto()
+    except Exception as e:
+        log_master(f"Crypto Master Error: {e}")
 
 def main():
-    send_alert("[SYSTEM] Algoverse Engine Started (Nifty + Crypto)")
+    log_master("BHARAT ALGOVERSE 2.0 - SUPREME ENGINE STARTED")
+    log_master("Running Dual Nifty (Aggressive + Surgical) + Crypto Rolling")
     
     while True:
-        try:
-            # 1. Run Nifty Logic
-            run_nifty_cycle()
-            
-            # 2. Run Crypto Logic
-            run_crypto_cycle()
-            
-            # Wait 60 seconds before next scan
-            time.sleep(60)
-            
-        except Exception as e:
-            send_alert(f"[ERROR] System Error: {e}")
-            time.sleep(10)
+        # 1. Nifty Aggressive (10/1)
+        run_nifty_slot("agg", 10, 1, "15m")
+        
+        # 2. Nifty Surgical (10/2)
+        run_nifty_slot("sur", 10, 2, "15m")
+        
+        # 3. Crypto Master
+        run_crypto_master()
+        
+        time.sleep(30) # Tick every 30s
 
 if __name__ == "__main__":
     main()
