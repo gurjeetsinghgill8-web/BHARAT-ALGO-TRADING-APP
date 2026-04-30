@@ -6,6 +6,25 @@ import db
 import logic
 import executor
 import delta_executor
+import threading
+import time
+import main_loop
+
+# --- AUTOMATED ENGINE THREAD ---
+if 'engine_thread' not in st.session_state:
+    def run_engine():
+        while True:
+            try:
+                main_loop.run_nifty_slot("agg", 10, 1, "15m")
+                main_loop.run_nifty_slot("sur", 10, 2, "15m")
+                main_loop.run_crypto_master()
+            except Exception as e:
+                print(f"Cloud Engine Error: {e}")
+            time.sleep(30)
+    
+    thread = threading.Thread(target=run_engine, daemon=True)
+    thread.start()
+    st.session_state['engine_thread'] = True
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bharat Algoverse 2.0", layout="wide", initial_sidebar_state="expanded")
