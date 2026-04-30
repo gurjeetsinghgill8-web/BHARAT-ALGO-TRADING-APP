@@ -175,3 +175,5 @@ for m in all_months:
     roi_b = md_b[m]['ROI %'] if m in md_b else 0
     winner = "ADX" if roi_a > roi_b else "STABLE" if roi_b > roi_a else "TIE"
     print(f"  {m:<12} {roi_a:>14}% {roi_b:>14}% {winner:>12}")
+
+# SUPREME CLOUD SYNC: 2026-04-30

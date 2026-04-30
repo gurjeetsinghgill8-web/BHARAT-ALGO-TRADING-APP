@@ -248,3 +248,5 @@ best_data = [r for r in all_results if r['Strategy'] == best][0]['Monthly']
 for _, row in best_data.iterrows():
     s = "[+]" if row['Net P&L'] > 0 else "[-]"
     print(f"  {s} {str(row['Month']):<10}  P&L: ${row['Net P&L']:>10,.2f}  ROI: {row['ROI %']:>8}%")
+
+# SUPREME CLOUD SYNC: 2026-04-30

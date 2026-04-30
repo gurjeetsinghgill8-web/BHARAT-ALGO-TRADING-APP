@@ -124,3 +124,5 @@ print(f"  MAX DRAWDOWN:            ${max_dd:,.2f} ({(max_dd/CAPITAL)*100:.1f}%)"
 print(f"  TOTAL TRADES:            {len(trades_df)}")
 print(f"  OVERALL WIN RATE:        {len(trades_df[trades_df['Net P&L']>0])/len(trades_df)*100:.1f}%")
 print("=" * 85)
+
+# SUPREME CLOUD SYNC: 2026-04-30
