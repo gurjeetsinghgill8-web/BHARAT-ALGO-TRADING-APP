@@ -199,11 +199,34 @@ def find_gill_crypto_option(asset, direction):
 # STEP 4: SQUARE OFF EXISTING POSITION
 # ─────────────────────────────────────────────────────────────────
 
+def sync_delta_position():
+    """Fetches real-time position from Delta and syncs DB state."""
+    mode = db.get_param('crypto_mode', 'Paper')
+    if mode != "Live": return
+    
+    try:
+        url = "https://api.india.delta.exchange/v2/positions"
+        headers = get_delta_auth_headers(method="GET", endpoint="/v2/positions")
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            positions = resp.json().get('result', [])
+            for p in positions:
+                if float(p.get('size', 0)) != 0:
+                    prod_id = p.get('product_id')
+                    symbol = p.get('product', {}).get('symbol', 'Active')
+                    db.set_param("crypto_active_product_id", str(prod_id))
+                    db.set_param("crypto_active_symbol", symbol)
+                    log_crypto(f"Synced Active Position: {symbol} (ID: {prod_id})")
+                    return
+            # If no open positions
+            db.set_param("crypto_active_product_id", "")
+            db.set_param("crypto_active_symbol", "")
+    except Exception as e:
+        log_crypto(f"Position Sync Error: {e}")
+
 def square_off_crypto():
-    """
-    Closes any existing open crypto position BEFORE placing a new order.
-    Live: Sends a MARKET SELL order to Delta Exchange.
-    """
+    """Closes any existing open crypto position."""
+    sync_delta_position() # Ensure we have the latest product_id
     active_symbol = db.get_param("crypto_active_symbol", "")
     active_product_id = db.get_param("crypto_active_product_id", "")
     mode = db.get_param('crypto_mode', 'Paper')
