@@ -41,7 +41,6 @@ def run_crypto_master():
         if df.empty: return
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.columns = [str(c).lower() for c in df.columns]
-        
         df = logic.calculate_supertrend(df, period=10, multiplier=1.5)
         df = logic.calculate_adx(df)
         last_st = df['SUPERTd_10_1.5'].iloc[-1]
@@ -51,20 +50,24 @@ def run_crypto_master():
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
         
-        # AGGRESSIVE ADX THRESHOLD: 15 (Earlier it was 20)
         threshold = 15 
 
-        # Mismatch Flip Logic
-        if last_st == 1 and last_adx > threshold:
-            if not active_symbol or "PAPER" in active_symbol:
-                log_master("CRYPTO SYNC: Signal is BUY. Executing trade...")
-                delta_executor.execute_crypto_trade(asset, "BUY")
-        elif last_st == -1 and last_adx > threshold:
-            if not active_symbol or "PAPER" in active_symbol:
-                log_master("CRYPTO SYNC: Signal is SELL. Executing trade...")
-                delta_executor.execute_crypto_trade(asset, "SELL")
+        # --- SMART MISMATCH FLIP ---
+        if last_adx > threshold:
+            has_bullish = ("-C-" in active_symbol) or ("CALL" in active_symbol.upper())
+            has_bearish = ("-P-" in active_symbol) or ("PUT" in active_symbol.upper())
+            has_nothing = not active_symbol or "PAPER" in active_symbol
+            
+            if last_st == 1: # SIGNAL IS BUY
+                if has_nothing or has_bearish:
+                    log_master(f"CRYPTO SYNC: Signal is BUY but position is {active_symbol}. FLIPPING...")
+                    delta_executor.execute_crypto_trade(asset, "BUY")
+            elif last_st == -1: # SIGNAL IS SELL
+                if has_nothing or has_bullish:
+                    log_master(f"CRYPTO SYNC: Signal is SELL but position is {active_symbol}. FLIPPING...")
+                    delta_executor.execute_crypto_trade(asset, "SELL")
 
-        # Standard Crossover
+        # Standard Crossover (Safety)
         if prev_st == -1 and last_st == 1 and last_adx > threshold:
             delta_executor.execute_crypto_trade(asset, "BUY")
         elif prev_st == 1 and last_st == -1 and last_adx > threshold:

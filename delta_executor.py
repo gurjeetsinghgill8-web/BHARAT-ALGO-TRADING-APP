@@ -214,13 +214,16 @@ def sync_delta_position():
                 if float(p.get('size', 0)) != 0:
                     prod_id = p.get('product_id')
                     symbol = p.get('product', {}).get('symbol', 'Active')
+                    side = p.get('side', '').upper() # BUY or SELL
                     db.set_param("crypto_active_product_id", str(prod_id))
                     db.set_param("crypto_active_symbol", symbol)
-                    log_crypto(f"Synced Active Position: {symbol} (ID: {prod_id})")
+                    db.set_param("crypto_active_side", side)
+                    log_crypto(f"Synced Active Position: {symbol} | Side: {side}")
                     return
             # If no open positions
             db.set_param("crypto_active_product_id", "")
             db.set_param("crypto_active_symbol", "")
+            db.set_param("crypto_active_side", "")
     except Exception as e:
         log_crypto(f"Position Sync Error: {e}")
 
