@@ -68,6 +68,16 @@ with st.sidebar:
             db.set_param('delta_api_secret', d_sec)
             st.success("Delta Keys Saved!")
 
+    with st.expander("🔔 Mobile Notifications (Telegram)", expanded=False):
+        t_token = st.text_input("Bot Token", value=db.get_param('telegram_bot_token', ''), type="password")
+        t_chat = st.text_input("Chat ID", value=db.get_param('telegram_chat_id', ''))
+        if st.button("Save Telegram Settings"):
+            db.set_param('telegram_bot_token', t_token)
+            db.set_param('telegram_chat_id', t_chat)
+            import notifier
+            notifier.send_telegram_msg("🔔 Notifications Active! Bharat Algoverse is now synced with your phone.")
+            st.success("Telegram Settings Saved!")
+
     st.markdown("---")
     st.subheader("📊 Indicator Params")
     st_period = st.number_input("Supertrend Period", value=14)

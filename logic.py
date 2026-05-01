@@ -117,7 +117,8 @@ def calculate_adx(df, period=14):
     minus_di = 100 * (minus_dm.ewm(alpha=1/period, min_periods=period, adjust=False).mean() / atr)
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     adx = dx.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    return adx
+    df[f'ADX_{period}'] = adx
+    return df
 
 # ============================================================
 # ADX FILTER SIGNAL (Supertrend + ADX > 25) - MAX PROFIT
