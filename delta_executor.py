@@ -178,6 +178,12 @@ def execute_crypto_trade(asset, direction):
             
             if resp.status_code == 200 or resp.status_code == 201:
                 log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
+                db.set_param("crypto_active_symbol", symbol)
+                db.set_param("crypto_active_product_id", str(pid))
+                db.set_param("crypto_active_entry_price", str(price))
+            elif resp.status_code == 401:
+                log_terminal("LIVE ORDER FAILED: IP Not Whitelisted! Add VPS IP to Delta API settings.", "ERROR")
+                log_terminal(f"VPS IP: 46.224.133.16 and 2a01:4f8:c012:e9bb::1", "ALERT")
             else:
                 log_terminal(f"LIVE ORDER FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
         except Exception as e:
@@ -185,8 +191,8 @@ def execute_crypto_trade(asset, direction):
     else:
         # Paper Trade
         log_terminal(f"PAPER TRADE PLACED: {symbol} @ {price} (Qty: {qty})", "TRADE")
+        db.set_param("crypto_active_symbol", symbol)
+        db.set_param("crypto_active_product_id", str(pid))
+        db.set_param("crypto_active_entry_price", str(price))
     
-    db.set_param("crypto_active_symbol", symbol)
-    db.set_param("crypto_active_product_id", str(pid))
-    db.set_param("crypto_active_entry_price", str(price))
-    log_crypto(f"Order Processed: {symbol} @ {price}")
+    log_crypto(f"Execution Step Finished for {symbol}")
