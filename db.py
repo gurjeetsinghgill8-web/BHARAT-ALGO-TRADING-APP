@@ -35,14 +35,6 @@ def get_param(key, default=None):
     conn.close()
     return row[0] if row else default
 
-def log_trade(symbol, direction, entry_price):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO trades (timestamp, symbol, direction, entry_price, status) VALUES (?, ?, ?, ?, ?)",
-                   (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), symbol, direction, entry_price, 'OPEN'))
-    conn.commit()
-    conn.close()
-
 def get_daily_loss():
     today = datetime.now().strftime('%Y-%m-%d')
     conn = sqlite3.connect(DB_NAME)

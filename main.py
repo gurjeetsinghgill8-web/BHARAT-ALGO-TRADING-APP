@@ -7,14 +7,21 @@ import logic
 import executor
 import delta_executor
 import crypto_roller
-import notifier
+import requests
 import os
 
 # --- RISK CONFIG ---
-DAILY_LOSS_LIMIT_PCT = 2.0 # 2% Max Daily Loss
+DAILY_LOSS_LIMIT_PCT = 2.0
 
-def clear_terminal():
-    os.system('cls' if os.name == 'nt' else 'clear')
+def send_telegram_msg(message):
+    bot_token = db.get_param('telegram_bot_token', '')
+    chat_id = db.get_param('telegram_chat_id', '')
+    if bot_token and chat_id:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {"chat_id": chat_id, "text": f"🚀 BHARAT ALGO:\n{message}"}
+            requests.post(url, json=payload, timeout=5)
+        except: pass
 
 def log_terminal(msg, type="INFO"):
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
@@ -27,26 +34,18 @@ def log_terminal(msg, type="INFO"):
     print(full_msg)
     
     if type in ["TRADE", "ALERT", "ERROR"]:
-        notifier.send_telegram_msg(full_msg)
-
-def check_risk_management():
-    # Basic protection: If daily loss > 2%, stop trading
-    current_loss = db.get_daily_loss()
-    if current_loss <= -DAILY_LOSS_LIMIT_PCT:
-        log_terminal("RISK LIMIT REACHED! Daily loss > 2%. Trading Suspended.", "ALERT")
-        return False
-    return True
+        send_telegram_msg(full_msg)
 
 def run_crypto_surgical():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
-    if not check_risk_management(): return
+    if db.get_daily_loss() <= -DAILY_LOSS_LIMIT_PCT:
+        log_terminal("RISK LIMIT: Trading Suspended.", "ALERT")
+        return
 
     asset = db.get_param('crypto_asset', 'BTC')
-    timeframe = "5m" # Fixed for Dr. Saab
-    
     try:
         symbol = f"{asset}-USD"
-        df = yf.download(symbol, period="1d", interval=timeframe, progress=False)
+        df = yf.download(symbol, period="1d", interval="5m", progress=False)
         if df.empty: return
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.columns = [str(c).lower().strip() for c in df.columns]
@@ -75,30 +74,23 @@ def run_crypto_surgical():
 
         crypto_roller.check_and_roll_crypto()
     except Exception as e:
-        log_terminal(f"Crypto Loop Error: {e}", "ERROR")
+        log_terminal(f"Crypto Error: {e}", "ERROR")
 
 def main():
-    clear_terminal()
     print("="*60)
-    print("      🚀 BHARAT ALGOVERSE v2.0 - STEALTH COMMAND CENTER 🚀      ")
+    print("      🚀 BHARAT ALGOVERSE v2.0 - STEALTH MODE 🚀      ")
     print("="*60)
-    print("Mode: TERMUX (Mobile) | UI: DISABLED | Alerts: TELEGRAM")
+    print("Background Bot Active (Termux/Mobile)")
     print("-" * 60)
 
-    # Initial Sync
     delta_executor.sync_delta_position()
     
     while True:
         try:
-            # Check Nifty
-            executor.check_and_roll_nifty() # Standard rolling
-            # Check Crypto (5m Sniper)
+            executor.check_and_roll_nifty()
             run_crypto_surgical()
-            
             time.sleep(30)
-        except KeyboardInterrupt:
-            print("\nSafe Shutdown.")
-            break
+        except KeyboardInterrupt: break
         except Exception as e:
             log_terminal(f"Master Error: {e}", "ERROR")
             time.sleep(10)
