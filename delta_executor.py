@@ -129,14 +129,18 @@ def sync_delta_position():
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
             positions = resp.json().get('result', [])
+            found = False
             for p in positions:
                 if float(p.get('size', 0)) != 0:
                     db.set_param("crypto_active_symbol", p.get('product', {}).get('symbol', ''))
                     db.set_param("crypto_active_product_id", str(p.get('product_id')))
-                    return
-            db.set_param("crypto_active_symbol", "")
-            db.set_param("crypto_active_product_id", "")
-    except: pass
+                    found = True
+                    break
+            if not found:
+                db.set_param("crypto_active_symbol", "")
+                db.set_param("crypto_active_product_id", "")
+    except Exception as e:
+        print(f"[SYNC ERROR] {e}")
 
 def square_off_crypto():
     sync_delta_position()

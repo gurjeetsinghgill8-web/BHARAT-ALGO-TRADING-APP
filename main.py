@@ -114,10 +114,11 @@ def run_crypto_sar():
         
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
+        mode = db.get_param('trade_mode', 'PAPER')
         
-        has_bullish = ("-C-" in active_symbol) or ("CALL" in active_symbol.upper())
-        has_bearish = ("-P-" in active_symbol) or ("PUT" in active_symbol.upper())
-        has_nothing = not active_symbol or "PAPER" in active_symbol
+        has_bullish = active_symbol.startswith("C-") or "-C-" in active_symbol or "CALL" in active_symbol.upper()
+        has_bearish = active_symbol.startswith("P-") or "-P-" in active_symbol or "PUT" in active_symbol.upper()
+        has_nothing = not active_symbol or active_symbol == "NONE"
 
         # Force Initial Entry Logic
         if has_nothing:
@@ -133,7 +134,7 @@ def run_crypto_sar():
         # Periodic Heartbeat for Telegram (Every 5 mins)
         if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0
         if time.time() - run_crypto_sar.last_status > 300:
-            send_telegram_msg(f"📊 Market Report: {asset} @ ${price} | Signal: {'BULL' if last_st==1 else 'BEAR'} | Position: {active_symbol or 'NONE'}")
+            send_telegram_msg(f"📊 Market Report [{mode}]: {asset} @ ${price} | Signal: {'BULL' if last_st==1 else 'BEAR'} | Position: {active_symbol or 'NONE'}")
             run_crypto_sar.last_status = time.time()
 
         crypto_roller.check_and_roll_crypto()
