@@ -71,10 +71,12 @@ def fetch_delta_option_chain(asset="BTC"):
     return []
 
 def find_gill_crypto_option(asset, direction):
+    from main import send_telegram_msg
     log_crypto(f"Finding best {direction} option for {asset}...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
+        send_telegram_msg(f"❌ DEBUG: API returned empty chain for {asset}. Check API URLs.")
         return None
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
@@ -83,6 +85,7 @@ def find_gill_crypto_option(asset, direction):
     options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
     if not options:
         log_crypto(f"No liquid {target_type} found.")
+        send_telegram_msg(f"❌ DEBUG: No liquid {target_type} found for {asset} in the chain.")
         return None
     
     # Sort by expiry date (ascending) to get the nearest one
@@ -91,9 +94,8 @@ def find_gill_crypto_option(asset, direction):
     
     # Filter for only the nearest expiry
     near_options = [o for o in options if o.get('expiry_date') == nearest_expiry]
-    log_crypto(f"Found {len(near_options)} options for nearest expiry: {nearest_expiry}")
     
-    # Get Spot Price (try spot_price first, then underlying_price, then spot_index price if available)
+    # Get Spot Price
     spot_price = 0
     for o in near_options:
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
@@ -101,16 +103,14 @@ def find_gill_crypto_option(asset, direction):
     
     if spot_price == 0:
         log_crypto("Could not determine spot price.")
+        send_telegram_msg(f"❌ DEBUG: Could not find spot price in Delta ticker for {asset}.")
         return None
-    
-    log_crypto(f"Current Spot: {spot_price}")
     
     # Find strike closest to spot
     best_opt = min(near_options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
     
-    available_strikes = sorted([float(o.get('strike_price', 0)) for o in near_options])
-    log_crypto(f"Available strikes: {available_strikes}")
-    log_crypto(f"SELECTED: {best_opt['symbol']} (Strike: {best_opt['strike_price']}, Mark: {best_opt['mark_price']})")
+    msg = f"🔍 DEBUG: Best {asset} {direction} found:\nExpiry: {nearest_expiry}\nStrike: {best_opt['strike_price']}\nSymbol: {best_opt['symbol']}"
+    send_telegram_msg(msg)
     
     return (
         best_opt['symbol'], 
@@ -156,15 +156,22 @@ def square_off_crypto():
     db.set_param("crypto_active_symbol", "")
 
 def execute_crypto_trade(asset, direction):
-    from main import log_terminal
+    from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
+    
+    api_key = db.get_param('delta_api_key', '')
+    if not api_key:
+        send_telegram_msg("❌ CRITICAL: API Key missing in DB! Check dashboard/secrets.")
+        return
+
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     square_off_crypto()
     
     opt = find_gill_crypto_option(asset, direction)
     if not opt:
-        log_terminal(f"TRADE FAILED: No active option chain found for {asset}. Market might be illiquid or API blocked.", "ERROR")
+        # Debugging message already sent in find_gill_crypto_option
         return
+
         
     symbol, price, strike, expiry, pid = opt
     qty = db.get_param('crypto_trade_size', '1')
