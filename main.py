@@ -14,20 +14,22 @@ import sys
 DAILY_LOSS_LIMIT_PCT = 2.0
 
 def fetch_delta_candles(symbol, resolution, limit=100):
-    """Fetches OHLC data directly from Delta Exchange (Ultra-Robust)."""
+    """Fetches OHLC data directly from Delta Exchange (Fixed with Start/End)."""
     # Try different symbol variations
     symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT", f"MARK:{symbol}USD"]
     # Try different resolution formats
     res_variants = [resolution, resolution.replace('m', ''), str(int(resolution.replace('m', ''))*60) if 'm' in resolution else resolution]
     
-    # Try different base URLs
+    # Correct Production Base URLs
     base_urls = [
         "https://api.india.delta.exchange",
-        "https://api.delta.exchange",
-        "https://api.deltaexchange.io"
+        "https://api.delta.exchange"
     ]
-    custom_url = db.get_param('delta_base_url', '')
-    if custom_url: base_urls.insert(0, custom_url)
+    
+    # Calculate start/end timestamps (Delta V2 requires these)
+    end_ts = int(time.time())
+    # 5m resolution * 100 candles = 500 minutes ago
+    start_ts = end_ts - (int(limit) * 300) # 300s = 5m
 
     last_error = ""
     for base in base_urls:
@@ -35,7 +37,12 @@ def fetch_delta_candles(symbol, resolution, limit=100):
             for res in res_variants:
                 try:
                     url = f"{base}/v2/history/candles"
-                    params = {"symbol": sym, "resolution": res, "limit": limit}
+                    params = {
+                        "symbol": sym, 
+                        "resolution": res, 
+                        "start": start_ts, 
+                        "end": end_ts
+                    }
                     resp = requests.get(url, params=params, timeout=5)
                     if resp.status_code == 200:
                         data = resp.json().get('result', [])
@@ -44,9 +51,9 @@ def fetch_delta_candles(symbol, resolution, limit=100):
                             df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
                             for col in ['open', 'high', 'low', 'close', 'volume']:
                                 df[col] = pd.to_numeric(df[col])
-                            return df
+                            return df, ""
                     else:
-                        last_error = f"HTTP {resp.status_code} from {base}"
+                        last_error = f"HTTP {resp.status_code} from {base} ({resp.text[:50]})"
                 except Exception as e: 
                     last_error = str(e)
                     continue
