@@ -54,11 +54,25 @@ def fetch_delta_candles(symbol, resolution, limit=100):
                     if resp.status_code == 200:
                         data = resp.json().get('result', [])
                         if data:
+                            # Delta V2 returns newest first (Descending). We need Oldest First (Ascending).
                             df = pd.DataFrame(data)
-                            df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
-                            for col in ['open', 'high', 'low', 'close', 'volume']:
-                                df[col] = pd.to_numeric(df[col])
-                            return df, ""
+                            
+                            # Handle both 'c'/'o'/'h'/'l' and 'close'/'open'/'high'/'low' keys
+                            rename_map = {'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume', 't': 'time'}
+                            df = df.rename(columns=rename_map)
+                            
+                            # Ensure all required columns exist and are numeric
+                            for col in ['open', 'high', 'low', 'close']:
+                                if col in df.columns:
+                                    df[col] = pd.to_numeric(df[col])
+                            
+                            # CRITICAL: Reverse to Ascending Order
+                            if 'time' in df.columns:
+                                df = df.sort_values('time', ascending=True)
+                            else:
+                                df = df.iloc[::-1] # Fallback reverse
+                                
+                            return df.reset_index(drop=True), ""
                     else:
                         last_error = f"HTTP {resp.status_code} from {base} ({resp.text[:50]})"
                 except Exception as e: 
