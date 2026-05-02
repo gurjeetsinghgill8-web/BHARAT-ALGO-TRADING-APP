@@ -51,7 +51,7 @@ def fetch_delta_candles(symbol, resolution, limit=100):
                     last_error = str(e)
                     continue
     print(f"[DEBUG] Last Fetch Error: {last_error}")
-    return pd.DataFrame()
+    return pd.DataFrame(), last_error
 
 def send_telegram_msg(message):
     bot_token = db.get_param('telegram_bot_token', '')
@@ -85,9 +85,9 @@ def run_crypto_sar():
     st_multiplier = float(db.get_param('st_multiplier', 1.5))
     
     try:
-        df = fetch_delta_candles(asset, "5m", limit=100)
+        df, err_msg = fetch_delta_candles(asset, "5m", limit=100)
         if df.empty: 
-            log_terminal(f"DATA ERROR: Could not fetch data for {asset}. API might be blocked or Base URL is wrong.", "ERROR")
+            log_terminal(f"DATA ERROR: {asset} fetch failed.\nDetails: {err_msg}", "ERROR")
             return
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
