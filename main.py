@@ -119,14 +119,22 @@ def run_crypto_sar():
         has_bearish = ("-P-" in active_symbol) or ("PUT" in active_symbol.upper())
         has_nothing = not active_symbol or "PAPER" in active_symbol
 
-        if last_st == 1:
-            if has_nothing or has_bearish:
-                log_terminal(f"SAR FLIP: BUY BTC @ ${price}", "TRADE")
-                delta_executor.execute_crypto_trade(asset, "BUY")
-        elif last_st == -1:
-            if has_nothing or has_bullish:
-                log_terminal(f"SAR FLIP: SELL BTC @ ${price}", "TRADE")
-                delta_executor.execute_crypto_trade(asset, "SELL")
+        # Force Initial Entry Logic
+        if has_nothing:
+            log_terminal(f"INITIAL ENTRY: {asset} is { 'BULL' if last_st==1 else 'BEAR' }. Executing Trade.", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "BUY" if last_st==1 else "SELL")
+        elif last_st == 1 and has_bearish:
+            log_terminal(f"SAR FLIP: BUY BTC @ ${price}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "BUY")
+        elif last_st == -1 and has_bullish:
+            log_terminal(f"SAR FLIP: SELL BTC @ ${price}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "SELL")
+
+        # Periodic Heartbeat for Telegram (Every 5 mins)
+        if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0
+        if time.time() - run_crypto_sar.last_status > 300:
+            send_telegram_msg(f"📊 Market Report: {asset} @ ${price} | Signal: {'BULL' if last_st==1 else 'BEAR'} | Position: {active_symbol or 'NONE'}")
+            run_crypto_sar.last_status = time.time()
 
         crypto_roller.check_and_roll_crypto()
     except Exception as e:
