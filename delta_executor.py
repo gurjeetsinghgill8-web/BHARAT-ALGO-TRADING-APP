@@ -76,7 +76,6 @@ def find_gill_crypto_option(asset, direction):
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
-        send_telegram_msg(f"❌ DEBUG: API returned empty chain for {asset}. Check API URLs.")
         return None
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
@@ -85,7 +84,6 @@ def find_gill_crypto_option(asset, direction):
     options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
     if not options:
         log_crypto(f"No liquid {target_type} found.")
-        send_telegram_msg(f"❌ DEBUG: No liquid {target_type} found for {asset} in the chain.")
         return None
     
     # Sort by expiry date (ascending) to get the nearest one
@@ -108,9 +106,6 @@ def find_gill_crypto_option(asset, direction):
     
     # Find strike closest to spot
     best_opt = min(near_options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    msg = f"🔍 DEBUG: Best {asset} {direction} found:\nExpiry: {nearest_expiry}\nStrike: {best_opt['strike_price']}\nSymbol: {best_opt['symbol']}"
-    send_telegram_msg(msg)
     
     return (
         best_opt['symbol'], 
