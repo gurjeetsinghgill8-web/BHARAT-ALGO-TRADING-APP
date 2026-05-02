@@ -97,14 +97,18 @@ def execute_crypto_trade(asset, direction):
     if not opt: return
     symbol, price, strike, expiry, pid = opt
     
+    qty = db.get_param('crypto_trade_size', '1')
+    
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
-            payload = '{"product_id":' + str(pid) + ',"size":1,"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
+            # Use configurable size
+            payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
             requests.post(url, headers=headers, data=payload, timeout=10)
         except: pass
     
     db.set_param("crypto_active_symbol", symbol)
     db.set_param("crypto_active_product_id", str(pid))
-    log_crypto(f"Order Placed: {symbol} @ {price}")
+    db.set_param("crypto_active_entry_price", str(price))
+    log_crypto(f"Order Placed: {symbol} @ {price} (Qty: {qty})")

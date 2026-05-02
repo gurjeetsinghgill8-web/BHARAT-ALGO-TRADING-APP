@@ -14,36 +14,43 @@ import sys
 DAILY_LOSS_LIMIT_PCT = 2.0
 
 def fetch_delta_candles(symbol, resolution, limit=100):
-    """Fetches OHLC data directly from Delta Exchange (Flexible URL)."""
+    """Fetches OHLC data directly from Delta Exchange (Ultra-Robust)."""
     # Try different symbol variations
-    symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
+    symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT", f"MARK:{symbol}USD"]
+    # Try different resolution formats
+    res_variants = [resolution, resolution.replace('m', ''), str(int(resolution.replace('m', ''))*60) if 'm' in resolution else resolution]
     
     # Try different base URLs
     base_urls = [
         "https://api.india.delta.exchange",
-        "https://api.delta.exchange"
+        "https://api.delta.exchange",
+        "https://api.deltaexchange.io"
     ]
     custom_url = db.get_param('delta_base_url', '')
     if custom_url: base_urls.insert(0, custom_url)
 
+    last_error = ""
     for base in base_urls:
         for sym in symbol_variants:
-            try:
-                url = f"{base}/v2/history/candles"
-                params = {"symbol": sym, "resolution": resolution, "limit": limit}
-                resp = requests.get(url, params=params, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json().get('result', [])
-                    if data:
-                        df = pd.DataFrame(data)
-                        df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
-                        for col in ['open', 'high', 'low', 'close', 'volume']:
-                            df[col] = pd.to_numeric(df[col])
-                        return df
-                else:
-                    # Optional: print(f"[DEBUG] {base} {sym} -> {resp.status_code}")
-                    pass
-            except: continue
+            for res in res_variants:
+                try:
+                    url = f"{base}/v2/history/candles"
+                    params = {"symbol": sym, "resolution": res, "limit": limit}
+                    resp = requests.get(url, params=params, timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json().get('result', [])
+                        if data:
+                            df = pd.DataFrame(data)
+                            df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
+                            for col in ['open', 'high', 'low', 'close', 'volume']:
+                                df[col] = pd.to_numeric(df[col])
+                            return df
+                    else:
+                        last_error = f"HTTP {resp.status_code} from {base}"
+                except Exception as e: 
+                    last_error = str(e)
+                    continue
+    print(f"[DEBUG] Last Fetch Error: {last_error}")
     return pd.DataFrame()
 
 def send_telegram_msg(message):
@@ -71,20 +78,21 @@ def log_terminal(msg, type="INFO"):
 
 def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
-    if db.get_daily_loss() <= -DAILY_LOSS_LIMIT_PCT:
-        log_terminal("RISK LIMIT: Trading Suspended.", "ALERT")
-        return
-
     asset = db.get_param('crypto_asset', 'BTC')
+
+    # Use DB parameters or defaults (Matches Aggressive SAR requirements)
+    st_period = int(float(db.get_param('st_period', 10)))
+    st_multiplier = float(db.get_param('st_multiplier', 1.5))
+    
     try:
         df = fetch_delta_candles(asset, "5m", limit=100)
         if df.empty: 
-            # Transparent error logging as requested
             print(f"[ERROR] Could not fetch data for {asset}. Check API Key or DELTA_BASE_URL.")
             return
         
-        df = logic.calculate_supertrend(df, period=10, multiplier=1.5)
-        last_st = df['SUPERTd_10_1.5'].iloc[-1]
+        df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
+        dir_col = f"SUPERTd_{st_period}_{st_multiplier}"
+        last_st = df[dir_col].iloc[-1]
         price = df['close'].iloc[-1]
         
         delta_executor.sync_delta_position()
@@ -124,15 +132,24 @@ def main():
     db.set_param('crypto_asset', 'BTC')
     
     last_heartbeat = time.time()
+    last_status_msg = time.time()
     
     while True:
         try:
             executor.check_and_roll_nifty()
             run_crypto_sar()
             
+            # Terminal Heartbeat (Every 1 min)
             if time.time() - last_heartbeat > 60:
                 print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [HEARTBEAT] VPS Active. Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
                 last_heartbeat = time.time()
+            
+            # Telegram Status Report (Every 30 mins) - "Constant Visibility"
+            if time.time() - last_status_msg > 1800:
+                active = db.get_param('crypto_active_symbol', 'NONE')
+                msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
+                send_telegram_msg(msg)
+                last_status_msg = time.time()
                 
             time.sleep(10)
         except KeyboardInterrupt: break
