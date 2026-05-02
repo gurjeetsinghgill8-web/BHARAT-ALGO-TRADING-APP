@@ -1,18 +1,45 @@
 import time
 import datetime
-import yfinance as yf
+import requests
 import pandas as pd
 import db
 import logic
 import executor
 import delta_executor
 import crypto_roller
-import requests
 import os
 import sys
 
 # --- RISK CONFIG ---
 DAILY_LOSS_LIMIT_PCT = 2.0
+
+def fetch_delta_candles(symbol, resolution, limit=100):
+    """Fetches OHLC data directly from Delta Exchange (India)."""
+    try:
+        # We use spot for analysis to match yfinance behavior
+        # Delta Spot symbol for BTC is usually 'BTCUSD' or similar
+        # For Supertrend, we use 'MARK:BTCUSD' or similar for reliability
+        url = "https://api.india.delta.exchange/v2/history/candles"
+        params = {
+            "symbol": f"MARK:{symbol}USDT", # Use Mark Price for consistent signals
+            "resolution": resolution,
+            "limit": limit
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json().get('result', [])
+            if not data: return pd.DataFrame()
+            df = pd.DataFrame(data)
+            # Standardize columns for logic.py
+            df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
+            # Convert to numeric
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col])
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
 
 def send_telegram_msg(message):
     bot_token = db.get_param('telegram_bot_token', '')
@@ -45,11 +72,11 @@ def run_crypto_surgical():
 
     asset = db.get_param('crypto_asset', 'BTC')
     try:
-        symbol = f"{asset}-USD"
-        df = yf.download(symbol, period="1d", interval="5m", progress=False)
-        if df.empty: return
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df.columns = [str(c).lower().strip() for c in df.columns]
+        # REPLACED yfinance with Delta API for reliability
+        df = fetch_delta_candles(asset, "5m", limit=100)
+        if df.empty: 
+            # log_terminal(f"Data Error: Could not fetch {asset} from Delta.", "ERROR")
+            return
         
         df = logic.calculate_supertrend(df, period=10, multiplier=1.5)
         df = logic.calculate_adx(df)
@@ -79,19 +106,16 @@ def run_crypto_surgical():
 
 def main():
     print("="*60)
-    print("      🚀 BHARAT ALGOVERSE v2.0 - STEALTH COMMAND CENTER 🚀      ")
+    print("      🚀 BHARAT ALGOVERSE v2.0 - DELTA DIRECT MODE 🚀      ")
     print("="*60)
     
-    # --- SECURE SECRETS LOAD ---
     if not db.load_secrets():
-        sys.exit(1) # Halt bot if secrets are missing
+        sys.exit(1)
         
-    print("Mode: TERMUX (Mobile) | UI: DISABLED | Alerts: TELEGRAM")
+    print("Mode: TERMUX | Data: DELTA DIRECT | Alerts: TELEGRAM")
     print("-" * 60)
 
     delta_executor.sync_delta_position()
-    
-    # Set default running status
     db.set_param('crypto_algo_running', 'ON')
     db.set_param('crypto_asset', 'BTC')
     
