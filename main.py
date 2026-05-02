@@ -15,34 +15,35 @@ DAILY_LOSS_LIMIT_PCT = 2.0
 
 def fetch_delta_candles(symbol, resolution, limit=100):
     """Fetches OHLC data directly from Delta Exchange (Flexible URL)."""
-    # Try India first, then International
+    # Try different symbol variations
+    symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
+    
+    # Try different base URLs
     base_urls = [
         "https://api.india.delta.exchange",
         "https://api.delta.exchange"
     ]
-    
-    # Check if user specified a custom URL in secrets.txt
     custom_url = db.get_param('delta_base_url', '')
     if custom_url: base_urls.insert(0, custom_url)
 
     for base in base_urls:
-        try:
-            url = f"{base}/v2/history/candles"
-            params = {
-                "symbol": f"MARK:{symbol}USDT",
-                "resolution": resolution,
-                "limit": limit
-            }
-            resp = requests.get(url, params=params, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json().get('result', [])
-                if data:
-                    df = pd.DataFrame(data)
-                    df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
-                    for col in ['open', 'high', 'low', 'close', 'volume']:
-                        df[col] = pd.to_numeric(df[col])
-                    return df
-        except: continue
+        for sym in symbol_variants:
+            try:
+                url = f"{base}/v2/history/candles"
+                params = {"symbol": sym, "resolution": resolution, "limit": limit}
+                resp = requests.get(url, params=params, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json().get('result', [])
+                    if data:
+                        df = pd.DataFrame(data)
+                        df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
+                        for col in ['open', 'high', 'low', 'close', 'volume']:
+                            df[col] = pd.to_numeric(df[col])
+                        return df
+                else:
+                    # Optional: print(f"[DEBUG] {base} {sym} -> {resp.status_code}")
+                    pass
+            except: continue
     return pd.DataFrame()
 
 def send_telegram_msg(message):
