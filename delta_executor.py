@@ -28,39 +28,50 @@ def get_next_friday_expiry():
     next_friday = today + datetime.timedelta(days=days_until_friday)
     return next_friday.strftime('%Y-%m-%d')
 
-def fetch_delta_option_chain(asset="BTC", expiry_date=None):
+def fetch_delta_option_chain(asset="BTC"):
     base_urls = ["https://api.india.delta.exchange", "https://api.delta.exchange"]
     
+    # 1. Fetch Product Definitions (for Expiry and Strike info)
+    products = {}
     for base in base_urls:
-        url = f"{base}/v2/tickers"
-        # Try with specific expiry first
-        params = {'contract_types': 'call_options,put_options', 'underlying_asset_symbols': asset}
-        if expiry_date: params['expiry_date'] = expiry_date
-        
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            url = f"{base}/v2/products?underlying_asset_symbols={asset}&contract_types=call_options,put_options"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                for p in resp.json().get('result', []):
+                    products[p['id']] = {
+                        'expiry': p.get('settlement_time', '').split('T')[0],
+                        'strike': float(p.get('strike_price', 0)),
+                        'symbol': p.get('symbol', ''),
+                        'type': p.get('contract_type', '')
+                    }
+                if products: break
+        except: continue
+
+    # 2. Fetch Tickers (for live Mark Price)
+    chain = []
+    for base in base_urls:
+        url = f"{base}/v2/tickers?underlying_asset_symbols={asset}"
+        try:
+            resp = requests.get(url, timeout=10)
             if resp.status_code == 200:
                 res = resp.json().get('result', [])
-                if res: return res
+                if res:
+                    # Enrich tickers with product info
+                    for ticker in res:
+                        pid = ticker.get('product_id')
+                        if pid in products:
+                            ticker['expiry_date'] = products[pid]['expiry']
+                            ticker['strike_price'] = products[pid]['strike']
+                            ticker['contract_type'] = products[pid]['type']
+                            chain.append(ticker)
+                    if chain: return chain
         except: continue
-        
-        # If specific expiry failed, try without expiry to get anything available
-        if expiry_date:
-            try:
-                params.pop('expiry_date')
-                resp = requests.get(url, params=params, timeout=10)
-                if resp.status_code == 200:
-                    res = resp.json().get('result', [])
-                    if res: return res
-            except: continue
             
     return []
 
 def find_gill_crypto_option(asset, direction):
-    # Try fetching with preferred Friday expiry first
-    friday = get_next_friday_expiry()
-    chain = fetch_delta_option_chain(asset, friday)
-    
+    chain = fetch_delta_option_chain(asset)
     if not chain: return None
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
@@ -73,14 +84,27 @@ def find_gill_crypto_option(asset, direction):
     options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
     nearest_expiry = options[0].get('expiry_date')
     
-    # Filter for only the nearest expiry to avoid mixing strikes from different dates
+    # Filter for only the nearest expiry
     near_options = [o for o in options if o.get('expiry_date') == nearest_expiry]
     
-    spot_price = float(near_options[0].get('underlying_price', 0))
+    # Get Spot Price (try spot_price first, then underlying_price)
+    spot_price = 0
+    for o in near_options:
+        spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
+        if spot_price > 0: break
+    
+    if spot_price == 0: return None
     
     # Find strike closest to spot
     best_opt = min(near_options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    return (best_opt['symbol'], float(best_opt['mark_price']), float(best_opt['strike_price']), best_opt['expiry_date'], best_opt['id'])
+    
+    return (
+        best_opt['symbol'], 
+        float(best_opt['mark_price']), 
+        float(best_opt['strike_price']), 
+        best_opt['expiry_date'], 
+        best_opt['product_id']
+    )
 
 def sync_delta_position():
     mode = db.get_param('trade_mode', 'PAPER')
