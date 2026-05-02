@@ -40,7 +40,8 @@ def load_secrets():
                 # Map to internal DB keys
                 db_key = key.lower()
                 if db_key == 'telegram_token': db_key = 'telegram_bot_token'
-                set_param(db_key, value)
+                if db_key == 'trade_mode': db_key = 'trade_mode' # Explicitly keep as trade_mode
+                set_param(db_key, value.upper()) # Force upper case for PAPER/LIVE
     return True
 
 def set_param(key, value):

@@ -217,8 +217,8 @@ def place_limit_order(instrument_key, ltp, strike, direction):
     log(f"   Limit  : Rs.{limit_price} ({buffer_pct}% buffer)")
     log(f"   Key    : {instrument_key}")
 
-    mode = db.get_param('algo_mode', 'Paper')
-    if mode == "Live":
+    mode = db.get_param('trade_mode', 'PAPER')
+    if mode == "LIVE":
         qty = int(db.get_param('nifty_trade_qty', '50'))
         payload = {
             "quantity": qty,
