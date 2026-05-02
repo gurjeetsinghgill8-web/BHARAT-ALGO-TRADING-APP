@@ -6,7 +6,7 @@ DB_NAME = "trading_app.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Flexible Settings Table
+    # Flexible Settings Table (Key-Value)
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings 
                       (key TEXT PRIMARY KEY, value TEXT)''')
     # Detailed Trade Logs
@@ -35,7 +35,21 @@ def get_param(key, default=None):
     conn.close()
     return row[0] if row else default
 
-# Initialize on load
-init_db()
+def log_trade(symbol, direction, entry_price):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO trades (timestamp, symbol, direction, entry_price, status) VALUES (?, ?, ?, ?, ?)",
+                   (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), symbol, direction, entry_price, 'OPEN'))
+    conn.commit()
+    conn.close()
 
-# SUPREME CLOUD SYNC: 2026-04-30
+def get_daily_loss():
+    today = datetime.now().strftime('%Y-%m-%d')
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT total_pnl FROM daily_stats WHERE date = ?", (today,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else 0.0
+
+init_db()

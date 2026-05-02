@@ -3,3 +3,4 @@ numpy>=1.24.0
 yfinance>=0.2.36
 requests>=2.31.0
 pytz>=2024.1
+upstox-python-sdk>=1.0.0
