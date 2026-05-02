@@ -87,13 +87,16 @@ def run_crypto_sar():
     try:
         df = fetch_delta_candles(asset, "5m", limit=100)
         if df.empty: 
-            print(f"[ERROR] Could not fetch data for {asset}. Check API Key or DELTA_BASE_URL.")
+            log_terminal(f"DATA ERROR: Could not fetch data for {asset}. API might be blocked or Base URL is wrong.", "ERROR")
             return
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
         dir_col = f"SUPERTd_{st_period}_{st_multiplier}"
         last_st = df[dir_col].iloc[-1]
         price = df['close'].iloc[-1]
+        
+        # Periodic Signal Update in Terminal
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Signal: {'BULL' if last_st==1 else 'BEAR'} | Price: {price}")
         
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
