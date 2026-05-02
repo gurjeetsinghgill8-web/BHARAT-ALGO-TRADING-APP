@@ -71,14 +71,19 @@ def fetch_delta_option_chain(asset="BTC"):
     return []
 
 def find_gill_crypto_option(asset, direction):
+    log_crypto(f"Finding best {direction} option for {asset}...")
     chain = fetch_delta_option_chain(asset)
-    if not chain: return None
+    if not chain:
+        log_crypto("Chain is empty!")
+        return None
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
     
     # Filter for target type and valid mark prices
     options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
-    if not options: return None
+    if not options:
+        log_crypto(f"No liquid {target_type} found.")
+        return None
     
     # Sort by expiry date (ascending) to get the nearest one
     options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
@@ -86,17 +91,26 @@ def find_gill_crypto_option(asset, direction):
     
     # Filter for only the nearest expiry
     near_options = [o for o in options if o.get('expiry_date') == nearest_expiry]
+    log_crypto(f"Found {len(near_options)} options for nearest expiry: {nearest_expiry}")
     
-    # Get Spot Price (try spot_price first, then underlying_price)
+    # Get Spot Price (try spot_price first, then underlying_price, then spot_index price if available)
     spot_price = 0
     for o in near_options:
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
         if spot_price > 0: break
     
-    if spot_price == 0: return None
+    if spot_price == 0:
+        log_crypto("Could not determine spot price.")
+        return None
+    
+    log_crypto(f"Current Spot: {spot_price}")
     
     # Find strike closest to spot
     best_opt = min(near_options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    
+    available_strikes = sorted([float(o.get('strike_price', 0)) for o in near_options])
+    log_crypto(f"Available strikes: {available_strikes}")
+    log_crypto(f"SELECTED: {best_opt['symbol']} (Strike: {best_opt['strike_price']}, Mark: {best_opt['mark_price']})")
     
     return (
         best_opt['symbol'], 
