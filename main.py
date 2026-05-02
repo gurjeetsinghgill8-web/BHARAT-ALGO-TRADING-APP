@@ -18,7 +18,8 @@ def allowed_gai_family():
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
 # --- RISK CONFIG ---
-DAILY_LOSS_LIMIT_PCT = 2.0
+# Daily loss limit removed per user request for aggressive options trading.
+
 
 def fetch_delta_candles(symbol, resolution, limit=100):
     """Fetches OHLC data directly from Delta Exchange (Fixed with Start/End)."""
