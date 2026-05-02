@@ -84,7 +84,7 @@ def run_crypto_surgical():
         last_st = df['SUPERTd_10_1.5'].iloc[-1]
         last_adx = df['ADX_14'].iloc[-1]
         price = df['close'].iloc[-1]
-        
+        # SYNC & FLIP LOGIC (FILTERS REMOVED: ADX SHUT DOWN)
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
         
@@ -92,13 +92,12 @@ def run_crypto_surgical():
         has_bearish = ("-P-" in active_symbol) or ("PUT" in active_symbol.upper())
         has_nothing = not active_symbol or "PAPER" in active_symbol
 
-        if last_adx > 15:
-            if last_st == 1 and (has_nothing or has_bearish):
-                log_terminal(f"CRYPTO BUY: {asset} @ ${price}", "TRADE")
-                delta_executor.execute_crypto_trade(asset, "BUY")
-            elif last_st == -1 and (has_nothing or has_bullish):
-                log_terminal(f"CRYPTO SELL: {asset} @ ${price}", "TRADE")
-                delta_executor.execute_crypto_trade(asset, "SELL")
+        if last_st == 1 and (has_nothing or has_bearish):
+            log_terminal(f"CRYPTO BUY: {asset} @ ${price}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "BUY")
+        elif last_st == -1 and (has_nothing or has_bullish):
+            log_terminal(f"CRYPTO SELL: {asset} @ ${price}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "SELL")
 
         crypto_roller.check_and_roll_crypto()
     except Exception as e:
