@@ -10,6 +10,12 @@ from datetime import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="BHARAT ALGOVERSE Dashboard", page_icon="🚀", layout="wide")
 
+# Memory Management (Surgical Optimization)
+if st.button("🧹 Flush System Memory"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.success("Memory Flushed!")
+
 # --- CUSTOM CSS ---
 st.markdown("""
     <style>
