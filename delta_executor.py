@@ -89,26 +89,37 @@ def square_off_crypto():
     db.set_param("crypto_active_symbol", "")
 
 def execute_crypto_trade(asset, direction):
+    from main import log_terminal
     mode = db.get_param('trade_mode', 'PAPER')
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     square_off_crypto()
     
     opt = find_gill_crypto_option(asset, direction)
-    if not opt: return
+    if not opt:
+        log_terminal(f"TRADE FAILED: No active option chain found for {asset}. Market might be illiquid or API blocked.", "ERROR")
+        return
+        
     symbol, price, strike, expiry, pid = opt
-    
     qty = db.get_param('crypto_trade_size', '1')
     
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
-            # Use configurable size
             payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
-            requests.post(url, headers=headers, data=payload, timeout=10)
-        except: pass
+            resp = requests.post(url, headers=headers, data=payload, timeout=10)
+            
+            if resp.status_code == 200 or resp.status_code == 201:
+                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
+            else:
+                log_terminal(f"LIVE ORDER FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
+        except Exception as e:
+            log_terminal(f"API EXCEPTION: {e}", "ERROR")
+    else:
+        # Paper Trade
+        log_terminal(f"PAPER TRADE PLACED: {symbol} @ {price} (Qty: {qty})", "TRADE")
     
     db.set_param("crypto_active_symbol", symbol)
     db.set_param("crypto_active_product_id", str(pid))
     db.set_param("crypto_active_entry_price", str(price))
-    log_crypto(f"Order Placed: {symbol} @ {price} (Qty: {qty})")
+    log_crypto(f"Order Processed: {symbol} @ {price}")
