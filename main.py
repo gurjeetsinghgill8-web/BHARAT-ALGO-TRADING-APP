@@ -14,14 +14,10 @@ import sys
 DAILY_LOSS_LIMIT_PCT = 2.0
 
 def fetch_delta_candles(symbol, resolution, limit=100):
-    """Fetches OHLC data directly from Delta Exchange (India)."""
     try:
-        # We use spot for analysis to match yfinance behavior
-        # Delta Spot symbol for BTC is usually 'BTCUSD' or similar
-        # For Supertrend, we use 'MARK:BTCUSD' or similar for reliability
         url = "https://api.india.delta.exchange/v2/history/candles"
         params = {
-            "symbol": f"MARK:{symbol}USDT", # Use Mark Price for consistent signals
+            "symbol": f"MARK:{symbol}USDT",
             "resolution": resolution,
             "limit": limit
         }
@@ -30,16 +26,12 @@ def fetch_delta_candles(symbol, resolution, limit=100):
             data = resp.json().get('result', [])
             if not data: return pd.DataFrame()
             df = pd.DataFrame(data)
-            # Standardize columns for logic.py
             df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
-            # Convert to numeric
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = pd.to_numeric(df[col])
             return df
-        else:
-            return pd.DataFrame()
-    except Exception as e:
-        return pd.DataFrame()
+    except: pass
+    return pd.DataFrame()
 
 def send_telegram_msg(message):
     bot_token = db.get_param('telegram_bot_token', '')
@@ -61,7 +53,8 @@ def log_terminal(msg, type="INFO"):
     full_msg = f"[{timestamp}] {icon} {msg}"
     print(full_msg)
     
-    if type in ["TRADE", "ALERT", "ERROR"]:
+    # AGGRESSIVE: Notify Telegram for everything important
+    if type in ["TRADE", "ALERT", "ERROR", "START"]:
         send_telegram_msg(full_msg)
 
 def run_crypto_surgical():
@@ -72,19 +65,14 @@ def run_crypto_surgical():
 
     asset = db.get_param('crypto_asset', 'BTC')
     try:
-        # REPLACED yfinance with Delta API for reliability
         df = fetch_delta_candles(asset, "5m", limit=100)
-        if df.empty: 
-            # log_terminal(f"Data Error: Could not fetch {asset} from Delta.", "ERROR")
-            return
+        if df.empty: return
         
+        # PURE SUPERTREND 10/1.5 (NO OTHER FILTERS)
         df = logic.calculate_supertrend(df, period=10, multiplier=1.5)
-        df = logic.calculate_adx(df)
-        
         last_st = df['SUPERTd_10_1.5'].iloc[-1]
-        last_adx = df['ADX_14'].iloc[-1]
         price = df['close'].iloc[-1]
-        # SYNC & FLIP LOGIC (FILTERS REMOVED: ADX SHUT DOWN)
+        
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
         
@@ -92,11 +80,12 @@ def run_crypto_surgical():
         has_bearish = ("-P-" in active_symbol) or ("PUT" in active_symbol.upper())
         has_nothing = not active_symbol or "PAPER" in active_symbol
 
+        # AGGRESSIVE ENTRY: Immediate execution if signal exists and no position
         if last_st == 1 and (has_nothing or has_bearish):
-            log_terminal(f"CRYPTO BUY: {asset} @ ${price}", "TRADE")
+            log_terminal(f"AGGRESSIVE BUY: {asset} @ ${price}", "TRADE")
             delta_executor.execute_crypto_trade(asset, "BUY")
         elif last_st == -1 and (has_nothing or has_bullish):
-            log_terminal(f"CRYPTO SELL: {asset} @ ${price}", "TRADE")
+            log_terminal(f"AGGRESSIVE SELL: {asset} @ ${price}", "TRADE")
             delta_executor.execute_crypto_trade(asset, "SELL")
 
         crypto_roller.check_and_roll_crypto()
@@ -105,28 +94,33 @@ def run_crypto_surgical():
 
 def main():
     print("="*60)
-    print("      🚀 BHARAT ALGOVERSE v2.0 - DELTA DIRECT MODE 🚀      ")
+    print("      🚀 BHARAT ALGOVERSE v2.0 - VOCAL AGGRESSIVE MODE 🚀      ")
     print("="*60)
     
     if not db.load_secrets():
         sys.exit(1)
         
-    print("Mode: TERMUX | Data: DELTA DIRECT | Alerts: TELEGRAM")
+    # 1. Telegram Greeting
+    log_terminal("System Started & Monitoring BTC....", "START")
     print("-" * 60)
 
-    # Initial Sync and Mode Check
     delta_executor.sync_delta_position()
     db.set_param('crypto_algo_running', 'ON')
     db.set_param('crypto_asset', 'BTC')
     
-    log_terminal("SURGICAL ENGINE: Checking for immediate entry...", "INFO")
+    last_heartbeat = time.time()
     
     while True:
         try:
             executor.check_and_roll_nifty()
             run_crypto_surgical()
-            # Fast check every 10 seconds
-            time.sleep(10)
+            
+            # 3. Continuous Heartbeat (60s)
+            if time.time() - last_heartbeat > 60:
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [HEARTBEAT] Bot is searching...")
+                last_heartbeat = time.time()
+                
+            time.sleep(10) # Fast 10s check
         except KeyboardInterrupt: break
         except Exception as e:
             log_terminal(f"Master Error: {e}", "ERROR")
