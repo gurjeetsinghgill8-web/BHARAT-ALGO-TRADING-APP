@@ -114,15 +114,19 @@ def main():
     print("Mode: TERMUX | Data: DELTA DIRECT | Alerts: TELEGRAM")
     print("-" * 60)
 
+    # Initial Sync and Mode Check
     delta_executor.sync_delta_position()
     db.set_param('crypto_algo_running', 'ON')
     db.set_param('crypto_asset', 'BTC')
+    
+    log_terminal("SURGICAL ENGINE: Checking for immediate entry...", "INFO")
     
     while True:
         try:
             executor.check_and_roll_nifty()
             run_crypto_surgical()
-            time.sleep(30)
+            # Fast check every 10 seconds
+            time.sleep(10)
         except KeyboardInterrupt: break
         except Exception as e:
             log_terminal(f"Master Error: {e}", "ERROR")
