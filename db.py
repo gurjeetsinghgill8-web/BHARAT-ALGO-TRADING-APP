@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime
 
@@ -6,19 +7,41 @@ DB_NAME = "trading_app.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    # Flexible Settings Table (Key-Value)
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings 
                       (key TEXT PRIMARY KEY, value TEXT)''')
-    # Detailed Trade Logs
     cursor.execute('''CREATE TABLE IF NOT EXISTS trades 
                       (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, 
                        symbol TEXT, direction TEXT, entry_price REAL, 
                        exit_price REAL, status TEXT, pnl REAL)''')
-    # Daily Risk Management Ledger
     cursor.execute('''CREATE TABLE IF NOT EXISTS daily_stats 
                       (date TEXT PRIMARY KEY, total_pnl REAL, status TEXT)''')
     conn.commit()
     conn.close()
+
+def load_secrets():
+    """STRICT SECURITY: Loads keys from local secrets.txt only."""
+    secrets_file = "secrets.txt"
+    if not os.path.exists(secrets_file):
+        print("\n" + "!"*60)
+        print("CRITICAL ERROR: secrets.txt NOT FOUND!")
+        print("Please create a file named 'secrets.txt' in this folder.")
+        print("Format:")
+        print("DELTA_API_KEY=your_key")
+        print("DELTA_API_SECRET=your_secret")
+        print("TELEGRAM_TOKEN=your_bot_token")
+        print("TELEGRAM_CHAT_ID=your_chat_id")
+        print("!"*60 + "\n")
+        return False
+
+    with open(secrets_file, 'r') as f:
+        for line in f:
+            if '=' in line:
+                key, value = line.strip().split('=', 1)
+                # Map to internal DB keys
+                db_key = key.lower()
+                if db_key == 'telegram_token': db_key = 'telegram_bot_token'
+                set_param(db_key, value)
+    return True
 
 def set_param(key, value):
     conn = sqlite3.connect(DB_NAME)

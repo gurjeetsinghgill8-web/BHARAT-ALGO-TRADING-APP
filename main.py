@@ -9,6 +9,7 @@ import delta_executor
 import crypto_roller
 import requests
 import os
+import sys
 
 # --- RISK CONFIG ---
 DAILY_LOSS_LIMIT_PCT = 2.0
@@ -78,12 +79,21 @@ def run_crypto_surgical():
 
 def main():
     print("="*60)
-    print("      🚀 BHARAT ALGOVERSE v2.0 - STEALTH MODE 🚀      ")
+    print("      🚀 BHARAT ALGOVERSE v2.0 - STEALTH COMMAND CENTER 🚀      ")
     print("="*60)
-    print("Background Bot Active (Termux/Mobile)")
+    
+    # --- SECURE SECRETS LOAD ---
+    if not db.load_secrets():
+        sys.exit(1) # Halt bot if secrets are missing
+        
+    print("Mode: TERMUX (Mobile) | UI: DISABLED | Alerts: TELEGRAM")
     print("-" * 60)
 
     delta_executor.sync_delta_position()
+    
+    # Set default running status
+    db.set_param('crypto_algo_running', 'ON')
+    db.set_param('crypto_asset', 'BTC')
     
     while True:
         try:
