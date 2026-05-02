@@ -21,10 +21,12 @@ def init_db():
 def load_secrets():
     """STRICT SECURITY: Loads keys from local secrets.txt only."""
     secrets_file = "secrets.txt"
+    abs_path = os.path.abspath(secrets_file)
     if not os.path.exists(secrets_file):
         print("\n" + "!"*60)
-        print("CRITICAL ERROR: secrets.txt NOT FOUND!")
+        print(f"CRITICAL ERROR: secrets.txt NOT FOUND at {abs_path}")
         print("Please create a file named 'secrets.txt' in this folder.")
+        # ... existing help print ...
         print("Format:")
         print("DELTA_API_KEY=your_key")
         print("DELTA_API_SECRET=your_secret")
