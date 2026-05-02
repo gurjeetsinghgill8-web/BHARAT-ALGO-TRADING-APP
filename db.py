@@ -40,8 +40,9 @@ def load_secrets():
                 # Map to internal DB keys
                 db_key = key.lower()
                 if db_key == 'telegram_token': db_key = 'telegram_bot_token'
-                if db_key == 'trade_mode': db_key = 'trade_mode' # Explicitly keep as trade_mode
-                set_param(db_key, value.upper()) # Force upper case for PAPER/LIVE
+                if db_key == 'delta_base_url': db_key = 'delta_base_url'
+                if db_key == 'trade_mode': db_key = 'trade_mode'
+                set_param(db_key, value.upper() if db_key == 'trade_mode' else value)
     return True
 
 def set_param(key, value):
