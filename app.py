@@ -69,14 +69,26 @@ def get_bot_status():
             return "RUNNING" if output.strip() else "STOPPED"
     except: return "UNKNOWN"
 
+# --- API STATUS CHECK ---
+def check_api_connectivity():
+    try:
+        url = "https://api.india.delta.exchange/v2/wallet/balances"
+        headers = delta_executor.get_delta_auth_headers("GET", "/v2/wallet/balances")
+        resp = requests.get(url, headers=headers, timeout=5)
+        return "CONNECTED" if resp.status_code == 200 else f"ERROR: {resp.status_code}"
+    except: return "DISCONNECTED"
+
 # --- SIDEBAR (CONFIG) ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2091/2091665.png", width=80)
     st.title("Settings")
-    t_mode = st.selectbox("Mode", ["PAPER", "LIVE"], index=1 if db.get_param('trade_mode') == "LIVE" else 0)
-    lots = st.number_input("Lot Size", min_value=1, max_value=100, value=int(db.get_param('crypto_trade_size', '3')))
-    st.title("System Info")
-    st.info("System is optimized for 24/7 VPS operation. Ensure 'main.py' is running.")
+    
+    api_status = check_api_connectivity()
+    if api_status == "CONNECTED":
+        st.success("✅ API: CONNECTED")
+    else:
+        st.error(f"❌ API: {api_status}")
+        st.info("💡 Hint: Check IP Whitelist (46.224.133.16) or Keys.")
 
 # --- MAIN DASHBOARD ---
 st.title("🚀 BHARAT ALGOVERSE v2.0")
