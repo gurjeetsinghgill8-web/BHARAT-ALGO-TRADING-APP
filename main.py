@@ -109,6 +109,22 @@ def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
     asset = db.get_param('crypto_asset', 'BTC')
 
+    # Enforce 5-minute boundary rule (but allow immediate check on start)
+    now = datetime.datetime.now()
+    if not hasattr(run_crypto_sar, "last_logic_run"): run_crypto_sar.last_logic_run = 0
+    
+    # Run logic if:
+    # 1. It's a 5-minute boundary (0, 5, 10...)
+    # 2. Or if we haven't run it yet (startup)
+    is_boundary = (now.minute % 5 == 0)
+    time_since_last = time.time() - run_crypto_sar.last_logic_run
+    
+    if not is_boundary and time_since_last < 300:
+        # Just heartbeat, no logic
+        return
+
+    run_crypto_sar.last_logic_run = time.time()
+    
     # Use DB parameters or defaults (Matches Aggressive SAR requirements)
     st_period = int(float(db.get_param('st_period', 10)))
     st_multiplier = float(db.get_param('st_multiplier', 1.5))
@@ -121,12 +137,11 @@ def run_crypto_sar():
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
         
-        # Lego Block 1: Whipsaw Protection (Signal Logic)
-        signal = logic.get_signal(df) # Uses iloc[-2] internally
+        # Signal Logic: Uses iloc[-2] internally for closed candle
+        signal = logic.get_signal(df) 
         price = df['close'].iloc[-2]
         
-        # Periodic Signal Update in Terminal
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Closed Candle Signal: {signal} | Price: {price}")
+        log_terminal(f"STRATEGY CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
         
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
@@ -134,18 +149,21 @@ def run_crypto_sar():
         
         has_bullish = active_symbol.startswith("C-") or "-C-" in active_symbol or "CALL" in active_symbol.upper()
         has_bearish = active_symbol.startswith("P-") or "-P-" in active_symbol or "PUT" in active_symbol.upper()
-        has_nothing = not active_symbol or active_symbol == "NONE"
+        has_nothing = not active_symbol or active_symbol == "NONE" or active_symbol == "API_ERROR_LOCK"
 
-        # Force Initial Entry Logic
-        if has_nothing and signal != "WAIT":
-            log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
-            delta_executor.execute_crypto_trade(asset, signal)
+        # SAR CORE LOGIC:
+        if has_nothing:
+            if signal != "WAIT":
+                log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
+                delta_executor.execute_crypto_trade(asset, "BUY" if signal == "BUY" else "SELL")
         elif signal == "BUY" and has_bearish:
-            log_terminal(f"SAR FLIP: BUY BTC @ ${price}", "TRADE")
+            log_terminal(f"SAR FLIP: Bearish -> Bullish. Closing Put, Opening Call.", "TRADE")
             delta_executor.execute_crypto_trade(asset, "BUY")
         elif signal == "SELL" and has_bullish:
-            log_terminal(f"SAR FLIP: SELL BTC @ ${price}", "TRADE")
+            log_terminal(f"SAR FLIP: Bullish -> Bearish. Closing Call, Opening Put.", "TRADE")
             delta_executor.execute_crypto_trade(asset, "SELL")
+        else:
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Signal {signal} matches current position {active_symbol}. Holding.")
 
         # Periodic Heartbeat for Telegram (Every 30 mins)
         if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0

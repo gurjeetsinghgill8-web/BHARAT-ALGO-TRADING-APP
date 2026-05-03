@@ -157,24 +157,45 @@ def filter_options_by_expiry(options, days_threshold=3):
             continue
     return valid_options
 
-def find_atm_strike(spot_price, options_list, offset=0):
+def find_atm_strike(spot_price, options_list, direction, offset=0):
     """
-    Lego Block 3: ATM Strike Selection (Strike Picker)
-    Finds the strike price with min difference from spot, plus an optional offset.
-    offset=0: ATM, offset=1: Next OTM, etc.
+    Lego Block 3: Strike Selection (Strike Picker)
+    Finds the strike price with min difference from spot, plus an optional OTM offset.
+    offset=0: ATM
+    offset=1: 1-strike OTM
     """
     if not options_list: return None
-    # Sort by strike proximity
+    
+    # 1. Sort all by proximity to spot (ATM candidate is index 0)
     options_list.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
     
-    # Return the strike with the requested offset
-    if offset < len(options_list):
-        return options_list[offset]
-    return options_list[0]
+    if offset == 0:
+        return options_list[0]
+    
+    # 2. Filter for OTM strikes
+    # For CALL: Strike > Spot
+    # For PUT: Strike < Spot
+    otm_options = []
+    if direction == "BUY": # Call
+        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) > spot_price]
+    else: # Put
+        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) < spot_price]
+        
+    if not otm_options:
+        return options_list[0] # Fallback to ATM if no OTM found
+        
+    # 3. Sort OTM options by proximity to spot and pick the requested offset
+    otm_options.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    
+    target_idx = offset - 1 # offset 1 is index 0 of OTM list
+    if target_idx < len(otm_options):
+        return otm_options[target_idx]
+    
+    return otm_options[-1] # Pick furthest OTM if requested offset is out of bounds
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Scanning {direction} options for {asset} (Dynamic Rule)...")
+    log_crypto(f"Scanning {direction} options for {asset} (Gill Supertrend Rule)...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
@@ -189,24 +210,21 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Lego Block 2: Expiry Rule (Dynamic from DB)
-    exp_days = int(db.get_param('expiry_threshold', '1'))
-    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=exp_days)
-                
-    if not valid_options:
-        log_crypto(f"WARNING: No options found with {exp_days}d expiry. Using nearest available.")
-        valid_options = all_typed_options 
-
-    # 3. Sort by expiry date (ascending) and pick the first (nearest) valid expiry
-    valid_options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
-    best_expiry = valid_options[0].get('expiry_date')
+    # 2. Expiry Rule: Never same day. Pick nearest expiry AFTER today.
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today_str])))
     
+    if not valid_expiries:
+        log_crypto("No expiries found after today!")
+        return None
+        
+    best_expiry = valid_expiries[0] # Nearest expiry that is NOT today
     log_crypto(f"Selected Expiry: {best_expiry} (Target: {target_type})")
     
-    # 4. Filter for options with that specific expiry
-    near_options = [o for o in valid_options if o.get('expiry_date') == best_expiry]
+    # 3. Filter for options with that specific expiry
+    near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
     
-    # 5. Get Spot Price
+    # 4. Get Spot Price
     spot_price = 0
     for o in near_options:
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
@@ -216,9 +234,10 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("Could not determine spot price.")
         return None
     
-    # 6. Lego Block 3: Strike Selection (Dynamic Offset from DB)
-    offset = int(db.get_param('strike_offset', '0'))
-    best_opt = find_atm_strike(spot_price, near_options, offset=offset)
+    # 5. Strike Selection: ATM or 1-strike OTM
+    # offset=0 is ATM, offset=1 is 1-strike OTM
+    offset = int(db.get_param('strike_offset', '1')) # Defaulting to 1 (slight OTM) per user request
+    best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
     
     if not best_opt: return None
 
@@ -379,13 +398,23 @@ def execute_crypto_trade(asset, direction):
 
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     
+    # --- MANDATORY SQUARE OFF ALL POSITIONS FIRST ---
+    log_terminal("CLEAN SLATE: Squaring off all positions before new entry.", "INFO")
+    square_off_crypto()
+    time.sleep(2) # Brief wait for exchange to process
+    
     # --- FAIL-SAFE SYNC ---
     if not sync_delta_position():
         log_terminal("🛑 SYNC FAILED: Aborting entry to prevent double-trade. Check API/IP!", "ERROR")
         return
 
+    # Verify screen is empty
+    active = db.get_param("crypto_active_symbol", "")
+    if active and active != "NONE":
+        log_terminal(f"🛑 SAFETY BLOCK: Screen not empty ({active}). Cannot enter new trade.", "ERROR")
+        return
+
     # --- SAFETY LOCK: PRE-SAVE STATE ---
-    # We set a placeholder symbol to block any other bot from entering while this one processes
     db.set_param("crypto_active_symbol", "PENDING_ENTRY")
     
     opt = find_gill_crypto_option(asset, direction)
