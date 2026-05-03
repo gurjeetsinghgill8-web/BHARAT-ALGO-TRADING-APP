@@ -157,6 +157,14 @@ with tab2:
     st.markdown("### 🔬 Strategy Tuning")
     st.write("Adjust parameters in real-time. No coding required.")
     
+    # EMERGENCY RESET BUTTON
+    if st.button("🚨 RESET BOT MEMORY (Emergency Only)"):
+        db.set_param("crypto_active_symbol", "")
+        db.set_param("crypto_active_product_id", "")
+        db.set_param("crypto_active_entry_price", "0")
+        st.warning("⚠️ Bot memory cleared! Bot will now take a fresh entry on next signal.")
+        st.rerun()
+
     col_s1, col_s2 = st.columns(2)
     with col_s1:
         s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"], 
