@@ -86,20 +86,40 @@ if c2.button("🛑 STOP BOT"):
 
 st.divider()
 
-# --- SECRETS MANAGEMENT ---
-st.header("🔐 Safe Vault (Secrets)")
-with st.expander("Edit API Keys & Config"):
+# --- SECRETS & STRATEGY MANAGEMENT ---
+st.header("⚙️ System Config & Strategy")
+with st.expander("Edit Parameters (Lot Size, Expiry, Keys)"):
+    # Strategy Parameters
+    st.subheader("🎯 Strategy Controls")
+    col_a, col_b, col_c = st.columns(3)
+    
+    current_lots = int(db.get_param('crypto_trade_size', '1'))
+    new_lots = col_a.number_input("Lot Size (Qty)", min_value=1, max_value=100, value=current_lots)
+    
+    current_expiry = int(db.get_param('expiry_threshold', '1'))
+    new_expiry = col_b.number_input("Min Expiry Days", min_value=0, max_value=7, value=current_expiry)
+    
+    current_offset = int(db.get_param('strike_offset', '0'))
+    new_offset = col_c.number_input("Strike Offset (0=ATM, 1=OTM1)", min_value=0, max_value=5, value=current_offset)
+
+    st.divider()
+    
+    # API Keys
+    st.subheader("🔑 API & Mode")
     t_mode = st.selectbox("Trade Mode", ["PAPER", "LIVE"], index=0 if db.get_param('trade_mode') == "PAPER" else 1)
     d_url = st.text_input("Delta Base URL", value=db.get_param('delta_base_url', 'https://api.india.delta.exchange'))
     d_key = st.text_input("Delta API Key", value=db.get_param('delta_api_key', ''), type="password")
     d_sec = st.text_input("Delta API Secret", value=db.get_param('delta_api_secret', ''), type="password")
     
-    if st.button("💾 Save Settings"):
+    if st.button("💾 Save All Settings"):
+        db.set_param('crypto_trade_size', str(new_lots))
+        db.set_param('expiry_threshold', str(new_expiry))
+        db.set_param('strike_offset', str(new_offset))
         db.set_param('trade_mode', t_mode)
         db.set_param('delta_base_url', d_url)
         db.set_param('delta_api_key', d_key)
         db.set_param('delta_api_secret', d_sec)
-        st.success("Settings saved to DB!")
+        st.success(f"Successfully updated! Lots: {new_lots}, Expiry: {new_expiry}d, Offset: {new_offset}")
 
 st.divider()
 
