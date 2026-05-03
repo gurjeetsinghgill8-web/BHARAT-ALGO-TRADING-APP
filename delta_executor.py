@@ -183,14 +183,48 @@ def sync_delta_position():
     except Exception as e:
         print(f"[SYNC ERROR] {e}")
 
+def send_daily_summary():
+    from main import send_telegram_msg
+    # Lego Block 5: The Daily Auditor
+    pnl_24h, count = db.get_stats(days=1)
+    pnl_7d, _ = db.get_stats(days=7)
+    
+    # Conversion to Rupees (Standard rate)
+    pnl_rs = pnl_24h * 85 
+    
+    # Capital calculation (Approx budget deployed)
+    # If 1 lot is approx $120, 3 lots is $360. 
+    # For a simple percentage, we can use $1000 as base or dynamic balance.
+    capital = float(db.get_param('estimated_capital', '1000'))
+    pnl_pct = (pnl_24h / capital) * 100 if capital > 0 else 0
+    
+    msg = f"📊 *DAILY AUDIT REPORT (24h)*\n"
+    msg += f"----------------------------\n"
+    msg += f"💰 PnL: ${pnl_24h:.2f} (~₹{pnl_rs:,.0f})\n"
+    msg += f"📈 Return: {pnl_pct:+.2f}%\n"
+    msg += f"🔄 Trades Today: {count}\n"
+    msg += f"📅 7-Day Total: ${pnl_7d:.2f}\n"
+    msg += f"----------------------------"
+    send_telegram_msg(msg)
+
 def square_off_crypto():
     sync_delta_position()
     symbol = db.get_param("crypto_active_symbol", "")
     pid = db.get_param("crypto_active_product_id", "")
+    entry_price = float(db.get_param("crypto_active_entry_price", "0"))
     mode = db.get_param('trade_mode', 'PAPER')
     if not symbol or not pid: return
     
     log_crypto(f"SQUARING OFF: {symbol}")
+    
+    # Fetch Exit Price (Mark Price)
+    exit_price = 0
+    chain = fetch_delta_option_chain("BTC")
+    for o in chain:
+        if o['symbol'] == symbol:
+            exit_price = float(o.get('mark_price', 0))
+            break
+
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
@@ -198,7 +232,17 @@ def square_off_crypto():
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
             requests.post(url, headers=headers, data=payload, timeout=10)
         except: pass
+    
+    # Log Trade & Send Summary
+    if entry_price > 0 and exit_price > 0:
+        # PnL for contracts (Size is usually 1 contract = 0.001 BTC for options)
+        # But for simplification, we use the price diff
+        pnl = (exit_price - entry_price) # Simplification for paper/stat tracking
+        db.log_trade(symbol, "EXIT", entry_price, exit_price, pnl)
+        send_daily_summary()
+
     db.set_param("crypto_active_symbol", "")
+    db.set_param("crypto_active_entry_price", "0")
 
 def get_dynamic_quantity(option_price):
     try:

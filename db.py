@@ -71,4 +71,28 @@ def get_daily_loss():
     conn.close()
     return row[0] if row else 0.0
 
+def log_trade(symbol, direction, entry_price, exit_price, pnl, status="CLOSED"):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute("""INSERT INTO trades (timestamp, symbol, direction, entry_price, exit_price, status, pnl) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?)""", 
+                   (timestamp, symbol, direction, entry_price, exit_price, status, pnl))
+    conn.commit()
+    conn.close()
+
+def get_stats(days=1):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    query = """SELECT SUM(pnl) FROM trades WHERE timestamp >= datetime('now', ?)"""
+    cursor.execute(query, (f'-{days} days',))
+    total_pnl = cursor.fetchone()[0] or 0.0
+    
+    # Also count total trades
+    cursor.execute("SELECT COUNT(*) FROM trades WHERE timestamp >= datetime('now', ?)", (f'-{days} days',))
+    count = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    return total_pnl, count
+
 init_db()
