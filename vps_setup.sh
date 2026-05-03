@@ -1,5 +1,10 @@
 #!/bin/bash
 
+echo "🩺 BHARAT ALGOVERSE: FORCING SYSTEM RECOVERY..."
+# Fix Git Conflict
+git fetch --all
+git reset --hard origin/main
+
 echo "🩺 BHARAT ALGOVERSE: VPS PERMANENT CURE SETUP..."
 echo "------------------------------------------------"
 

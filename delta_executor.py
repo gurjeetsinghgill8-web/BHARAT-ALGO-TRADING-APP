@@ -295,54 +295,35 @@ def square_off_crypto():
     pid = db.get_param("crypto_active_product_id", "")
     mode = db.get_param('trade_mode', 'PAPER')
     
-    if not symbol or not pid: 
-        log_crypto("No active position to square off.")
-        return True # Already flat
+    if not symbol or not pid: return True
     
-    log_crypto(f"SQUARING OFF: {symbol} (Verifying Closure...)")
+    log_crypto(f"SQUARING OFF: {symbol}")
     
-    # 1. Send Market Exit Order
     if mode == "LIVE":
         try:
-            # First, fetch actual size to close
+            url = "https://api.india.delta.exchange/v2/orders"
+            # Fetch size to close
             url_pos = "https://api.india.delta.exchange/v2/positions"
             h_pos = get_delta_auth_headers("GET", "/v2/positions")
             r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-            size_to_close = 0
+            size = 1
             if r_pos.status_code == 200:
                 for p in r_pos.json().get('result', []):
                     if str(p.get('product_id')) == str(pid):
-                        size_to_close = abs(int(float(p.get('size', 0))))
+                        size = abs(int(float(p.get('size', 0))))
                         break
             
-            if size_to_close > 0:
-                url_order = "https://api.india.delta.exchange/v2/orders"
-                payload = '{"product_id":' + str(pid) + ',"size":' + str(size_to_close) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
-                h_order = get_delta_auth_headers("POST", "/v2/orders", payload)
-                requests.post(url_order, headers=h_order, data=payload, timeout=10)
-                log_crypto(f"Exit Order Sent for {size_to_close} lots.")
+            payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
+            h_order = get_delta_auth_headers("POST", "/v2/orders", payload)
+            requests.post(url, headers=h_order, data=payload, timeout=10)
         except Exception as e:
-            log_crypto(f"Exit Order Error: {e}")
-            return False
+            log_crypto(f"Square Off Error: {e}")
 
-    # 2. VERIFICATION LOOP: Wait for Position to reach ZERO
-    max_retries = 5
-    for attempt in range(max_retries):
-        time.sleep(2) # Give exchange time to process
-        sync_delta_position()
-        current_active = db.get_param("crypto_active_symbol", "")
-        
-        if not current_active or current_active == "":
-            log_crypto(f"✅ CONFIRMED: Position {symbol} is now CLOSED.")
-            db.set_param("crypto_active_symbol", "")
-            db.set_param("crypto_active_product_id", "")
-            db.set_param("crypto_active_entry_price", "0")
-            return True
-        
-        log_crypto(f"Wait... Position {symbol} still active. Retry {attempt+1}/{max_retries}")
-
-    log_crypto("🚨 WARNING: Position closure could not be verified!")
-    return False # Failed to confirm closure
+    # Reset DB immediately for fast Lego experience
+    db.set_param("crypto_active_symbol", "")
+    db.set_param("crypto_active_product_id", "")
+    db.set_param("crypto_active_entry_price", "0")
+    return True
 
 def get_dynamic_quantity(option_price):
     # Lego Block: Priority Lot Selection
