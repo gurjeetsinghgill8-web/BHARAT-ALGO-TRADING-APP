@@ -88,18 +88,24 @@ def filter_options_by_expiry(options, days_threshold=3):
             continue
     return valid_options
 
-def find_atm_strike(spot_price, options_list):
+def find_atm_strike(spot_price, options_list, offset=0):
     """
     Lego Block 3: ATM Strike Selection (Strike Picker)
-    Finds the strike price in options_list with the minimum difference from the current spot_price.
-    Returns the full option dictionary.
+    Finds the strike price with min difference from spot, plus an optional offset.
+    offset=0: ATM, offset=1: Next OTM, etc.
     """
     if not options_list: return None
-    return min(options_list, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    # Sort by strike proximity
+    options_list.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    
+    # Return the strike with the requested offset
+    if offset < len(options_list):
+        return options_list[offset]
+    return options_list[0]
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Scanning {direction} options for {asset} (3-Day Rule)...")
+    log_crypto(f"Scanning {direction} options for {asset} (Dynamic Rule)...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
@@ -114,13 +120,12 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Lego Block 2: Next-Day Expiry Rule
-    # Today is May 3, we want May 4 (threshold = 1 day)
-    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=1)
+    # 2. Lego Block 2: Expiry Rule (Dynamic from DB)
+    exp_days = int(db.get_param('expiry_threshold', '1'))
+    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=exp_days)
                 
     if not valid_options:
-        log_crypto(f"WARNING: No options found with Next-Day expiry. Using nearest available.")
-        send_telegram_msg(f"⚠️ ALERT: No {direction} options found with Next-Day expiry. Using nearest.")
+        log_crypto(f"WARNING: No options found with {exp_days}d expiry. Using nearest available.")
         valid_options = all_typed_options 
 
     # 3. Sort by expiry date (ascending) and pick the first (nearest) valid expiry
@@ -142,8 +147,9 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("Could not determine spot price.")
         return None
     
-    # 6. Lego Block 3: ATM Selection (Min difference from Spot)
-    best_opt = find_atm_strike(spot_price, near_options)
+    # 6. Lego Block 3: Strike Selection (Dynamic Offset from DB)
+    offset = int(db.get_param('strike_offset', '0'))
+    best_opt = find_atm_strike(spot_price, near_options, offset=offset)
     
     if not best_opt: return None
 
