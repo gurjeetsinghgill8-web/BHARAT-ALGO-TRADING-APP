@@ -376,13 +376,14 @@ def execute_crypto_trade(asset, direction):
 
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     
-    # --- LEGO BLOCK: VERIFIED EXIT BEFORE ENTRY ---
-    if not square_off_crypto():
-        log_terminal("🛑 CRITICAL: Could not verify exit of old trade. Entry aborted for safety.", "ERROR")
-        return
+    # --- SAFETY LOCK: PRE-SAVE STATE ---
+    # We set a placeholder symbol to block any other bot from entering while this one processes
+    db.set_param("crypto_active_symbol", "PENDING_ENTRY")
     
     opt = find_gill_crypto_option(asset, direction)
-    if not opt: return
+    if not opt: 
+        db.set_param("crypto_active_symbol", "") # Release lock if no option found
+        return
         
     symbol, price, strike, expiry, pid = opt
     qty = get_dynamic_quantity(price)
@@ -395,18 +396,20 @@ def execute_crypto_trade(asset, direction):
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code == 200 or resp.status_code == 201:
-                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
                 db.set_param("crypto_active_symbol", symbol)
                 db.set_param("crypto_active_product_id", str(pid))
                 db.set_param("crypto_active_entry_price", str(price))
+                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
             else:
+                db.set_param("crypto_active_symbol", "") # Release lock on failure
                 log_terminal(f"LIVE ORDER FAILED: {resp.status_code}", "ERROR")
         except Exception as e:
+            db.set_param("crypto_active_symbol", "") # Release lock on exception
             log_terminal(f"API EXCEPTION: {e}", "ERROR")
     else:
         # Paper Trade
-        log_terminal(f"PAPER TRADE: {symbol} @ {price} (Qty: {qty})", "TRADE")
         db.set_param("crypto_active_symbol", symbol)
         db.set_param("crypto_active_product_id", str(pid))
         db.set_param("crypto_active_entry_price", str(price))
+        log_terminal(f"PAPER TRADE: {symbol} @ {price} (Qty: {qty})", "TRADE")
 
