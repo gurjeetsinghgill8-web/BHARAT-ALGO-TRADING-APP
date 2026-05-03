@@ -293,51 +293,56 @@ def square_off_crypto():
     sync_delta_position()
     symbol = db.get_param("crypto_active_symbol", "")
     pid = db.get_param("crypto_active_product_id", "")
-    entry_price = float(db.get_param("crypto_active_entry_price", "0"))
     mode = db.get_param('trade_mode', 'PAPER')
-    if not symbol or not pid: return
     
-    log_crypto(f"SQUARING OFF: {symbol}")
+    if not symbol or not pid: 
+        log_crypto("No active position to square off.")
+        return True # Already flat
     
-    # 1. Fetch Position Size from Delta to close FULL amount
-    size_to_close = 1 # Default
+    log_crypto(f"SQUARING OFF: {symbol} (Verifying Closure...)")
+    
+    # 1. Send Market Exit Order
     if mode == "LIVE":
         try:
-            url = "https://api.india.delta.exchange/v2/positions"
-            headers = get_delta_auth_headers("GET", "/v2/positions")
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                for p in resp.json().get('result', []):
+            # First, fetch actual size to close
+            url_pos = "https://api.india.delta.exchange/v2/positions"
+            h_pos = get_delta_auth_headers("GET", "/v2/positions")
+            r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+            size_to_close = 0
+            if r_pos.status_code == 200:
+                for p in r_pos.json().get('result', []):
                     if str(p.get('product_id')) == str(pid):
                         size_to_close = abs(int(float(p.get('size', 0))))
                         break
-        except: pass
+            
+            if size_to_close > 0:
+                url_order = "https://api.india.delta.exchange/v2/orders"
+                payload = '{"product_id":' + str(pid) + ',"size":' + str(size_to_close) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
+                h_order = get_delta_auth_headers("POST", "/v2/orders", payload)
+                requests.post(url_order, headers=h_order, data=payload, timeout=10)
+                log_crypto(f"Exit Order Sent for {size_to_close} lots.")
+        except Exception as e:
+            log_crypto(f"Exit Order Error: {e}")
+            return False
 
-    # 2. Fetch Exit Price
-    exit_price = 0
-    chain = fetch_delta_option_chain("BTC")
-    for o in chain:
-        if o['symbol'] == symbol:
-            exit_price = float(o.get('mark_price', 0))
-            break
+    # 2. VERIFICATION LOOP: Wait for Position to reach ZERO
+    max_retries = 5
+    for attempt in range(max_retries):
+        time.sleep(2) # Give exchange time to process
+        sync_delta_position()
+        current_active = db.get_param("crypto_active_symbol", "")
+        
+        if not current_active or current_active == "":
+            log_crypto(f"✅ CONFIRMED: Position {symbol} is now CLOSED.")
+            db.set_param("crypto_active_symbol", "")
+            db.set_param("crypto_active_product_id", "")
+            db.set_param("crypto_active_entry_price", "0")
+            return True
+        
+        log_crypto(f"Wait... Position {symbol} still active. Retry {attempt+1}/{max_retries}")
 
-    if mode == "LIVE":
-        try:
-            url = "https://api.india.delta.exchange/v2/orders"
-            # Use size_to_close instead of hardcoded 1
-            payload = '{"product_id":' + str(pid) + ',"size":' + str(size_to_close) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
-            headers = get_delta_auth_headers("POST", "/v2/orders", payload)
-            requests.post(url, headers=headers, data=payload, timeout=10)
-        except: pass
-    
-    # Log Trade
-    if entry_price > 0 and exit_price > 0:
-        pnl = (exit_price - entry_price) * size_to_close * 0.001
-        db.log_trade(symbol, "EXIT", entry_price, exit_price, pnl)
-        send_daily_summary()
-
-    db.set_param("crypto_active_symbol", "")
-    db.set_param("crypto_active_entry_price", "0")
+    log_crypto("🚨 WARNING: Position closure could not be verified!")
+    return False # Failed to confirm closure
 
 def get_dynamic_quantity(option_price):
     # Lego Block: Priority Lot Selection
@@ -371,51 +376,42 @@ def execute_crypto_trade(asset, direction):
     
     api_key = db.get_param('delta_api_key', '')
     if not api_key:
-        send_telegram_msg("❌ CRITICAL: API Key missing in DB! Check dashboard/secrets.")
+        send_telegram_msg("❌ CRITICAL: API Key missing in DB!")
         return
 
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
-    square_off_crypto()
+    
+    # --- LEGO BLOCK: VERIFIED EXIT BEFORE ENTRY ---
+    if not square_off_crypto():
+        log_terminal("🛑 CRITICAL: Could not verify exit of old trade. Entry aborted for safety.", "ERROR")
+        return
     
     opt = find_gill_crypto_option(asset, direction)
-    if not opt:
-        # Debugging message already sent in find_gill_crypto_option
-        return
+    if not opt: return
         
     symbol, price, strike, expiry, pid = opt
-    
-    # DYNAMIC QUANTITY LOGIC
-    if mode == "LIVE":
-        qty = get_dynamic_quantity(price)
-    else:
-        qty = int(db.get_param('crypto_trade_size', '1'))
+    qty = get_dynamic_quantity(price)
     
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
-            # Qty must be integer for contracts
             payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code == 200 or resp.status_code == 201:
-                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} | Expiry: {expiry} (Qty: {qty})", "TRADE")
+                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
                 db.set_param("crypto_active_symbol", symbol)
                 db.set_param("crypto_active_product_id", str(pid))
                 db.set_param("crypto_active_entry_price", str(price))
-            elif resp.status_code == 401:
-                log_terminal("LIVE ORDER FAILED: IP Not Whitelisted! Add VPS IP to Delta API settings.", "ERROR")
-                log_terminal(f"VPS IP: 46.224.133.16 and 2a01:4f8:c012:e9bb::1", "ALERT")
             else:
-                log_terminal(f"LIVE ORDER FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
+                log_terminal(f"LIVE ORDER FAILED: {resp.status_code}", "ERROR")
         except Exception as e:
             log_terminal(f"API EXCEPTION: {e}", "ERROR")
     else:
         # Paper Trade
-        log_terminal(f"PAPER TRADE PLACED: {symbol} @ {price} | Expiry: {expiry} (Qty: {qty})", "TRADE")
+        log_terminal(f"PAPER TRADE: {symbol} @ {price} (Qty: {qty})", "TRADE")
         db.set_param("crypto_active_symbol", symbol)
         db.set_param("crypto_active_product_id", str(pid))
         db.set_param("crypto_active_entry_price", str(price))
-    
-    log_crypto(f"Execution Step Finished for {symbol}")
 

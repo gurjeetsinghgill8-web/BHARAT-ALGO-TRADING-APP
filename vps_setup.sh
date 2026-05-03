@@ -1,9 +1,5 @@
 #!/bin/bash
 
-echo "🩺 BHARAT ALGOVERSE: VPS EMERGENCY PROTECTION..."
-# Run Emergency Close First
-python3 emergency_close.py || echo "⚠️ Emergency close failed, continuing setup..."
-
 echo "🩺 BHARAT ALGOVERSE: VPS PERMANENT CURE SETUP..."
 echo "------------------------------------------------"
 
