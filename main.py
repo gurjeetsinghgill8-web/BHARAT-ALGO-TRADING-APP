@@ -158,57 +158,75 @@ def run_crypto_sar():
         log_terminal(f"SAR Engine Error: {e}", "ERROR")
 
 def main():
+    # --- LEGO BLOCK: SINGLETON PROCESS LOCK ---
+    # Prevents multiple bots from running and double-trading
+    lock_file = "bot.lock"
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, "r") as f:
+                old_pid = int(f.read().strip())
+            # Check if process is actually running
+            os.kill(old_pid, 0) 
+            print(f"🚨 ALERT: Bot already running (PID: {old_pid}). Exiting.")
+            sys.exit(1)
+        except (OSError, ValueError, ProcessLookupError):
+            # Process is dead, safe to remove lock
+            try: os.remove(lock_file)
+            except: pass
+            
+    with open(lock_file, "w") as f:
+        f.write(str(os.getpid()))
+
     print("="*60)
     print("      🚀 BHARAT ALGOVERSE v2.0 - VPS COMMAND CENTER 🚀      ")
     print("="*60)
     
-    if not db.load_secrets():
-        print("CRITICAL: secrets.txt missing. Check GitHub report.")
-        sys.exit(1)
-        
-    log_terminal("VPS System Started & Monitoring BTC....", "START")
-    print("-" * 60)
+    try:
+        if not db.load_secrets():
+            print("CRITICAL: secrets.txt missing.")
+            sys.exit(1)
+            
+        log_terminal("VPS System Started & Monitoring BTC....", "START")
+        print("-" * 60)
 
-    delta_executor.sync_delta_position()
-    db.set_param('crypto_algo_running', 'ON')
-    db.set_param('crypto_asset', 'BTC')
-    
-    last_heartbeat = time.time()
-    last_status_msg = time.time()
-    
-    while True:
-        try:
-            # MASTER INTEGRATION LOOP
-            # 1. Handle Nifty/Rollover logic if any
-            executor.check_and_roll_nifty()
-            
-            # 2. Run Crypto SAR Engine (Blocks 1, 2, 3 integrated here)
-            run_crypto_sar()
-            
-            # 3. Terminal Heartbeat (Lego Block 4)
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] VPS System Active. Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
-            
-            # 4. Telegram Status Report (Every 30 mins)
-            if time.time() - last_status_msg > 1800:
-                active = db.get_param('crypto_active_symbol', 'NONE')
-                msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
-                send_telegram_msg(msg)
-                last_status_msg = time.time()
-            
-            # 5. Weekly Summary (Every Sunday at 20:00)
-            now = datetime.datetime.now()
-            if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
-                # To prevent multiple sends in the same minute
-                if not hasattr(main, "last_weekly_report") or (now - main.last_weekly_report).days >= 1:
-                    delta_executor.send_weekly_summary()
-                    main.last_weekly_report = now
+        delta_executor.sync_delta_position()
+        db.set_param('crypto_algo_running', 'ON')
+        db.set_param('crypto_asset', 'BTC')
+        
+        last_status_msg = time.time()
+        
+        while True:
+            try:
+                # Run Crypto SAR Engine
+                run_crypto_sar()
                 
-            # 60-second cycle as requested for Lego Block 4
-            time.sleep(60) 
-        except KeyboardInterrupt: break
-        except Exception as e:
-            log_terminal(f"Master Error: {e}", "ERROR")
-            time.sleep(10)
+                # Terminal Heartbeat
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
+                
+                # Telegram Status (Every 30 mins)
+                if time.time() - last_status_msg > 1800:
+                    active = db.get_param('crypto_active_symbol', 'NONE')
+                    msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
+                    send_telegram_msg(msg)
+                    last_status_msg = time.time()
+                
+                # Weekly Summary (Every Sunday at 20:00)
+                now = datetime.datetime.now()
+                if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
+                    if not hasattr(main, "last_weekly_report") or (now - main.last_weekly_report).days >= 1:
+                        delta_executor.send_weekly_summary()
+                        main.last_weekly_report = now
+                        
+                time.sleep(60) 
+            except KeyboardInterrupt: break
+            except Exception as e:
+                log_terminal(f"Main Loop Error: {e}", "ERROR")
+                time.sleep(10)
+    finally:
+        # Clean up lock file on exit
+        if os.path.exists(lock_file):
+            try: os.remove(lock_file)
+            except: pass
 
 if __name__ == "__main__":
     main()
