@@ -9,10 +9,8 @@ echo "🩺 BHARAT ALGOVERSE: VPS PERMANENT CURE SETUP..."
 echo "------------------------------------------------"
 
 # 1. Setup Systemd Service for the Dashboard
-DASH_CMD="streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
-if [ -f "$(pwd)/venv/bin/streamlit" ]; then
-    DASH_CMD="$(pwd)/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
-fi
+ST_PATH=$(which streamlit || echo "/usr/local/bin/streamlit")
+DASH_CMD="$ST_PATH run app.py --server.port 8501 --server.address 0.0.0.0"
 
 echo "[Unit]
 Description=Bharat AlgoVerse Dashboard
@@ -28,10 +26,8 @@ Restart=always
 WantedBy=multi-user.target" | sudo tee /etc/systemd/system/bharat_dashboard.service
 
 # 2. Setup Systemd Service for the Trading Engine
-ENGINE_CMD="python3 main.py"
-if [ -f "$(pwd)/venv/bin/python3" ]; then
-    ENGINE_CMD="$(pwd)/venv/bin/python3 main.py"
-fi
+PY_PATH=$(which python3 || echo "/usr/bin/python3")
+ENGINE_CMD="$PY_PATH main.py"
 
 echo "[Unit]
 Description=Bharat AlgoVerse Trading Engine
