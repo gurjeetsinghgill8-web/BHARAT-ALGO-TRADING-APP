@@ -149,10 +149,13 @@ def run_crypto_sar():
         
         has_bullish = active_symbol.startswith("C-") or "-C-" in active_symbol or "CALL" in active_symbol.upper()
         has_bearish = active_symbol.startswith("P-") or "-P-" in active_symbol or "PUT" in active_symbol.upper()
-        has_nothing = not active_symbol or active_symbol == "NONE" or active_symbol == "API_ERROR_LOCK"
+        has_nothing = not active_symbol or active_symbol == "NONE"
+        is_locked = active_symbol == "API_ERROR_LOCK"
 
         # SAR CORE LOGIC:
-        if has_nothing:
+        if is_locked:
+            log_terminal("SYSTEM LOCKED: Waiting for API sync to recover.", "ALERT")
+        elif has_nothing:
             if signal != "WAIT":
                 log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
                 delta_executor.execute_crypto_trade(asset, "BUY" if signal == "BUY" else "SELL")

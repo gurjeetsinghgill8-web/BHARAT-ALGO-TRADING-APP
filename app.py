@@ -169,7 +169,7 @@ with tab2:
     with col_s1:
         s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"], 
                             index=1 if db.get_param('trade_mode') == "LIVE" else 0)
-        s_lots = st.slider("Lot Size (Contracts)", 1, 50, int(db.get_param('crypto_trade_size', '3')))
+        s_lots = st.slider("Lot Size (Contracts)", 1, 50, int(db.get_param('crypto_trade_size', '4')))
         s_expiry = st.slider("Min Expiry Days", 0, 7, int(db.get_param('expiry_threshold', '1')))
     with col_s2:
         s_period = st.number_input("Supertrend Period", 5, 20, int(float(db.get_param('st_period', '10'))))
