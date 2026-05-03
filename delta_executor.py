@@ -77,11 +77,13 @@ def fetch_delta_candles(symbol, resolution, limit=100):
 def log_crypto(msg):
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [CRYPTO] {msg}")
 
-def get_delta_auth_headers(method, endpoint, payload=""):
+def get_delta_auth_headers(method, path, payload="", query_string=""):
     api_key = db.get_param('delta_api_key', '')
     api_secret = db.get_param('delta_api_secret', '')
     timestamp = str(int(time.time()))
-    signature_data = method + timestamp + endpoint + payload
+    
+    # Signature: method + timestamp + path + query_string + body
+    signature_data = method + timestamp + path + query_string + payload
     signature = hmac.new(api_secret.encode('utf-8'), signature_data.encode('utf-8'), hashlib.sha256).hexdigest()
     return {
         'api-key': api_key,
@@ -254,9 +256,14 @@ def sync_delta_position():
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    url = "https://api.india.delta.exchange/v2/positions"
+    # Use /v2/positions/margined which is more stable on India servers
+    # Adding underlying_asset_symbol to avoid bad_schema errors
+    path = "/v2/positions/margined"
+    query = "?underlying_asset_symbol=BTC"
+    url = f"https://api.india.delta.exchange{path}{query}"
+    
     try:
-        headers = get_delta_auth_headers("GET", "/v2/positions")
+        headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(url, headers=headers, timeout=10)
         
         if resp.status_code == 200:
@@ -278,7 +285,7 @@ def sync_delta_position():
             return True # Successfully verified position state
         else:
             from main import log_terminal
-            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Response: {resp.text[:100]}", "ERROR")
+            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Msg: {resp.json().get('error', {}).get('message', 'Schema Error')}", "ERROR")
             db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
             return False 
     except Exception as e:
@@ -348,7 +355,7 @@ def square_off_crypto():
                         break
             
             payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
-            h_order = get_delta_auth_headers("POST", "/v2/orders", payload)
+            h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             requests.post(url, headers=h_order, data=payload, timeout=10)
         except Exception as e:
             log_crypto(f"Square Off Error: {e}")
@@ -427,7 +434,7 @@ def execute_crypto_trade(asset, direction):
         try:
             url = "https://api.india.delta.exchange/v2/orders"
             payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
-            headers = get_delta_auth_headers("POST", "/v2/orders", payload)
+            headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code == 200 or resp.status_code == 201:
