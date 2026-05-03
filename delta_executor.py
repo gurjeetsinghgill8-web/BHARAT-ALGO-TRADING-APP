@@ -198,8 +198,15 @@ def get_dynamic_quantity(option_price):
             total_usdt = sum(float(b.get('balance', 0)) for b in balances if b.get('asset_symbol') in ['USDT', 'DETO'])
             
             if total_usdt > 0:
-                # Use 20% of account balance (approx ₹200 for ₹1000 capital)
+                # Use 20% of account balance
                 trade_budget = total_usdt * 0.20
+                
+                # Lego Block: Minimum Deployment Rule
+                # Minimum 200 Rupees is approx $2.40 USDT
+                min_budget_usdt = 2.40 
+                if trade_budget < min_budget_usdt and total_usdt >= min_budget_usdt:
+                    trade_budget = min_budget_usdt
+                    log_crypto(f"Budget adjusted to minimum: ${trade_budget:.2f} (approx ₹200)")
                 
                 # On Delta, BTC options contract size is usually 0.001 BTC. 
                 qty = int(trade_budget / (option_price * 0.001))
