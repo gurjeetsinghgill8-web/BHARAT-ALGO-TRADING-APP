@@ -11,6 +11,14 @@ from datetime import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="BHARAT ALGOVERSE v2.0", page_icon="🚀", layout="wide")
 
+# --- PWA INJECTION ---
+st.markdown("""
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1e1b4b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+""", unsafe_allow_html=True)
+
 # --- PREMIUM CSS (Glassmorphism & Gradients) ---
 st.markdown("""
     <style>
