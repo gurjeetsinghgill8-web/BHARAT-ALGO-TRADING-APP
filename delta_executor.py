@@ -186,24 +186,37 @@ def sync_delta_position():
 def send_daily_summary():
     from main import send_telegram_msg
     # Lego Block 5: The Daily Auditor
-    pnl_24h, count = db.get_stats(days=1)
-    pnl_7d, _ = db.get_stats(days=7)
+    pnl_24h, count, win_rate, avg_pnl = db.get_stats(days=1)
     
     # Conversion to Rupees (Standard rate)
     pnl_rs = pnl_24h * 85 
     
-    # Capital calculation (Approx budget deployed)
-    # If 1 lot is approx $120, 3 lots is $360. 
-    # For a simple percentage, we can use $1000 as base or dynamic balance.
-    capital = float(db.get_param('estimated_capital', '1000'))
+    # Capital calculation
+    capital = float(db.get_param('estimated_capital', '240'))
     pnl_pct = (pnl_24h / capital) * 100 if capital > 0 else 0
     
     msg = f"📊 *DAILY AUDIT REPORT (24h)*\n"
     msg += f"----------------------------\n"
     msg += f"💰 PnL: ${pnl_24h:.2f} (~₹{pnl_rs:,.0f})\n"
     msg += f"📈 Return: {pnl_pct:+.2f}%\n"
-    msg += f"🔄 Trades Today: {count}\n"
-    msg += f"📅 7-Day Total: ${pnl_7d:.2f}\n"
+    msg += f"🎯 Win Rate: {win_rate:.1f}%\n"
+    msg += f"🔄 Trades: {count}\n"
+    msg += f"----------------------------"
+    send_telegram_msg(msg)
+
+def send_weekly_summary():
+    from main import send_telegram_msg
+    # Lego Block 6: Weekly Performance Summary
+    pnl_7d, count, win_rate, avg_pnl = db.get_stats(days=7)
+    pnl_rs = pnl_7d * 85
+    
+    msg = f"🏆 *WEEKLY PERFORMANCE SUMMARY*\n"
+    msg += f"----------------------------\n"
+    msg += f"💰 Net Profit: ${pnl_7d:.2f} (~₹{pnl_rs:,.0f})\n"
+    msg += f"🎯 Accuracy: {win_rate:.1f}%\n"
+    msg += f"📊 Total Trades: {count}\n"
+    msg += f"💵 Avg/Trade: ${avg_pnl:.2f}\n"
+    msg += f"🏁 System Health: {'EXCELLENT' if win_rate > 60 else 'STABLE'}\n"
     msg += f"----------------------------"
     send_telegram_msg(msg)
 

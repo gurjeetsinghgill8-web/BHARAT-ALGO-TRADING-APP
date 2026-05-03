@@ -194,6 +194,14 @@ def main():
                 msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
                 send_telegram_msg(msg)
                 last_status_msg = time.time()
+            
+            # 5. Weekly Summary (Every Sunday at 20:00)
+            now = datetime.datetime.now()
+            if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
+                # To prevent multiple sends in the same minute
+                if not hasattr(main, "last_weekly_report") or (now - main.last_weekly_report).days >= 1:
+                    delta_executor.send_weekly_summary()
+                    main.last_weekly_report = now
                 
             # 60-second cycle as requested for Lego Block 4
             time.sleep(60) 
