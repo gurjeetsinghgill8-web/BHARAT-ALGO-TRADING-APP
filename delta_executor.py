@@ -233,7 +233,7 @@ def find_gill_crypto_option(asset, direction):
 def sync_delta_position():
     """Syncs local DB with actual Delta Exchange positions. SAFETY FIRST."""
     api_key = db.get_param('delta_api_key', '')
-    if not api_key: return
+    if not api_key: return False
     
     url = "https://api.india.delta.exchange/v2/positions"
     try:
@@ -254,17 +254,20 @@ def sync_delta_position():
                     break
             
             if not found:
-                # ONLY CLEAR DB IF API CONFIRMS ZERO POSITIONS
                 db.set_param("crypto_active_symbol", "")
                 db.set_param("crypto_active_product_id", "")
-        elif resp.status_code == 401:
-            from main import log_terminal
-            log_terminal("🛑 API ERROR: 401 Unauthorized. Bot is BLOCKED from seeing positions. Please Whitelist IP 46.224.133.16 on Delta!", "ERROR")
-            # CRITICAL: DO NOT clear the DB. Assume position still exists.
+            return True # Successfully verified position state
         else:
-            print(f"[SYNC ERROR] Status {resp.status_code}")
+            from main import log_terminal
+            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Blocking all entries for safety!", "ERROR")
+            # CRITICAL: If we can't talk to the exchange, we DON'T clear the DB.
+            # We also set a special 'LOCK' state.
+            db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
+            return False 
     except Exception as e:
         print(f"[SYNC EXCEPTION] {e}")
+        db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
+        return False
 
 def send_daily_summary():
     from main import send_telegram_msg
@@ -376,6 +379,11 @@ def execute_crypto_trade(asset, direction):
 
     log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     
+    # --- FAIL-SAFE SYNC ---
+    if not sync_delta_position():
+        log_terminal("🛑 SYNC FAILED: Aborting entry to prevent double-trade. Check API/IP!", "ERROR")
+        return
+
     # --- SAFETY LOCK: PRE-SAVE STATE ---
     # We set a placeholder symbol to block any other bot from entering while this one processes
     db.set_param("crypto_active_symbol", "PENDING_ENTRY")
