@@ -114,12 +114,13 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Lego Block 2: 3-Day Expiry Rule
-    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=3)
+    # 2. Lego Block 2: Next-Day Expiry Rule
+    # Today is May 3, we want May 4 (threshold = 1 day)
+    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=1)
                 
     if not valid_options:
-        log_crypto(f"WARNING: No options found with >= 3 days expiry. Using nearest available as safety fallback.")
-        send_telegram_msg(f"⚠️ ALERT: No {direction} options found with >= 3 days expiry. Using nearest available.")
+        log_crypto(f"WARNING: No options found with Next-Day expiry. Using nearest available.")
+        send_telegram_msg(f"⚠️ ALERT: No {direction} options found with Next-Day expiry. Using nearest.")
         valid_options = all_typed_options 
 
     # 3. Sort by expiry date (ascending) and pick the first (nearest) valid expiry
