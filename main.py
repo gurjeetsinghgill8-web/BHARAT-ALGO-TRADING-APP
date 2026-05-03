@@ -120,12 +120,13 @@ def run_crypto_sar():
             return
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
-        dir_col = f"SUPERTd_{st_period}_{st_multiplier}"
-        last_st = df[dir_col].iloc[-1]
-        price = df['close'].iloc[-1]
+        
+        # Lego Block 1: Whipsaw Protection (Signal Logic)
+        signal = logic.get_signal(df) # Uses iloc[-2] internally
+        price = df['close'].iloc[-2]
         
         # Periodic Signal Update in Terminal
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Signal: {'BULL' if last_st==1 else 'BEAR'} | Price: {price}")
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Closed Candle Signal: {signal} | Price: {price}")
         
         delta_executor.sync_delta_position()
         active_symbol = db.get_param("crypto_active_symbol", "")
@@ -136,13 +137,13 @@ def run_crypto_sar():
         has_nothing = not active_symbol or active_symbol == "NONE"
 
         # Force Initial Entry Logic
-        if has_nothing:
-            log_terminal(f"INITIAL ENTRY: {asset} is { 'BULL' if last_st==1 else 'BEAR' }. Executing Trade.", "TRADE")
-            delta_executor.execute_crypto_trade(asset, "BUY" if last_st==1 else "SELL")
-        elif last_st == 1 and has_bearish:
+        if has_nothing and signal != "WAIT":
+            log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
+            delta_executor.execute_crypto_trade(asset, signal)
+        elif signal == "BUY" and has_bearish:
             log_terminal(f"SAR FLIP: BUY BTC @ ${price}", "TRADE")
             delta_executor.execute_crypto_trade(asset, "BUY")
-        elif last_st == -1 and has_bullish:
+        elif signal == "SELL" and has_bullish:
             log_terminal(f"SAR FLIP: SELL BTC @ ${price}", "TRADE")
             delta_executor.execute_crypto_trade(asset, "SELL")
 
@@ -177,22 +178,25 @@ def main():
     
     while True:
         try:
+            # MASTER INTEGRATION LOOP
+            # 1. Handle Nifty/Rollover logic if any
             executor.check_and_roll_nifty()
+            
+            # 2. Run Crypto SAR Engine (Blocks 1, 2, 3 integrated here)
             run_crypto_sar()
             
-            # Terminal Heartbeat (Every 1 min)
-            if time.time() - last_heartbeat > 60:
-                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [HEARTBEAT] VPS Active. Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
-                last_heartbeat = time.time()
+            # 3. Terminal Heartbeat (Lego Block 4)
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] VPS System Active. Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
             
-            # Telegram Status Report (Every 30 mins) - "Constant Visibility"
+            # 4. Telegram Status Report (Every 30 mins)
             if time.time() - last_status_msg > 1800:
                 active = db.get_param('crypto_active_symbol', 'NONE')
                 msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
                 send_telegram_msg(msg)
                 last_status_msg = time.time()
                 
-            time.sleep(10)
+            # 60-second cycle as requested for Lego Block 4
+            time.sleep(60) 
         except KeyboardInterrupt: break
         except Exception as e:
             log_terminal(f"Master Error: {e}", "ERROR")

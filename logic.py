@@ -81,6 +81,7 @@ def calculate_supertrend(df, period=None, multiplier=None):
     dir_col    = f"SUPERTd_{period}_{multiplier}"
     df[col_prefix] = st_values
     df[dir_col]    = st_dir
+    df['sar']      = st_values # Alias for easier access
     return df
 
 # ============================================================
@@ -118,35 +119,28 @@ def calculate_adx(df, period=14):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     adx = dx.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     df[f'ADX_{period}'] = adx
+    df['adx'] = adx # Alias
     return df
 
 # ============================================================
-# ADX FILTER SIGNAL (Supertrend + ADX > 25) - MAX PROFIT
+# LEGO BLOCK 1: Whipsaw Protection (Signal Logic)
 # ============================================================
 def get_signal(df):
-    """Returns BUY, SELL, or WAIT using the ADX Filter logic."""
-    period     = int(float(db.get_param('st_period', 10)))
-    multiplier = float(db.get_param('st_multiplier', 1.5))
-    dir_col    = f"SUPERTd_{period}_{multiplier}"
-
-    if dir_col not in df.columns: return "WAIT"
-
-    try:
-        last_dir = df[dir_col].iloc[-2]
-        prev_dir = df[dir_col].iloc[-3]
+    """
+    Whipsaw Protection: Uses iloc[-2] to look at the last completed candle only.
+    Return 'BUY' if close > sar, and 'SELL' if close < sar.
+    """
+    if 'sar' not in df.columns:
+        return "WAIT"
         
-        # ADX check
-        adx = df['adx'].iloc[-2] if 'adx' in df.columns else 0
-
-        # ADX FILTER: ST flip + ADX > 20 (Temporarily for Live Demo)
-        if prev_dir == -1 and last_dir == 1:
-            if adx >= 20:
-                return "BUY"
-        if prev_dir == 1 and last_dir == -1:
-            if adx >= 20:
-                return "SELL"
-    except:
-        pass
+    # iloc[-2] ensures we look at the closed candle, not the live fluctuating one
+    latest = df.iloc[-2]
+    
+    if latest['close'] > latest['sar']:
+        return "BUY"
+    elif latest['close'] < latest['sar']:
+        return "SELL"
+    
     return "WAIT"
 
-# SUPREME CLOUD SYNC: 2026-04-30
+# SUPREME CLOUD SYNC: 2026-05-03

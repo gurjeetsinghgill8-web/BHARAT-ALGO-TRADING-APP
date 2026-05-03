@@ -70,9 +70,36 @@ def fetch_delta_option_chain(asset="BTC"):
             
     return []
 
+def filter_options_by_expiry(options, days_threshold=3):
+    """
+    Lego Block 2: The 3-Day Expiry Rule
+    Filters out options that expire too soon to avoid heavy theta decay.
+    """
+    today = datetime.date.today()
+    min_expiry = today + datetime.timedelta(days=days_threshold)
+    
+    valid_options = []
+    for opt in options:
+        try:
+            expiry_dt = datetime.datetime.strptime(opt['expiry_date'], '%Y-%m-%d').date()
+            if expiry_dt >= min_expiry:
+                valid_options.append(opt)
+        except:
+            continue
+    return valid_options
+
+def find_atm_strike(spot_price, options_list):
+    """
+    Lego Block 3: ATM Strike Selection (Strike Picker)
+    Finds the strike price in options_list with the minimum difference from the current spot_price.
+    Returns the full option dictionary.
+    """
+    if not options_list: return None
+    return min(options_list, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Finding best {direction} option for {asset}...")
+    log_crypto(f"Finding best {direction} option for {asset} (3-Day ATM Rule)...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
@@ -80,18 +107,23 @@ def find_gill_crypto_option(asset, direction):
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
     
-    # Filter for target type and valid mark prices
+    # Filter for target type and liquidity
     options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
-    if not options:
-        log_crypto(f"No liquid {target_type} found.")
-        return None
     
-    # Sort by expiry date (ascending) to get the nearest one
-    options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
-    nearest_expiry = options[0].get('expiry_date')
+    # Lego Block 2: 3-Day Expiry Rule
+    valid_options = filter_options_by_expiry(options, days_threshold=3)
+                
+    if not valid_options:
+        log_crypto(f"No liquid {target_type} found with >= 3 days expiry. Checking nearest available...")
+        valid_options = options # Fallback to nearest if no 3-day option exists
+        if not valid_options: return None
+
+    # Get the nearest expiry date from the valid options
+    valid_options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
+    best_expiry = valid_options[0].get('expiry_date')
     
-    # Filter for only the nearest expiry
-    near_options = [o for o in options if o.get('expiry_date') == nearest_expiry]
+    # Filter for options with that expiry
+    near_options = [o for o in valid_options if o.get('expiry_date') == best_expiry]
     
     # Get Spot Price
     spot_price = 0
@@ -101,12 +133,13 @@ def find_gill_crypto_option(asset, direction):
     
     if spot_price == 0:
         log_crypto("Could not determine spot price.")
-        send_telegram_msg(f"❌ DEBUG: Could not find spot price in Delta ticker for {asset}.")
         return None
     
-    # Find strike closest to spot
-    best_opt = min(near_options, key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    # Lego Block 3: ATM Selection (Min difference from Spot)
+    best_opt = find_atm_strike(spot_price, near_options)
     
+    if not best_opt: return None
+
     return (
         best_opt['symbol'], 
         float(best_opt['mark_price']), 
@@ -154,6 +187,30 @@ def square_off_crypto():
         except: pass
     db.set_param("crypto_active_symbol", "")
 
+def get_dynamic_quantity(option_price):
+    try:
+        url = "https://api.india.delta.exchange/v2/wallet/balances"
+        headers = get_delta_auth_headers("GET", "/v2/wallet/balances")
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            balances = resp.json().get('result', [])
+            # Sum up USDT and DETO (Delta's token) as usable margin
+            total_usdt = sum(float(b.get('balance', 0)) for b in balances if b.get('asset_symbol') in ['USDT', 'DETO'])
+            
+            if total_usdt > 0:
+                # Use 20% of account balance (approx ₹200 for ₹1000 capital)
+                trade_budget = total_usdt * 0.20
+                
+                # On Delta, BTC options contract size is usually 0.001 BTC. 
+                qty = int(trade_budget / (option_price * 0.001))
+                
+                if qty < 1: qty = 1
+                log_crypto(f"Dynamic Qty Calculated: {qty} contracts (Budget: ${trade_budget:.2f})")
+                return qty
+    except Exception as e:
+        log_crypto(f"Qty calculation failed: {e}")
+    return 1 # Fallback to 1 unit
+
 def execute_crypto_trade(asset, direction):
     from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
@@ -170,14 +227,19 @@ def execute_crypto_trade(asset, direction):
     if not opt:
         # Debugging message already sent in find_gill_crypto_option
         return
-
         
     symbol, price, strike, expiry, pid = opt
-    qty = db.get_param('crypto_trade_size', '1')
+    
+    # DYNAMIC QUANTITY LOGIC
+    if mode == "LIVE":
+        qty = get_dynamic_quantity(price)
+    else:
+        qty = int(db.get_param('crypto_trade_size', '1'))
     
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
+            # Qty must be integer for contracts
             payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
@@ -202,3 +264,4 @@ def execute_crypto_trade(asset, direction):
         db.set_param("crypto_active_entry_price", str(price))
     
     log_crypto(f"Execution Step Finished for {symbol}")
+
