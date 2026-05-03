@@ -87,8 +87,7 @@ def get_delta_auth_headers(method, endpoint, payload=""):
         'api-key': api_key,
         'signature': signature,
         'timestamp': timestamp,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Content-Type': 'application/json'
     }
 
 def get_next_friday_expiry():
@@ -255,43 +254,37 @@ def sync_delta_position():
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # Try India first, then Global
-    base_urls = ["https://api.india.delta.exchange", "https://api.delta.exchange"]
-    
-    for base in base_urls:
-        url = f"{base}/v2/positions"
-        try:
-            headers = get_delta_auth_headers("GET", "/v2/positions")
-            resp = requests.get(url, headers=headers, timeout=10)
+    url = "https://api.india.delta.exchange/v2/positions"
+    try:
+        headers = get_delta_auth_headers("GET", "/v2/positions")
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            positions = resp.json().get('result', [])
+            found = False
+            for p in positions:
+                size = float(p.get('size', 0))
+                if size != 0:
+                    symbol = p.get('product', {}).get('symbol', '')
+                    pid = str(p.get('product_id', ''))
+                    db.set_param("crypto_active_symbol", symbol)
+                    db.set_param("crypto_active_product_id", pid)
+                    found = True
+                    break
             
-            if resp.status_code == 200:
-                positions = resp.json().get('result', [])
-                found = False
-                for p in positions:
-                    size = float(p.get('size', 0))
-                    if size != 0:
-                        symbol = p.get('product', {}).get('symbol', '')
-                        pid = str(p.get('product_id', ''))
-                        db.set_param("crypto_active_symbol", symbol)
-                        db.set_param("crypto_active_product_id", pid)
-                        found = True
-                        break
-                
-                if not found:
-                    db.set_param("crypto_active_symbol", "NONE")
-                    db.set_param("crypto_active_product_id", "")
-                return True # Successfully verified position state
-            else:
-                print(f"[DEBUG] Sync failed on {base}: {resp.status_code} - {resp.text[:50]}")
-                continue
-        except Exception as e:
-            print(f"[SYNC EXCEPTION] {base}: {e}")
-            continue
-
-    from main import log_terminal
-    log_terminal("🚨 API SYNC FAILED. Blocking all entries for safety!", "ERROR")
-    db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
-    return False
+            if not found:
+                db.set_param("crypto_active_symbol", "NONE")
+                db.set_param("crypto_active_product_id", "")
+            return True # Successfully verified position state
+        else:
+            from main import log_terminal
+            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Response: {resp.text[:100]}", "ERROR")
+            db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
+            return False 
+    except Exception as e:
+        print(f"[SYNC EXCEPTION] {e}")
+        db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
+        return False
 
 def send_daily_summary():
     from main import send_telegram_msg
