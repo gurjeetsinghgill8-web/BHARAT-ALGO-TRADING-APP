@@ -8,30 +8,49 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="BHARAT ALGOVERSE Dashboard", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="BHARAT ALGOVERSE v2.0", page_icon="🚀", layout="wide")
 
-# Memory Management (Surgical Optimization)
-if st.button("🧹 Flush System Memory"):
-    st.cache_data.clear()
-    st.cache_resource.clear()
-    st.success("Memory Flushed!")
-
-# --- CUSTOM CSS ---
+# --- PREMIUM CSS (Glassmorphism & Gradients) ---
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; color: white; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #2e7d32; color: white; }
-    .stButton>button:hover { background-color: #1b5e20; }
-    .status-card { background-color: #1e1e1e; padding: 20px; border-radius: 10px; border-left: 5px solid #2e7d32; margin-bottom: 10px; }
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap');
+    
+    * { font-family: 'Outfit', sans-serif; }
+    .main { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); color: white; }
+    
+    .metric-card {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 25px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        text-align: center;
+        transition: transform 0.3s ease;
+    }
+    .metric-card:hover { transform: translateY(-5px); border-color: #4ade80; }
+    
+    .status-active { color: #4ade80; text-shadow: 0 0 10px #4ade80; font-weight: 600; }
+    .status-stopped { color: #f87171; text-shadow: 0 0 10px #f87171; font-weight: 600; }
+    
+    .pnl-positive { color: #4ade80; font-size: 2.5rem; font-weight: 700; }
+    .pnl-negative { color: #f87171; font-size: 2.5rem; font-weight: 700; }
+    
+    .stButton>button {
+        background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        color: white; border: none; border-radius: 12px; height: 3.5rem;
+        font-weight: 600; font-size: 1.1rem; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    }
+    .stop-btn>div>button {
+        background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%) !important;
+        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # --- HELPERS ---
 def get_bot_status():
-    # Check if main.py process is running
     try:
-        # On Linux/VPS: pgrep -f main.py
-        # On Windows: tasklist
         if os.name == 'nt':
             cmd = 'tasklist /FI "IMAGENAME eq python.exe" /FO CSV'
             output = subprocess.check_output(cmd, shell=True).decode()
@@ -39,89 +58,99 @@ def get_bot_status():
         else:
             output = subprocess.check_output("pgrep -f main.py || true", shell=True).decode()
             return "RUNNING" if output.strip() else "STOPPED"
-    except:
-        return "UNKNOWN"
+    except: return "UNKNOWN"
 
-def start_bot():
-    if os.name == 'nt':
-        subprocess.Popen(["python", "main.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    else:
-        subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
-    db.set_param('crypto_algo_running', 'ON')
-    st.success("🚀 Engine Fired! Monitoring started.")
-
-def stop_bot():
-    db.set_param('crypto_algo_running', 'OFF')
-    if os.name != 'nt':
-        subprocess.run("pkill -f main.py", shell=True)
-    st.warning("🛑 Engine Halted.")
-
-# --- MAIN UI ---
-st.title("🚀 BHARAT ALGOVERSE v2.0")
-st.subheader("Professional VPS Command Center")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    status = get_bot_status()
-    st.markdown(f'<div class="status-card"><h4>BOT STATUS</h4><h2>{status}</h2></div>', unsafe_allow_html=True)
-
-with col2:
-    active_symbol = db.get_param('crypto_active_symbol', 'NONE')
-    st.markdown(f'<div class="status-card"><h4>ACTIVE SYMBOL</h4><h2>{active_symbol}</h2></div>', unsafe_allow_html=True)
-
-with col3:
-    mode = db.get_param('trade_mode', 'PAPER')
-    st.markdown(f'<div class="status-card"><h4>TRADE MODE</h4><h2>{mode}</h2></div>', unsafe_allow_html=True)
-
-st.divider()
-
-# --- CONTROLS ---
-st.header("🎮 Bot Controls")
-c1, c2 = st.columns(2)
-if c1.button("🔥 START BOT"):
-    start_bot()
-if c2.button("🛑 STOP BOT"):
-    stop_bot()
-
-st.divider()
-
-# --- SECRETS & STRATEGY MANAGEMENT ---
-st.header("⚙️ System Config & Strategy")
-with st.expander("Edit Parameters (Lot Size, Expiry, Keys)"):
-    # Strategy Parameters
-    st.subheader("🎯 Strategy Controls")
-    col_a, col_b, col_c = st.columns(3)
+# --- SIDEBAR (CONFIG) ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2091/2091665.png", width=80)
+    st.title("Settings")
+    t_mode = st.selectbox("Mode", ["PAPER", "LIVE"], index=1 if db.get_param('trade_mode') == "LIVE" else 0)
+    lots = st.number_input("Lot Size", min_value=1, max_value=100, value=int(db.get_param('crypto_trade_size', '3')))
+    expiry = st.number_input("Expiry Days", min_value=0, max_value=7, value=int(db.get_param('expiry_threshold', '1')))
     
-    current_lots = int(db.get_param('crypto_trade_size', '1'))
-    new_lots = col_a.number_input("Lot Size (Qty)", min_value=1, max_value=100, value=current_lots)
-    
-    current_expiry = int(db.get_param('expiry_threshold', '1'))
-    new_expiry = col_b.number_input("Min Expiry Days", min_value=0, max_value=7, value=current_expiry)
-    
-    current_offset = int(db.get_param('strike_offset', '0'))
-    new_offset = col_c.number_input("Strike Offset (0=ATM, 1=OTM1)", min_value=0, max_value=5, value=current_offset)
-
-    st.divider()
-    
-    # API Keys
-    st.subheader("🔑 API & Mode")
-    t_mode = st.selectbox("Trade Mode", ["PAPER", "LIVE"], index=0 if db.get_param('trade_mode') == "PAPER" else 1)
-    d_url = st.text_input("Delta Base URL", value=db.get_param('delta_base_url', 'https://api.india.delta.exchange'))
-    d_key = st.text_input("Delta API Key", value=db.get_param('delta_api_key', ''), type="password")
-    d_sec = st.text_input("Delta API Secret", value=db.get_param('delta_api_secret', ''), type="password")
-    
-    if st.button("💾 Save All Settings"):
-        db.set_param('crypto_trade_size', str(new_lots))
-        db.set_param('expiry_threshold', str(new_expiry))
-        db.set_param('strike_offset', str(new_offset))
+    if st.button("💾 Apply Settings"):
         db.set_param('trade_mode', t_mode)
-        db.set_param('delta_base_url', d_url)
-        db.set_param('delta_api_key', d_key)
-        db.set_param('delta_api_secret', d_sec)
-        st.success(f"Successfully updated! Lots: {new_lots}, Expiry: {new_expiry}d, Offset: {new_offset}")
+        db.set_param('crypto_trade_size', str(lots))
+        db.set_param('expiry_threshold', str(expiry))
+        st.success("Config Synced!")
 
+# --- MAIN DASHBOARD ---
+st.title("🚀 BHARAT ALGOVERSE v2.0")
+
+# 1. LIVE METRICS (Block 1 Core)
+pnl_data, trade_count, win_rate, _ = db.get_stats(days=1)
+status = get_bot_status()
+active = db.get_param('crypto_active_symbol', 'NONE')
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.markdown(f'''<div class="metric-card">
+        <p style="color: #94a3b8; margin:0;">24H PROFIT (USDT)</p>
+        <p class="{'pnl-positive' if pnl_data >=0 else 'pnl-negative'}">${pnl_data:.2f}</p>
+        <p style="color: #94a3b8; font-size:0.9rem;">~ ₹{pnl_data*85:,.0f}</p>
+    </div>''', unsafe_allow_html=True)
+with c2:
+    st.markdown(f'''<div class="metric-card">
+        <p style="color: #94a3b8; margin:0;">BOT STATUS</p>
+        <p class="{'status-active' if status=='RUNNING' else 'status-stopped'}" style="font-size:2rem;">{status}</p>
+        <p style="color: #94a3b8; font-size:0.9rem;">Monitoring BTC</p>
+    </div>''', unsafe_allow_html=True)
+with c3:
+    st.markdown(f'''<div class="metric-card">
+        <p style="color: #94a3b8; margin:0;">WIN RATE</p>
+        <p style="font-size:2.5rem; font-weight:700; color:#60a5fa;">{win_rate:.1f}%</p>
+        <p style="color: #94a3b8; font-size:0.9rem;">{trade_count} Trades Today</p>
+    </div>''', unsafe_allow_html=True)
+
+st.write("")
+
+# 2. INTERACTIVE CHART (Block 1 Core)
+st.subheader("📊 Live Market Intelligence")
+try:
+    import main
+    df_candles, _ = main.fetch_delta_candles("BTC", "1h", limit=50)
+    if not df_candles.empty:
+        fig = go.Figure(data=[go.Candlestick(x=df_candles['time'],
+                open=df_candles['open'], high=df_candles['high'],
+                low=df_candles['low'], close=df_candles['close'])])
+        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0),
+                          xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
+except:
+    st.info("Chart will appear once system starts monitoring.")
+
+# 3. CONTROL CENTER
+st.write("")
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if st.button("🔥 START ENGINE"):
+        if os.name != 'nt':
+            subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
+        db.set_param('crypto_algo_running', 'ON')
+        st.experimental_rerun()
+with col_btn2:
+    st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+    if st.button("🛑 STOP ENGINE"):
+        db.set_param('crypto_algo_running', 'OFF')
+        if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
+        st.experimental_rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# 4. RECENT TRADES
 st.divider()
+st.subheader("📜 Recent Trade Activity")
+conn = sqlite3.connect("trading_app.db") if os.path.exists("trading_app.db") else None
+if conn:
+    df_history = pd.read_sql_query("SELECT timestamp, symbol, direction, pnl FROM trades ORDER BY id DESC LIMIT 5", conn)
+    if not df_history.empty:
+        st.table(df_history)
+    else:
+        st.info("No trades logged yet. Let's make some profit!")
+    conn.close()
+else:
+    st.info("Waiting for first trade data...")
+
+st.caption("Bharat AlgoVerse v2.0 - Developed for Dr. Saab 🩺")
 
 # --- REPORTS ---
 st.header("📊 Performance Reports")
