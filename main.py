@@ -150,7 +150,7 @@ def run_crypto_sar():
         # Periodic Heartbeat for Telegram (Every 30 mins)
         if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0
         if time.time() - run_crypto_sar.last_status > 1800:
-            send_telegram_msg(f"✅ VPS Status Report [{mode}]: {asset} @ ${price} | Signal: {'BULL' if last_st==1 else 'BEAR'} | Position: {active_symbol or 'NONE'}")
+            send_telegram_msg(f"✅ VPS Status Report [{mode}]: {asset} @ ${price} | Signal: {signal} | Position: {active_symbol or 'NONE'}")
             run_crypto_sar.last_status = time.time()
 
         crypto_roller.check_and_roll_crypto()
