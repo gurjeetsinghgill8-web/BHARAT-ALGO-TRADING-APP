@@ -105,11 +105,13 @@ with c3:
 
 st.write("")
 
+import delta_executor
+# ... rest of imports ...
+
 # 2. INTERACTIVE CHART (Block 1 Core)
 st.subheader("📊 Live Market Intelligence")
 try:
-    import main
-    df_candles, _ = main.fetch_delta_candles("BTC", "1h", limit=50)
+    df_candles, _ = delta_executor.fetch_delta_candles("BTC", "1h", limit=50)
     if not df_candles.empty:
         fig = go.Figure(data=[go.Candlestick(x=df_candles['time'],
                 open=df_candles['open'], high=df_candles['high'],
@@ -128,26 +130,29 @@ with col_btn1:
         if os.name != 'nt':
             subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
         db.set_param('crypto_algo_running', 'ON')
-        st.experimental_rerun()
+        st.rerun()
 with col_btn2:
     st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
     if st.button("🛑 STOP ENGINE"):
         db.set_param('crypto_algo_running', 'OFF')
         if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
-        st.experimental_rerun()
+        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # 4. RECENT TRADES
 st.divider()
 st.subheader("📜 Recent Trade Activity")
-conn = sqlite3.connect("trading_app.db") if os.path.exists("trading_app.db") else None
-if conn:
-    df_history = pd.read_sql_query("SELECT timestamp, symbol, direction, pnl FROM trades ORDER BY id DESC LIMIT 5", conn)
-    if not df_history.empty:
-        st.table(df_history)
-    else:
-        st.info("No trades logged yet. Let's make some profit!")
-    conn.close()
+if os.path.exists("trading_app.db"):
+    try:
+        conn = sqlite3.connect("trading_app.db")
+        df_history = pd.read_sql_query("SELECT timestamp, symbol, direction, pnl FROM trades ORDER BY id DESC LIMIT 5", conn)
+        if not df_history.empty:
+            st.table(df_history)
+        else:
+            st.info("No trades logged yet. Let's make some profit!")
+        conn.close()
+    except:
+        st.info("Trade history table is being initialized...")
 else:
     st.info("Waiting for first trade data...")
 

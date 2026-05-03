@@ -114,7 +114,7 @@ def run_crypto_sar():
     st_multiplier = float(db.get_param('st_multiplier', 1.5))
     
     try:
-        df, err_msg = fetch_delta_candles(asset, "5m", limit=100)
+        df, err_msg = delta_executor.fetch_delta_candles(asset, "5m", limit=100)
         if df.empty: 
             log_terminal(f"DATA ERROR: {asset} fetch failed.\nDetails: {err_msg}", "ERROR")
             return

@@ -3,7 +3,76 @@ import hmac
 import hashlib
 import requests
 import datetime
+import socket
 import db
+import pandas as pd
+
+# --- FORCE IPv4 GLOBALLY ---
+import requests.packages.urllib3.util.connection as urllib3_cn
+def allowed_gai_family():
+    return socket.AF_INET
+urllib3_cn.allowed_gai_family = allowed_gai_family
+
+def fetch_delta_candles(symbol, resolution, limit=100):
+    """Fetches OHLC data directly from Delta Exchange (Fixed with Start/End)."""
+    # Try different symbol variations
+    symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT", f"MARK:{symbol}USD"]
+    # Try different resolution formats
+    res_variants = [resolution, resolution.replace('m', ''), str(int(resolution.replace('m', ''))*60) if 'm' in resolution else resolution]
+    
+    # Correct Production Base URLs
+    base_urls = [
+        "https://api.india.delta.exchange",
+        "https://api.delta.exchange"
+    ]
+    
+    # Calculate start/end timestamps (Delta V2 requires these)
+    end_ts = int(time.time())
+    # 5m resolution * 100 candles = 500 minutes ago
+    start_ts = end_ts - (int(limit) * 300) # 300s = 5m
+    if 'h' in resolution: start_ts = end_ts - (int(limit) * 3600)
+
+    last_error = ""
+    for base in base_urls:
+        for sym in symbol_variants:
+            for res in res_variants:
+                try:
+                    url = f"{base}/v2/history/candles"
+                    params = {
+                        "symbol": sym, 
+                        "resolution": res, 
+                        "start": start_ts, 
+                        "end": end_ts
+                    }
+                    resp = requests.get(url, params=params, timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json().get('result', [])
+                        if data:
+                            # Delta V2 returns newest first (Descending). We need Oldest First (Ascending).
+                            df = pd.DataFrame(data)
+                            
+                            # Handle both 'c'/'o'/'h'/'l' and 'close'/'open'/'high'/'low' keys
+                            rename_map = {'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume', 't': 'time'}
+                            df = df.rename(columns=rename_map)
+                            
+                            # Ensure all required columns exist and are numeric
+                            for col in ['open', 'high', 'low', 'close']:
+                                if col in df.columns:
+                                    df[col] = pd.to_numeric(df[col])
+                            
+                            # CRITICAL: Reverse to Ascending Order
+                            if 'time' in df.columns:
+                                df = df.sort_values('time', ascending=True)
+                            else:
+                                df = df.iloc[::-1] # Fallback reverse
+                                
+                            return df.reset_index(drop=True), ""
+                    else:
+                        last_error = f"HTTP {resp.status_code} from {base} ({resp.text[:50]})"
+                except Exception as e: 
+                    last_error = str(e)
+                    continue
+    return pd.DataFrame(), last_error
 
 def log_crypto(msg):
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [CRYPTO] {msg}")
