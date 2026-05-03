@@ -67,19 +67,14 @@ with st.sidebar:
     st.title("Settings")
     t_mode = st.selectbox("Mode", ["PAPER", "LIVE"], index=1 if db.get_param('trade_mode') == "LIVE" else 0)
     lots = st.number_input("Lot Size", min_value=1, max_value=100, value=int(db.get_param('crypto_trade_size', '3')))
-    expiry = st.number_input("Expiry Days", min_value=0, max_value=7, value=int(db.get_param('expiry_threshold', '1')))
-    
-    if st.button("💾 Apply Settings"):
-        db.set_param('trade_mode', t_mode)
-        db.set_param('crypto_trade_size', str(lots))
-        db.set_param('expiry_threshold', str(expiry))
-        st.success("Config Synced!")
+    st.title("System Info")
+    st.info("System is optimized for 24/7 VPS operation. Ensure 'main.py' is running.")
 
 # --- MAIN DASHBOARD ---
 st.title("🚀 BHARAT ALGOVERSE v2.0")
 
 # 1. LIVE METRICS (Block 1 Core)
-pnl_data, trade_count, win_rate, _ = db.get_stats(days=1)
+pnl_data, trade_count, win_rate, avg_pnl = db.get_stats(days=1)
 status = get_bot_status()
 active = db.get_param('crypto_active_symbol', 'NONE')
 
@@ -103,58 +98,79 @@ with c3:
         <p style="color: #94a3b8; font-size:0.9rem;">{trade_count} Trades Today</p>
     </div>''', unsafe_allow_html=True)
 
-st.write("")
-
 import delta_executor
-# ... rest of imports ...
 
-# 2. INTERACTIVE CHART (Block 1 Core)
-st.subheader("📊 Live Market Intelligence")
-try:
-    df_candles, _ = delta_executor.fetch_delta_candles("BTC", "1h", limit=50)
-    if not df_candles.empty:
-        fig = go.Figure(data=[go.Candlestick(x=df_candles['time'],
-                open=df_candles['open'], high=df_candles['high'],
-                low=df_candles['low'], close=df_candles['close'])])
-        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0),
-                          xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-except:
-    st.info("Chart will appear once system starts monitoring.")
-
-# 3. CONTROL CENTER
+# 2. CONTROL & STRATEGY (Block 2: Strategy Lab)
 st.write("")
-col_btn1, col_btn2 = st.columns(2)
-with col_btn1:
-    if st.button("🔥 START ENGINE"):
-        if os.name != 'nt':
-            subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
-        db.set_param('crypto_algo_running', 'ON')
-        st.rerun()
-with col_btn2:
-    st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
-    if st.button("🛑 STOP ENGINE"):
-        db.set_param('crypto_algo_running', 'OFF')
-        if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+tab1, tab2, tab3 = st.tabs(["🎮 Control Center", "🔬 Strategy Lab", "📜 Trade Journal"])
 
-# 4. RECENT TRADES
-st.divider()
-st.subheader("📜 Recent Trade Activity")
-if os.path.exists("trading_app.db"):
+with tab1:
+    # Live Chart
     try:
-        conn = sqlite3.connect("trading_app.db")
-        df_history = pd.read_sql_query("SELECT timestamp, symbol, direction, pnl FROM trades ORDER BY id DESC LIMIT 5", conn)
-        if not df_history.empty:
-            st.table(df_history)
-        else:
-            st.info("No trades logged yet. Let's make some profit!")
-        conn.close()
-    except:
-        st.info("Trade history table is being initialized...")
-else:
-    st.info("Waiting for first trade data...")
+        df_candles, _ = delta_executor.fetch_delta_candles("BTC", "1h", limit=50)
+        if not df_candles.empty:
+            fig = go.Figure(data=[go.Candlestick(x=df_candles['time'],
+                    open=df_candles['open'], high=df_candles['high'],
+                    low=df_candles['low'], close=df_candles['close'])])
+            fig.update_layout(template="plotly_dark", height=350, margin=dict(l=0,r=0,b=0,t=0),
+                            xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+    except: st.info("Loading live chart...")
+
+    # Action Buttons
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🔥 START ENGINE", key="start_main"):
+            if os.name != 'nt':
+                subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
+            db.set_param('crypto_algo_running', 'ON')
+            st.rerun()
+    with col_btn2:
+        st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
+        if st.button("🛑 STOP ENGINE", key="stop_main"):
+            db.set_param('crypto_algo_running', 'OFF')
+            if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+with tab2:
+    st.markdown("### 🔬 Strategy Tuning")
+    st.write("Adjust parameters in real-time. No coding required.")
+    
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"], 
+                            index=1 if db.get_param('trade_mode') == "LIVE" else 0)
+        s_lots = st.slider("Lot Size (Contracts)", 1, 50, int(db.get_param('crypto_trade_size', '3')))
+        s_expiry = st.slider("Min Expiry Days", 0, 7, int(db.get_param('expiry_threshold', '1')))
+    with col_s2:
+        s_period = st.number_input("Supertrend Period", 5, 20, int(float(db.get_param('st_period', '10'))))
+        s_mult = st.number_input("Supertrend Multiplier", 0.5, 5.0, float(db.get_param('st_multiplier', '1.5')), step=0.1)
+        s_offset = st.selectbox("Strike Offset", ["ATM (0)", "OTM +1", "OTM +2"], index=int(db.get_param('strike_offset', '0')))
+
+    if st.button("💾 SAVE & APPLY STRATEGY"):
+        db.set_param('trade_mode', s_mode)
+        db.set_param('crypto_trade_size', str(s_lots))
+        db.set_param('expiry_threshold', str(s_expiry))
+        db.set_param('st_period', str(s_period))
+        db.set_param('st_multiplier', str(s_mult))
+        db.set_param('strike_offset', str(0 if "ATM" in s_offset else (1 if "+1" in s_offset else 2)))
+        st.success("🚀 Strategy updated! Bot will use new settings for next trade.")
+
+with tab3:
+    st.markdown("### 📜 Trade Journal")
+    if os.path.exists("trading_app.db"):
+        try:
+            conn = sqlite3.connect("trading_app.db")
+            df_history = pd.read_sql_query("SELECT timestamp, symbol, direction, entry_price, exit_price, pnl FROM trades ORDER BY id DESC LIMIT 20", conn)
+            if not df_history.empty:
+                # Add some color to direction
+                st.dataframe(df_history.style.map(lambda x: 'color: #4ade80' if x == 'BUY' else ('color: #f87171' if x == 'SELL' else ''), subset=['direction']))
+            else:
+                st.info("Journal is empty. Waiting for trades...")
+            conn.close()
+        except: st.info("Initializing trade table...")
+    else: st.info("Waiting for data...")
 
 st.caption("Bharat AlgoVerse v2.0 - Developed for Dr. Saab 🩺")
 
