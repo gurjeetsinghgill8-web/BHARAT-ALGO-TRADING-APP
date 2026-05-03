@@ -8,9 +8,11 @@ git reset --hard origin/main
 echo "🩺 BHARAT ALGOVERSE: VPS PERMANENT CURE SETUP..."
 echo "------------------------------------------------"
 
+# 0. Open Firewall for Dashboard
+sudo ufw allow 8501/tcp || echo "Firewall skip..."
+
 # 1. Setup Systemd Service for the Dashboard
-ST_PATH=$(which streamlit || echo "/usr/local/bin/streamlit")
-DASH_CMD="$ST_PATH run app.py --server.port 8501 --server.address 0.0.0.0"
+DASH_CMD="python3 -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
 
 echo "[Unit]
 Description=Bharat AlgoVerse Dashboard
@@ -21,9 +23,7 @@ User=$USER
 WorkingDirectory=$(pwd)
 ExecStart=$DASH_CMD
 Restart=always
-
-[Install]
-WantedBy=multi-user.target" | sudo tee /etc/systemd/system/bharat_dashboard.service
+" | sudo tee /etc/systemd/system/bharat_dashboard.service
 
 # 2. Setup Systemd Service for the Trading Engine
 PY_PATH=$(which python3 || echo "/usr/bin/python3")
