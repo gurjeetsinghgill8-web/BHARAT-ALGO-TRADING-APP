@@ -230,7 +230,21 @@ def square_off_crypto():
     
     log_crypto(f"SQUARING OFF: {symbol}")
     
-    # Fetch Exit Price (Mark Price)
+    # 1. Fetch Position Size from Delta to close FULL amount
+    size_to_close = 1 # Default
+    if mode == "LIVE":
+        try:
+            url = "https://api.india.delta.exchange/v2/positions"
+            headers = get_delta_auth_headers("GET", "/v2/positions")
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                for p in resp.json().get('result', []):
+                    if str(p.get('product_id')) == str(pid):
+                        size_to_close = abs(int(float(p.get('size', 0))))
+                        break
+        except: pass
+
+    # 2. Fetch Exit Price
     exit_price = 0
     chain = fetch_delta_option_chain("BTC")
     for o in chain:
@@ -241,16 +255,15 @@ def square_off_crypto():
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
-            payload = '{"product_id":' + str(pid) + ',"size":1,"side":"sell","order_type":"market_order","close_on_trigger":true}'
+            # Use size_to_close instead of hardcoded 1
+            payload = '{"product_id":' + str(pid) + ',"size":' + str(size_to_close) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
             headers = get_delta_auth_headers("POST", "/v2/orders", payload)
             requests.post(url, headers=headers, data=payload, timeout=10)
         except: pass
     
-    # Log Trade & Send Summary
+    # Log Trade
     if entry_price > 0 and exit_price > 0:
-        # PnL for contracts (Size is usually 1 contract = 0.001 BTC for options)
-        # But for simplification, we use the price diff
-        pnl = (exit_price - entry_price) # Simplification for paper/stat tracking
+        pnl = (exit_price - entry_price) * size_to_close * 0.001
         db.log_trade(symbol, "EXIT", entry_price, exit_price, pnl)
         send_daily_summary()
 
@@ -258,35 +271,30 @@ def square_off_crypto():
     db.set_param("crypto_active_entry_price", "0")
 
 def get_dynamic_quantity(option_price):
+    # Lego Block: Priority Lot Selection
+    # If user manually set lot size on dashboard, use it!
+    manual_lots = int(db.get_param('crypto_trade_size', '1'))
+    
     try:
         url = "https://api.india.delta.exchange/v2/wallet/balances"
         headers = get_delta_auth_headers("GET", "/v2/wallet/balances")
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
             balances = resp.json().get('result', [])
-            # Sum up USDT and DETO (Delta's token) as usable margin
             total_usdt = sum(float(b.get('balance', 0)) for b in balances if b.get('asset_symbol') in ['USDT', 'DETO'])
             
-            if total_usdt > 0:
-                # Use 20% of account balance
-                trade_budget = total_usdt * 0.20
-                
-                # Lego Block: Minimum Deployment Rule
-                # Minimum 200 Rupees is approx $2.40 USDT
-                min_budget_usdt = 2.40 
-                if trade_budget < min_budget_usdt and total_usdt >= min_budget_usdt:
-                    trade_budget = min_budget_usdt
-                    log_crypto(f"Budget adjusted to minimum: ${trade_budget:.2f} (approx ₹200)")
-                
-                # On Delta, BTC options contract size is usually 0.001 BTC. 
-                qty = int(trade_budget / (option_price * 0.001))
-                
-                if qty < 1: qty = 1
-                log_crypto(f"Dynamic Qty Calculated: {qty} contracts (Budget: ${trade_budget:.2f})")
-                return qty
-    except Exception as e:
-        log_crypto(f"Qty calculation failed: {e}")
-    return 1 # Fallback to 1 unit
+            # If we have balance, we check if manual_lots is within 20% risk
+            # But Dr. Saab wants STRICT lots, so we prioritize his choice
+            if manual_lots > 1:
+                log_crypto(f"Using Dashboard Lot Size: {manual_lots}")
+                return manual_lots
+            
+            # Fallback to 20% rule if no manual lots set
+            trade_budget = max(total_usdt * 0.20, 2.50) # Min $2.50 (~₹210)
+            qty = int(trade_budget / (option_price * 0.001))
+            return max(qty, 1)
+    except: pass
+    return manual_lots
 
 def execute_crypto_trade(asset, direction):
     from main import log_terminal, send_telegram_msg
