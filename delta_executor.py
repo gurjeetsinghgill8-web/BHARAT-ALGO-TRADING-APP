@@ -99,7 +99,7 @@ def find_atm_strike(spot_price, options_list):
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Finding best {direction} option for {asset} (3-Day ATM Rule)...")
+    log_crypto(f"Scanning {direction} options for {asset} (3-Day Rule)...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
@@ -107,25 +107,31 @@ def find_gill_crypto_option(asset, direction):
     
     target_type = 'call_options' if direction == "BUY" else 'put_options'
     
-    # Filter for target type and liquidity
-    options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
+    # 1. Filter for type and liquidity
+    all_typed_options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
     
-    # Lego Block 2: 3-Day Expiry Rule
-    valid_options = filter_options_by_expiry(options, days_threshold=3)
+    if not all_typed_options:
+        log_crypto(f"No liquid {target_type} found at all.")
+        return None
+
+    # 2. Lego Block 2: 3-Day Expiry Rule
+    valid_options = filter_options_by_expiry(all_typed_options, days_threshold=3)
                 
     if not valid_options:
-        log_crypto(f"No liquid {target_type} found with >= 3 days expiry. Checking nearest available...")
-        valid_options = options # Fallback to nearest if no 3-day option exists
-        if not valid_options: return None
+        log_crypto(f"WARNING: No options found with >= 3 days expiry. Using nearest available as safety fallback.")
+        send_telegram_msg(f"⚠️ ALERT: No {direction} options found with >= 3 days expiry. Using nearest available.")
+        valid_options = all_typed_options 
 
-    # Get the nearest expiry date from the valid options
+    # 3. Sort by expiry date (ascending) and pick the first (nearest) valid expiry
     valid_options.sort(key=lambda x: x.get('expiry_date', '9999-12-31'))
     best_expiry = valid_options[0].get('expiry_date')
     
-    # Filter for options with that expiry
+    log_crypto(f"Selected Expiry: {best_expiry} (Target: {target_type})")
+    
+    # 4. Filter for options with that specific expiry
     near_options = [o for o in valid_options if o.get('expiry_date') == best_expiry]
     
-    # Get Spot Price
+    # 5. Get Spot Price
     spot_price = 0
     for o in near_options:
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
@@ -135,7 +141,7 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("Could not determine spot price.")
         return None
     
-    # Lego Block 3: ATM Selection (Min difference from Spot)
+    # 6. Lego Block 3: ATM Selection (Min difference from Spot)
     best_opt = find_atm_strike(spot_price, near_options)
     
     if not best_opt: return None
@@ -252,7 +258,7 @@ def execute_crypto_trade(asset, direction):
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code == 200 or resp.status_code == 201:
-                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
+                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} | Expiry: {expiry} (Qty: {qty})", "TRADE")
                 db.set_param("crypto_active_symbol", symbol)
                 db.set_param("crypto_active_product_id", str(pid))
                 db.set_param("crypto_active_entry_price", str(price))
@@ -265,7 +271,7 @@ def execute_crypto_trade(asset, direction):
             log_terminal(f"API EXCEPTION: {e}", "ERROR")
     else:
         # Paper Trade
-        log_terminal(f"PAPER TRADE PLACED: {symbol} @ {price} (Qty: {qty})", "TRADE")
+        log_terminal(f"PAPER TRADE PLACED: {symbol} @ {price} | Expiry: {expiry} (Qty: {qty})", "TRADE")
         db.set_param("crypto_active_symbol", symbol)
         db.set_param("crypto_active_product_id", str(pid))
         db.set_param("crypto_active_entry_price", str(price))
