@@ -72,11 +72,13 @@ def get_bot_status():
 # --- API STATUS CHECK ---
 def check_api_connectivity():
     try:
-        url = "https://api.india.delta.exchange/v2/wallet/balances"
-        headers = delta_executor.get_delta_auth_headers("GET", "/v2/wallet/balances")
-        resp = requests.get(url, headers=headers, timeout=5)
-        return "CONNECTED" if resp.status_code == 200 else f"ERROR: {resp.status_code}"
-    except: return "DISCONNECTED"
+        # We use the same sync logic as the bot for consistency
+        import delta_executor
+        if delta_executor.sync_delta_position():
+            return "CONNECTED"
+        return "ERROR: SYNC FAILED"
+    except Exception as e:
+        return f"DISCONNECTED"
 
 # --- SIDEBAR (CONFIG) ---
 with st.sidebar:
