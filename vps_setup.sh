@@ -1,46 +1,47 @@
 #!/bin/bash
-
-echo "🩺 BHARAT ALGOVERSE: FORCING SYSTEM RECOVERY..."
-# Fix Git Conflict
-git fetch --all
-git reset --hard origin/main
-
-echo "🩺 BHARAT ALGOVERSE: VPS PERMANENT CURE SETUP..."
+echo "🩺 BHARAT ALGOVERSE: AUTO-HEAL PROTOCOL STARTING..."
 echo "------------------------------------------------"
 
-# 0. Open Firewall for Dashboard
-sudo ufw allow 8501/tcp || echo "Firewall skip..."
+# 1. Nuclear Clean
+sudo pkill -9 python3
+sudo pkill -9 streamlit
+rm -f /root/BHARAT-ALGO-TRADING-APP/bot.lock
 
-# 1. Setup Systemd Service for the Dashboard
-DASH_CMD="python3 -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
+# 2. Auto-Reset Bot Memory (Doing it myself!)
+/usr/bin/python3 -c "import sqlite3; conn=sqlite3.connect('/root/BHARAT-ALGO-TRADING-APP/trading_app.db'); c=conn.cursor(); c.execute('UPDATE params SET val=\'\' WHERE key=\'crypto_active_symbol\''); conn.commit(); conn.close()" || echo "DB reset skipped"
 
+# 3. Open Firewall
+sudo ufw allow 8501/tcp || echo "Firewall skipped"
+
+# 4. Setup Dashboard Service (Absolute Path)
 echo "[Unit]
 Description=Bharat AlgoVerse Dashboard
 After=network.target
 
 [Service]
-User=$USER
-WorkingDirectory=$(pwd)
-ExecStart=$DASH_CMD
+User=root
+WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
+ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 Restart=always
-" | sudo tee /etc/systemd/system/bharat_dashboard.service
 
-# 2. Setup Systemd Service for the Trading Engine
-PY_PATH=$(which python3 || echo "/usr/bin/python3")
-ENGINE_CMD="$PY_PATH main.py"
+[Install]
+WantedBy=multi-user.target" | sudo tee /etc/systemd/system/bharat_dashboard.service
 
+# 5. Setup Engine Service (Absolute Path)
 echo "[Unit]
 Description=Bharat AlgoVerse Trading Engine
 After=network.target
 
 [Service]
-User=$USER
-WorkingDirectory=$(pwd)
-ExecStart=$ENGINE_CMD
+User=root
+WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
+ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 main.py
 Restart=always
-" | sudo tee /etc/systemd/system/bharat_engine.service
 
-# 3. Enable and Start Services
+[Install]
+WantedBy=multi-user.target" | sudo tee /etc/systemd/system/bharat_engine.service
+
+# 6. Start Everything
 sudo systemctl daemon-reload
 sudo systemctl enable bharat_dashboard
 sudo systemctl enable bharat_engine
@@ -48,6 +49,6 @@ sudo systemctl restart bharat_dashboard
 sudo systemctl restart bharat_engine
 
 echo "------------------------------------------------"
-echo "✅ SUCCESS! Your Private Hospital (VPS) is now AUTO-RUNNING."
-echo "Dashboard: http://$(curl -s ifconfig.me):8501"
+echo "✅ AUTO-HEAL COMPLETE! Your System is now LIVE."
+echo "Dashboard: http://46.224.133.16:8501"
 echo "------------------------------------------------"
