@@ -231,26 +231,40 @@ def find_gill_crypto_option(asset, direction):
     )
 
 def sync_delta_position():
-    mode = db.get_param('trade_mode', 'PAPER')
-    if mode != "LIVE": return
+    """Syncs local DB with actual Delta Exchange positions. SAFETY FIRST."""
+    api_key = db.get_param('delta_api_key', '')
+    if not api_key: return
+    
+    url = "https://api.india.delta.exchange/v2/positions"
     try:
-        url = "https://api.india.delta.exchange/v2/positions"
         headers = get_delta_auth_headers("GET", "/v2/positions")
         resp = requests.get(url, headers=headers, timeout=10)
+        
         if resp.status_code == 200:
             positions = resp.json().get('result', [])
             found = False
             for p in positions:
-                if float(p.get('size', 0)) != 0:
-                    db.set_param("crypto_active_symbol", p.get('product', {}).get('symbol', ''))
-                    db.set_param("crypto_active_product_id", str(p.get('product_id')))
+                size = float(p.get('size', 0))
+                if size != 0:
+                    symbol = p.get('product', {}).get('symbol', '')
+                    pid = str(p.get('product_id', ''))
+                    db.set_param("crypto_active_symbol", symbol)
+                    db.set_param("crypto_active_product_id", pid)
                     found = True
                     break
+            
             if not found:
+                # ONLY CLEAR DB IF API CONFIRMS ZERO POSITIONS
                 db.set_param("crypto_active_symbol", "")
                 db.set_param("crypto_active_product_id", "")
+        elif resp.status_code == 401:
+            from main import log_terminal
+            log_terminal("🛑 API ERROR: 401 Unauthorized. Bot is BLOCKED from seeing positions. Please Whitelist IP 46.224.133.16 on Delta!", "ERROR")
+            # CRITICAL: DO NOT clear the DB. Assume position still exists.
+        else:
+            print(f"[SYNC ERROR] Status {resp.status_code}")
     except Exception as e:
-        print(f"[SYNC ERROR] {e}")
+        print(f"[SYNC EXCEPTION] {e}")
 
 def send_daily_summary():
     from main import send_telegram_msg
