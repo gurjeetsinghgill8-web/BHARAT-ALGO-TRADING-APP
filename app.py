@@ -5,6 +5,7 @@ import os
 import time
 import subprocess
 import plotly.graph_objects as go
+import sqlite3
 from datetime import datetime
 
 # --- PAGE CONFIG ---
