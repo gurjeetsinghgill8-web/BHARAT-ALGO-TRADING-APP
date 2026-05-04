@@ -70,6 +70,10 @@ def run_janitor():
 
     # CASE: ZOMBIE LOCK RECOVERY
     # If bot thinks a trade is active but exchange is empty
+    delta_executor.sync_delta_position() # Re-sync after potential closures
+    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
+    put_active = db.get_param("active_put_symbol", "NONE") != "NONE"
+    
     if db.get_param("local_trade_active", "NO") == "YES" and not call_active and not put_active:
         log_terminal("🚨 ZOMBIE LOCK: Memory was stuck. Releasing lock now.", "ALERT")
         db.set_param("local_trade_active", "NO")
@@ -81,11 +85,12 @@ def run_crypto_sar():
     """
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
     
-    # 1. Check Signal
+    # 1. Sync & Check Signal
     asset = "BTC"
     signal = logic.get_supertrend_signal(asset)
     
     # 2. Check Reality
+    delta_executor.sync_delta_position()
     active_call = db.get_param("active_call_symbol", "NONE")
     active_put = db.get_param("active_put_symbol", "NONE")
     active_any = (active_call != "NONE" or active_put != "NONE")
@@ -93,11 +98,16 @@ def run_crypto_sar():
     # 3. Decision
     if not active_any:
         if signal in ["BUY", "SELL"]:
-            # Clean Slate Entry
+            log_terminal(f"🎯 SIGNAL DETECTED: {signal}. Taking fresh entry.", "TRADE")
             delta_executor.execute_crypto_trade(asset, signal)
     else:
-        # Maintenance
-        crypto_roller.check_and_roll_crypto()
+        # Check if we are in the WRONG trade (should have been handled by janitor, but safety first)
+        if (signal == "BUY" and active_put != "NONE") or (signal == "SELL" and active_call != "NONE"):
+            log_terminal(f"🔄 WRONG TRADE DETECTED ({active_call if active_call != 'NONE' else active_put}). Fixing...", "ALERT")
+            delta_executor.square_off_crypto()
+        else:
+            # We are in the right trade, just maintain
+            pass
 
 def main():
     # --- BULLETPROOF SINGLETON ---
@@ -113,6 +123,12 @@ def main():
     print("="*60)
     
     if not db.load_secrets(): sys.exit(1)
+    
+    # Set default parameters if not exists
+    db.set_param('st_period', '10')
+    db.set_param('st_multiplier', '1.5')
+    db.set_param('crypto_trade_size', '3')
+    
     log_terminal("Stable System 2.0 Started.", "START")
 
     last_pulse = 0
@@ -135,12 +151,22 @@ def main():
                 send_telegram_msg(f"✅ STABLE 2.0 PULSE: {signal} | Active: {active}")
                 last_pulse = time.time()
 
-            time.sleep(15)
+            time.sleep(15) # Standard Loop Time
         except KeyboardInterrupt: break
         except Exception as e:
             print(f"Main Loop Error: {e}")
             traceback.print_exc()
             time.sleep(10)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("="*60)
+        print("🚨 CRITICAL SYSTEM CRASH 🚨")
+        traceback.print_exc()
+        print("="*60)
+        sys.exit(1)
 
 if __name__ == "__main__":
     try:

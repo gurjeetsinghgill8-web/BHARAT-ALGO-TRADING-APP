@@ -123,17 +123,28 @@ def calculate_adx(df, period=14):
     return df
 
 # ============================================================
-# LEGO BLOCK 1: Whipsaw Protection (Signal Logic)
+# LEGO BLOCK 1: Signal Logic (Supertrend 10/1.5)
 # ============================================================
-def get_signal(df):
+def get_supertrend_signal(asset="BTC"):
     """
-    Whipsaw Protection: Uses iloc[-2] to look at the last completed candle only.
-    Return 'BUY' if close > sar, and 'SELL' if close < sar.
+    Fetches candles and calculates Supertrend signal.
+    Uses iloc[-2] to look at the last completed candle only.
+    Settings: 10 Period, 1.5 Multiplier (fetched from DB).
     """
+    from delta_executor import fetch_delta_candles
+    
+    # 1. Fetch Candles
+    df, err = fetch_delta_candles(asset, "5m", limit=100)
+    if df.empty:
+        return "WAIT"
+        
+    # 2. Calculate Supertrend
+    df = calculate_supertrend(df)
+    
     if 'sar' not in df.columns:
         return "WAIT"
         
-    # iloc[-2] ensures we look at the closed candle, not the live fluctuating one
+    # 3. Check Signal on Closed Candle (iloc[-2])
     latest = df.iloc[-2]
     
     if latest['close'] > latest['sar']:

@@ -434,54 +434,50 @@ def square_off_crypto(target_pid=None):
     SQUARES OFF a position. 
     If target_pid is provided, closes only that. 
     Otherwise, syncs and closes everything.
+    Aggressive Retry: If it fails, it will be called again by Janitor in 15s.
     """
     mode = db.get_param('trade_mode', 'PAPER')
+    from main import log_terminal, send_telegram_msg
     
-    # If no PID, we sync first to see what's open
-    if not target_pid:
-        sync_delta_position()
-        pids = []
+    # 1. Sync first to see what's really open
+    sync_delta_position()
+    pids = []
+    
+    if target_pid:
+        pids = [target_pid]
+    else:
         c_pid = db.get_param("active_call_pid", "")
         p_pid = db.get_param("active_put_pid", "")
-        if c_pid: pids.append(c_pid)
-        if p_pid: pids.append(p_pid)
-        
-        # NUCLEAR FALLBACK: If sync was blind but something is actually open
-        if not pids:
-            try:
-                # CRITICAL: Use the same filter that worked in CAPACITY FULL
-                path_pos = "/v2/positions"
-                query_pos = "?underlying_asset_symbol=BTC"
-                url_pos = f"https://api.india.delta.exchange{path_pos}{query_pos}"
-                h_pos = get_delta_auth_headers("GET", path_pos, query_string=query_pos)
-                r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-                
-                if r_pos.status_code == 200:
-                    raw_data = r_pos.json().get('result', [])
-                    raw_pids = [str(p.get('product_id')) for p in raw_data if abs(float(p.get('size', 0))) > 0]
-                    if raw_pids:
-                        log_terminal(f"☢️ NUCLEAR SWEEP: Found {len(raw_pids)} hidden positions. Cleaning screen...", "ALERT")
-                        pids = raw_pids
-                    else:
-                        print(f"[DEBUG] Nuclear Sweep confirmed ZERO positions. Releasing Zombie Lock.")
-                        db.set_param("local_trade_active", "NO")
-                        db.set_param("crypto_active_symbol", "NONE")
-                        db.set_param("active_call_symbol", "NONE")
-                        db.set_param("active_put_symbol", "NONE")
-                else:
-                    print(f"[DEBUG] Nuclear Sweep positions fetch FAILED: {r_pos.status_code} - {r_pos.text}")
-            except Exception as e:
-                print(f"[DEBUG] Nuclear Sweep Exception: {e}")
-    else:
-        pids = [target_pid]
-
-    if not pids: return True
+        if c_pid and c_pid != "NONE": pids.append(c_pid)
+        if p_pid and p_pid != "NONE": pids.append(p_pid)
     
+    # NUCLEAR FALLBACK: If sync says none but we might have zombies
+    if not pids:
+        try:
+            path_pos = "/v2/positions"
+            query_pos = "?underlying_asset_symbol=BTC"
+            url_pos = f"https://api.india.delta.exchange{path_pos}{query_pos}"
+            h_pos = get_delta_auth_headers("GET", path_pos, query_string=query_pos)
+            r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+            if r_pos.status_code == 200:
+                raw_data = r_pos.json().get('result', [])
+                pids = [str(p.get('product_id')) for p in raw_data if abs(float(p.get('size', 0))) > 0]
+        except: pass
+
+    if not pids:
+        # Screen is truly clean
+        db.set_param("local_trade_active", "NO")
+        db.set_param("crypto_active_symbol", "NONE")
+        db.set_param("active_call_symbol", "NONE")
+        db.set_param("active_put_symbol", "NONE")
+        return True
+    
+    success = True
     for pid in pids:
-        log_crypto(f"RETRYING SQUARE OFF for PID: {pid}")
+        log_crypto(f"Attempting Square Off for PID: {pid}")
         if mode == "LIVE":
             try:
-                # 1. Get current size from /v2/positions
+                # Get current size
                 url_pos = "https://api.india.delta.exchange/v2/positions"
                 h_pos = get_delta_auth_headers("GET", "/v2/positions")
                 r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
@@ -490,44 +486,38 @@ def square_off_crypto(target_pid=None):
                 if r_pos.status_code == 200:
                     for p in r_pos.json().get('result', []):
                         if str(p.get('product_id')) == str(pid):
-                            size = abs(int(float(p.get('size', 0))))
+                            size = abs(float(p.get('size', 0)))
                             break
                 
-                if size == 0: continue # Already closed
+                if size == 0: continue 
 
-                # 2. Send Market Close Order
+                # Send Market Close Order
                 url = "https://api.india.delta.exchange/v2/orders"
-                side = "sell" # Default for our LONG positions
-                
-                # Payload without optional close_on_trigger for maximum compatibility
                 payload_dict = {
                     "product_id": int(pid),
-                    "size": int(size),
-                    "side": side,
+                    "size": float(size),
+                    "side": "sell", # Standard for our LONG only strategy
                     "order_type": "market_order",
                     "reduce_only": True
                 }
                 import json
                 payload = json.dumps(payload_dict)
-                
                 h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
                 resp = requests.post(url, headers=h_order, data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_terminal(f"✅ Square Off Order SENT: {pid} (Size: {size})", "TRADE")
-                    # Clear local lock
-                    db.set_param("local_trade_active", "NO")
-                    db.set_param("order_pending", "NO")
+                    log_terminal(f"✅ Square Off SENT: {pid}", "TRADE")
                 else:
-                    err_msg = f"❌ Square Off FAILED: {resp.status_code} - {resp.text}"
-                    log_terminal(err_msg, "ERROR")
-                    # Special log for Nuclear failures
-                    print(f"[DEBUG] Full Square Off Error Payload: {payload}")
+                    success = False
+                    err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
+                    log_terminal(f"❌ Square Off FAILED for {pid}: {err_msg}", "ERROR")
+                    send_telegram_msg(f"⚠️ FAILED TO CLOSE TRADE {pid}: {err_msg}. Will retry in 15s. Please check manually if persistent.")
             except Exception as e:
+                success = False
                 log_crypto(f"⚠️ Square Off EXCEPTION: {e}")
+                send_telegram_msg(f"⚠️ EXCEPTION CLOSING TRADE: {e}")
 
-    # Don't reset DB immediately; let sync_delta_position do it on next cycle
-    return True
+    return success
 
 def place_delta_bracket_orders(pid, qty, entry_price):
     """
@@ -574,28 +564,8 @@ def place_delta_bracket_orders(pid, qty, entry_price):
 
 def get_dynamic_quantity(option_price):
     # Lego Block: Priority Lot Selection
-    # If user manually set lot size on dashboard, use it!
-    manual_lots = int(db.get_param('crypto_trade_size', '4'))
-    
-    try:
-        url = "https://api.india.delta.exchange/v2/wallet/balances"
-        headers = get_delta_auth_headers("GET", "/v2/wallet/balances")
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            balances = resp.json().get('result', [])
-            total_usdt = sum(float(b.get('balance', 0)) for b in balances if b.get('asset_symbol') in ['USDT', 'DETO'])
-            
-            # If we have balance, we check if manual_lots is within 20% risk
-            # But Dr. Saab wants STRICT lots, so we prioritize his choice
-            if manual_lots > 1:
-                log_crypto(f"Using Dashboard Lot Size: {manual_lots}")
-                return manual_lots
-            
-            # Fallback to 20% rule if no manual lots set
-            trade_budget = max(total_usdt * 0.20, 2.50) # Min $2.50 (~₹210)
-            qty = int(trade_budget / (option_price * 0.001))
-            return max(qty, 1)
-    except: pass
+    # Dr. Saab wants STRICTLY 3 lots per trade
+    manual_lots = int(db.get_param('crypto_trade_size', '3'))
     return manual_lots
 
 def execute_crypto_trade(asset, direction):

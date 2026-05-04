@@ -1,3 +1,5 @@
+
+
 # BHARAT ALGO-TRADING SYSTEM LOGIC (Dr. Saab Edition)
 
 ## 1. Core Signal Strategy
