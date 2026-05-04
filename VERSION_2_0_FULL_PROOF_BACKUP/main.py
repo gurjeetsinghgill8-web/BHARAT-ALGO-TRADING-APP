@@ -10,6 +10,7 @@ import crypto_roller
 import os
 import sys
 import socket
+import traceback
 from utils import log_terminal, send_telegram_msg
 
 # --- FORCE IPv4 GLOBALLY (To match user's whitelist) ---
@@ -251,10 +252,14 @@ def main():
         
         while True:
             try:
-                # 1. Run Engine
+                # 1. Run Janitor (The Cleaner) FIRST
+                # This ensures the screen is clean and locks are released before checking signals
+                run_janitor()
+                
+                # 2. Run Trading Engine (The Evaluator)
                 run_crypto_sar()
                 
-                # 1.5 Check Stop Loss (40%)
+                # 3. Check Stop Loss (The Safety)
                 delta_executor.check_stop_loss()
 
                 # 2. Check for Persistent API Errors (The 'Blindfold' issue)
@@ -310,4 +315,16 @@ def main():
             except: pass
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("="*60)
+        print("🚨 CRITICAL SYSTEM CRASH 🚨")
+        traceback.print_exc()
+        print("="*60)
+        # Try to log to terminal/telegram before dying
+        try:
+            from utils import log_terminal
+            log_terminal(f"CRITICAL CRASH: {e}\nCheck terminal for stack trace.", "ERROR")
+        except: pass
+        sys.exit(1)
