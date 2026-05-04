@@ -280,15 +280,21 @@ def sync_delta_position():
             put_pid = ""
             
             for p in positions:
-                size = float(p.get('size', 0))
-                if size != 0:
+                size = abs(float(p.get('size', 0)))
+                if size > 0:
                     symbol = p.get('product', {}).get('symbol', '')
                     pid = str(p.get('product_id', ''))
+                    print(f"[DEBUG] Processing Symbol: {symbol} (Size: {size})")
                     
-                    if "CALL" in symbol.upper() or "-C-" in symbol.upper() or symbol.startswith("C-"):
+                    symbol_up = symbol.upper()
+                    # More robust matching patterns for Delta symbols like P-BTC-... or BTC-P-...
+                    is_call = "CALL" in symbol_up or "-C-" in symbol_up or symbol_up.startswith("C-") or (len(symbol_up.split('-')) > 0 and symbol_up.split('-')[0] == 'C')
+                    is_put = "PUT" in symbol_up or "-P-" in symbol_up or symbol_up.startswith("P-") or (len(symbol_up.split('-')) > 0 and symbol_up.split('-')[0] == 'P')
+                    
+                    if is_call:
                         call_symbol = symbol
                         call_pid = pid
-                    elif "PUT" in symbol.upper() or "-P-" in symbol.upper() or symbol.startswith("P-"):
+                    elif is_put:
                         put_symbol = symbol
                         put_pid = pid
 

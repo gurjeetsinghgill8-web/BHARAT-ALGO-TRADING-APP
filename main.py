@@ -153,6 +153,13 @@ def run_janitor():
         if call_active or put_active:
             log_terminal("JANITOR: Closing ALL positions (Signal WAIT)...", "ALERT")
             delta_executor.square_off_crypto()
+            
+    # --- EMERGENCY CLEANUP ---
+    # If Local Lock is YES but sync sees NONE, we have a sync blindness.
+    # Force a square off to clean the screen.
+    if db.get_param("local_trade_active", "NO") == "YES" and not call_active and not put_active:
+        log_terminal("🚨 JANITOR EMERGENCY: Local Lock active but Sync Blind. Forcing full square off...", "ALERT")
+        delta_executor.square_off_crypto()
 
 def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
