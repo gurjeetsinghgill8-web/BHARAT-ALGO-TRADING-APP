@@ -8,7 +8,7 @@ sudo pkill -9 streamlit
 rm -f /root/BHARAT-ALGO-TRADING-APP/bot.lock
 
 # 2. Auto-Reset Bot Memory (Doing it myself!)
-/usr/bin/python3 -c "import sqlite3; conn=sqlite3.connect('/root/BHARAT-ALGO-TRADING-APP/trading_app.db'); c=conn.cursor(); c.execute('UPDATE params SET val=\'\' WHERE key=\'crypto_active_symbol\''); conn.commit(); conn.close()" || echo "DB reset skipped"
+/usr/bin/python3 -c "import sqlite3; conn=sqlite3.connect('/root/BHARAT-ALGO-TRADING-APP/trading_app.db'); c=conn.cursor(); c.execute(\"UPDATE settings SET value='NONE' WHERE key='crypto_active_symbol'\"); c.execute(\"UPDATE settings SET value='NONE' WHERE key='active_call_symbol'\"); c.execute(\"UPDATE settings SET value='NONE' WHERE key='active_put_symbol'\"); c.execute(\"UPDATE settings SET value='NO' WHERE key='local_trade_active'\"); conn.commit(); conn.close()" || echo "DB reset skipped"
 
 # 3. Open Firewall
 sudo ufw allow 8501/tcp || echo "Firewall skipped"
