@@ -604,7 +604,15 @@ def execute_crypto_trade(asset, direction):
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
-            payload = '{"product_id":' + str(pid) + ',"size":' + str(qty) + ',"side":"buy","order_type":"limit_order","limit_price":"' + str(price*1.02) + '"}'
+            payload_dict = {
+                "product_id": int(pid),
+                "size": int(qty),
+                "side": "buy",
+                "order_type": "market_order"
+            }
+            import json
+            payload = json.dumps(payload_dict)
+            
             headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
