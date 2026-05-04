@@ -439,6 +439,20 @@ def square_off_crypto(target_pid=None):
         p_pid = db.get_param("active_put_pid", "")
         if c_pid: pids.append(c_pid)
         if p_pid: pids.append(p_pid)
+        
+        # NUCLEAR FALLBACK: If sync was blind but something is actually open
+        if not pids:
+            try:
+                url_pos = "https://api.india.delta.exchange/v2/positions"
+                h_pos = get_delta_auth_headers("GET", "/v2/positions")
+                r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+                if r_pos.status_code == 200:
+                    raw_pids = [str(p.get('product_id')) for p in r_pos.json().get('result', []) if abs(float(p.get('size', 0))) > 0]
+                    if raw_pids:
+                        from main import log_terminal
+                        log_terminal(f"☢️ NUCLEAR SWEEP: Found {len(raw_pids)} hidden positions. Cleaning screen...", "ALERT")
+                        pids = raw_pids
+            except: pass
     else:
         pids = [target_pid]
 
