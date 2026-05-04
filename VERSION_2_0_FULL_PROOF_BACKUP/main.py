@@ -10,6 +10,7 @@ import crypto_roller
 import os
 import sys
 import socket
+from utils import log_terminal, send_telegram_msg
 
 # --- FORCE IPv4 GLOBALLY (To match user's whitelist) ---
 import requests.packages.urllib3.util.connection as urllib3_cn
@@ -82,28 +83,6 @@ def fetch_delta_candles(symbol, resolution, limit=100):
     print(f"[DEBUG] Last Fetch Error: {last_error}")
     return pd.DataFrame(), last_error
 
-def send_telegram_msg(message):
-    bot_token = db.get_param('telegram_bot_token', '')
-    chat_id = db.get_param('telegram_chat_id', '')
-    if bot_token and chat_id:
-        try:
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            payload = {"chat_id": chat_id, "text": f"🚀 BHARAT ALGO (VPS):\n{message}"}
-            requests.post(url, json=payload, timeout=5)
-        except: pass
-
-def log_terminal(msg, type="INFO"):
-    timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-    icon = "🔹"
-    if type == "TRADE": icon = "🟢"
-    if type == "ALERT": icon = "🚨"
-    if type == "ERROR": icon = "❌"
-    
-    full_msg = f"[{timestamp}] {icon} {msg}"
-    print(full_msg)
-    
-    if type in ["TRADE", "ALERT", "ERROR", "START"]:
-        send_telegram_msg(full_msg)
 
 def run_recovery_mode(reason):
     """

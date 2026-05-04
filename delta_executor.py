@@ -6,6 +6,7 @@ import datetime
 import socket
 import db
 import pandas as pd
+from utils import log_terminal, send_telegram_msg
 
 # --- FORCE IPv4 GLOBALLY ---
 import requests.packages.urllib3.util.connection as urllib3_cn
@@ -374,7 +375,6 @@ def check_stop_loss():
                     
                     if entry_value != 0:
                         loss_pct = (upnl / abs(entry_value)) * 100
-                        from main import log_terminal
                         # Log status every check for transparency
                         print(f"[DEBUG] SL Check: {p.get('product',{}).get('symbol')} | PnL: {upnl:.2f} | Entry: {entry_value:.2f} | Loss: {loss_pct:.1f}%")
                         
@@ -387,7 +387,6 @@ def check_stop_loss():
     return False
 
 def send_daily_summary():
-    from main import send_telegram_msg
     # Lego Block 5: The Daily Auditor
     pnl_24h, count, win_rate, avg_pnl = db.get_stats(days=1)
     
@@ -408,7 +407,6 @@ def send_daily_summary():
     send_telegram_msg(msg)
 
 def send_weekly_summary():
-    from main import send_telegram_msg
     # Lego Block 6: Weekly Performance Summary
     pnl_7d, count, win_rate, avg_pnl = db.get_stats(days=7)
     pnl_rs = pnl_7d * 85
@@ -449,7 +447,6 @@ def square_off_crypto(target_pid=None):
                 if r_pos.status_code == 200:
                     raw_pids = [str(p.get('product_id')) for p in r_pos.json().get('result', []) if abs(float(p.get('size', 0))) > 0]
                     if raw_pids:
-                        from main import log_terminal
                         log_terminal(f"☢️ NUCLEAR SWEEP: Found {len(raw_pids)} hidden positions. Cleaning screen...", "ALERT")
                         pids = raw_pids
             except: pass
@@ -511,7 +508,6 @@ def place_delta_bracket_orders(pid, qty, entry_price):
     Places server-side Stop Loss and Take Profit orders on Delta Exchange.
     SL: -40% | TP: +40%
     """
-    from main import log_terminal
     url = "https://api.india.delta.exchange/v2/orders"
     
     # 1. Stop Loss Order (-40%)
