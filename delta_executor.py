@@ -291,9 +291,29 @@ def sync_delta_position():
             for p in positions:
                 size = abs(float(p.get('size', 0)))
                 if size > 0:
-                    # Robust PID and Symbol fetching
+                    # --- DEEP SCANNER START ---
                     symbol = p.get('product', {}).get('symbol') or p.get('symbol') or ""
                     pid = str(p.get('product_id') or p.get('id') or "")
+                    
+                    if not symbol and pid:
+                        # Emergency ID Lookup: Ask Delta for the name of this ID
+                        try:
+                            lookup_url = f"https://api.india.delta.exchange/v2/products/{pid}"
+                            l_resp = requests.get(lookup_url, timeout=5)
+                            if l_resp.status_code == 200:
+                                symbol = l_resp.json().get('result', {}).get('symbol', '')
+                                print(f"[DEEP SCAN] Resolved ID {pid} to {symbol}")
+                        except: pass
+                    
+                    if not symbol:
+                        # Report keys to help diagnose
+                        raw_keys = list(p.keys())
+                        print(f"[DEEP SCAN] Symbol missing! Raw keys: {raw_keys}")
+                        if not hasattr(sync_delta_position, "last_key_diag"): sync_delta_position.last_key_diag = 0
+                        if time.time() - sync_delta_position.last_key_diag > 300:
+                            send_telegram_msg(f"🕵️ DEEP SCAN: Symbol hidden. Keys found: {raw_keys}")
+                            sync_delta_position.last_key_diag = time.time()
+                    # --- DEEP SCANNER END ---
                     
                     symbol_up = symbol.upper()
                     is_call = "-C-" in symbol_up or symbol_up.startswith("C-") or "CALL" in symbol_up
