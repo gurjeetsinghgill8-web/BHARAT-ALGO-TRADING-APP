@@ -496,7 +496,8 @@ def square_off_crypto(target_pid=None):
                     "product_id": int(pid),
                     "size": int(size),
                     "side": side,
-                    "order_type": "market_order"
+                    "order_type": "market_order",
+                    "reduce_only": True
                 }
                 import json
                 payload = json.dumps(payload_dict)
@@ -505,12 +506,15 @@ def square_off_crypto(target_pid=None):
                 resp = requests.post(url, headers=h_order, data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_crypto(f"✅ Square Off Order SENT: {pid} (Size: {size})")
+                    log_terminal(f"✅ Square Off Order SENT: {pid} (Size: {size})", "TRADE")
                     # Clear local lock
                     db.set_param("local_trade_active", "NO")
                     db.set_param("order_pending", "NO")
                 else:
-                    log_crypto(f"❌ Square Off FAILED: {resp.status_code} - {resp.text}")
+                    err_msg = f"❌ Square Off FAILED: {resp.status_code} - {resp.text}"
+                    log_terminal(err_msg, "ERROR")
+                    # Special log for Nuclear failures
+                    print(f"[DEBUG] Full Square Off Error Payload: {payload}")
             except Exception as e:
                 log_crypto(f"⚠️ Square Off EXCEPTION: {e}")
 
