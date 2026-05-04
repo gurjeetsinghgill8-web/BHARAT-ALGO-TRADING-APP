@@ -190,6 +190,12 @@ def run_crypto_sar():
         signal = logic.get_signal(df) 
         price = df['close'].iloc[-2]
         
+        # 1. UPDATE TARGET EVERY TIME (So Janitor knows the truth)
+        if signal != "WAIT":
+            db.set_param("signal_target", "BUY" if signal == "BUY" else "SELL")
+        else:
+            db.set_param("signal_target", "WAIT")
+        
         # 2. IMMEDIATE ENTRY IF EMPTY SCREEN
         active = db.get_param("crypto_active_symbol", "NONE")
         if active == "NONE" and not is_boundary:

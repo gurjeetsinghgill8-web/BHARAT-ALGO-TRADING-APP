@@ -359,15 +359,16 @@ def check_stop_loss():
                 size = abs(float(p.get('size', 0)))
                 if size > 0:
                     upnl = float(p.get('unrealized_pnl', 0))
-                    # Entry value = size * entry_price
-                    # We can use margin or cost_value if available, but let's be safe.
-                    # Usually 40% SL on option premium.
                     entry_value = float(p.get('entry_value', 0))
+                    
                     if entry_value != 0:
                         loss_pct = (upnl / abs(entry_value)) * 100
+                        from main import log_terminal
+                        # Log status every check for transparency
+                        print(f"[DEBUG] SL Check: {p.get('product',{}).get('symbol')} | PnL: {upnl:.2f} | Entry: {entry_value:.2f} | Loss: {loss_pct:.1f}%")
+                        
                         if loss_pct <= -40: # 40% loss
-                            from main import log_terminal
-                            log_terminal(f"🚨 HARD STOP LOSS HIT: {loss_pct:.1f}%! Squaring off...", "ALERT")
+                            log_terminal(f"🚨 HARD STOP LOSS HIT: {loss_pct:.1f}%! Force Squaring off...", "ALERT")
                             square_off_crypto(p.get('product_id'))
                             return True
     except Exception as e:
@@ -452,23 +453,30 @@ def square_off_crypto(target_pid=None):
 
                 # 2. Send Market Close Order
                 url = "https://api.india.delta.exchange/v2/orders"
-                # Determine side: if size is positive (long), we need to SELL to close.
-                # If size is negative (short), we need to BUY to close.
-                # (Though this bot only buys, let's make it robust).
                 side = "sell" # Default for our LONG positions
                 
-                payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"' + side + '","order_type":"market_order","close_on_trigger":true}'
+                # Payload without optional close_on_trigger for maximum compatibility
+                payload_dict = {
+                    "product_id": int(pid),
+                    "size": int(size),
+                    "side": side,
+                    "order_type": "market_order"
+                }
+                import json
+                payload = json.dumps(payload_dict)
+                
                 h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
                 resp = requests.post(url, headers=h_order, data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_crypto(f"Square Off Order Sent for {pid}")
-                    # Clear local lock ONLY after successful square off command
+                    log_crypto(f"✅ Square Off Order SENT: {pid} (Size: {size})")
+                    # Clear local lock
                     db.set_param("local_trade_active", "NO")
+                    db.set_param("order_pending", "NO")
                 else:
-                    log_crypto(f"Square Off Failed for {pid}: {resp.status_code}")
+                    log_crypto(f"❌ Square Off FAILED: {resp.status_code} - {resp.text}")
             except Exception as e:
-                log_crypto(f"Square Off Exception for {pid}: {e}")
+                log_crypto(f"⚠️ Square Off EXCEPTION: {e}")
 
     # Don't reset DB immediately; let sync_delta_position do it on next cycle
     return True
