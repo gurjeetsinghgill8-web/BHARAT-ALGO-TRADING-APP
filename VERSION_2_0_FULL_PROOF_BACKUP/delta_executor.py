@@ -441,15 +441,25 @@ def square_off_crypto(target_pid=None):
         # NUCLEAR FALLBACK: If sync was blind but something is actually open
         if not pids:
             try:
-                url_pos = "https://api.india.delta.exchange/v2/positions"
-                h_pos = get_delta_auth_headers("GET", "/v2/positions")
+                # CRITICAL: Use the same filter that worked in CAPACITY FULL
+                path_pos = "/v2/positions"
+                query_pos = "?underlying_asset_symbol=BTC"
+                url_pos = f"https://api.india.delta.exchange{path_pos}{query_pos}"
+                h_pos = get_delta_auth_headers("GET", path_pos, query_string=query_pos)
                 r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+                
                 if r_pos.status_code == 200:
-                    raw_pids = [str(p.get('product_id')) for p in r_pos.json().get('result', []) if abs(float(p.get('size', 0))) > 0]
+                    raw_data = r_pos.json().get('result', [])
+                    raw_pids = [str(p.get('product_id')) for p in raw_data if abs(float(p.get('size', 0))) > 0]
                     if raw_pids:
                         log_terminal(f"☢️ NUCLEAR SWEEP: Found {len(raw_pids)} hidden positions. Cleaning screen...", "ALERT")
                         pids = raw_pids
-            except: pass
+                    else:
+                        print(f"[DEBUG] Nuclear Sweep positions fetch was empty even with BTC filter. Raw: {r_pos.text}")
+                else:
+                    print(f"[DEBUG] Nuclear Sweep positions fetch FAILED: {r_pos.status_code} - {r_pos.text}")
+            except Exception as e:
+                print(f"[DEBUG] Nuclear Sweep Exception: {e}")
     else:
         pids = [target_pid]
 

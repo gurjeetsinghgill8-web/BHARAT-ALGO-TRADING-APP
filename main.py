@@ -134,6 +134,27 @@ def run_janitor():
             log_terminal("JANITOR: Closing ALL positions (Signal WAIT)...", "ALERT")
             delta_executor.square_off_crypto()
             
+    # --- QUANTITY GUARD ---
+    # If we have too many lots (e.g. 6 instead of 3), something is wrong.
+    # Force a cleanup.
+    try:
+        manual_lots = int(db.get_param('crypto_trade_size', '3'))
+        total_size = 0
+        # Re-fetch positions directly for accuracy
+        p_path = "/v2/positions"
+        p_query = "?underlying_asset_symbol=BTC"
+        p_url = f"https://api.india.delta.exchange{p_path}{p_query}"
+        p_h = delta_executor.get_delta_auth_headers("GET", p_path, query_string=p_query)
+        p_r = requests.get(p_url, headers=p_h, timeout=5)
+        if p_r.status_code == 200:
+            for p in p_r.json().get('result', []):
+                total_size += abs(float(p.get('size', 0)))
+        
+        if total_size > manual_lots:
+            log_terminal(f"🚨 QUANTITY OVERLOAD: Total Size {total_size} > Target {manual_lots}. Clearing screen...", "ALERT")
+            delta_executor.square_off_crypto()
+    except: pass
+
     # --- EMERGENCY CLEANUP ---
     # If Local Lock is YES but sync sees NONE, we have a sync blindness.
     # Force a square off to clean the screen.
