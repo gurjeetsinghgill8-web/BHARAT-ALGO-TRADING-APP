@@ -258,17 +258,25 @@ def sync_delta_position():
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # CRITICAL: Delta V2 positions endpoint REQUIRES underlying_asset_symbol or product_id
+    # FETCH ALL POSITIONS (No filter) to prevent blindness
     path = "/v2/positions"
-    query = "?underlying_asset_symbol=BTC"
-    url = f"https://api.india.delta.exchange{path}{query}"
+    url = f"https://api.india.delta.exchange{path}"
     
     try:
-        headers = get_delta_auth_headers("GET", path, query_string=query)
+        headers = get_delta_auth_headers("GET", path)
         resp = requests.get(url, headers=headers, timeout=10)
         
+        # If no-filter fails, try with filter
+        if resp.status_code != 200:
+            query = "?underlying_asset_symbol=BTC"
+            url = f"{url}{query}"
+            headers = get_delta_auth_headers("GET", path, query_string=query)
+            resp = requests.get(url, headers=headers, timeout=10)
+
         if resp.status_code == 200:
-            positions = resp.json().get('result', [])
+            # Filter BTC positions in Python
+            all_positions = resp.json().get('result', [])
+            positions = [p for p in all_positions if p.get('product', {}).get('underlying_asset_symbol') == 'BTC' or 'BTC' in p.get('product', {}).get('symbol', '').upper()]
             
             # DEBUG: Log raw positions count
             print(f"[DEBUG] Raw Positions Count: {len(positions)}")
