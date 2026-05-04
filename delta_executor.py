@@ -258,25 +258,19 @@ def sync_delta_position():
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # FETCH ALL POSITIONS (No filter) to prevent blindness
+    # ALWAYS use the BTC filter as it's proven to work on this VPS
     path = "/v2/positions"
-    url = f"https://api.india.delta.exchange{path}"
+    query = "?underlying_asset_symbol=BTC"
+    url = f"https://api.india.delta.exchange{path}{query}"
     
     try:
-        headers = get_delta_auth_headers("GET", path)
+        headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(url, headers=headers, timeout=10)
-        
-        # If no-filter fails, try with filter
-        if resp.status_code != 200:
-            query = "?underlying_asset_symbol=BTC"
-            url = f"{url}{query}"
-            headers = get_delta_auth_headers("GET", path, query_string=query)
-            resp = requests.get(url, headers=headers, timeout=10)
 
         if resp.status_code == 200:
             # Filter BTC positions in Python
             all_positions = resp.json().get('result', [])
-            positions = [p for p in all_positions if p.get('product', {}).get('underlying_asset_symbol') == 'BTC' or 'BTC' in p.get('product', {}).get('symbol', '').upper()]
+            positions = all_positions 
             
             # DEBUG: Log raw positions count
             raw_symbols = [p.get('product',{}).get('symbol') for p in positions]
