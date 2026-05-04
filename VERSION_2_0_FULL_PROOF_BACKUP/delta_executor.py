@@ -252,60 +252,40 @@ def find_gill_crypto_option(asset, direction):
     )
 
 def sync_delta_position():
-    """Syncs local DB with actual Delta Exchange positions. Tracks CALL and PUT separately."""
+    """Syncs local DB with actual Delta Exchange positions. SAFETY FIRST."""
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # Use /v2/positions which is the standard endpoint
-    path = "/v2/positions"
-    url = f"https://api.india.delta.exchange{path}"
+    # Use /v2/positions/margined which is more stable on India servers
+    # Adding underlying_asset_symbol to avoid bad_schema errors
+    path = "/v2/positions/margined"
+    query = "?underlying_asset_symbol=BTC"
+    url = f"https://api.india.delta.exchange{path}{query}"
     
     try:
-        headers = get_delta_auth_headers("GET", path)
+        headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(url, headers=headers, timeout=10)
         
         if resp.status_code == 200:
             positions = resp.json().get('result', [])
-            
-            call_symbol = "NONE"
-            call_pid = ""
-            put_symbol = "NONE"
-            put_pid = ""
-            
+            found = False
             for p in positions:
                 size = float(p.get('size', 0))
                 if size != 0:
                     symbol = p.get('product', {}).get('symbol', '')
                     pid = str(p.get('product_id', ''))
-                    
-                    if "CALL" in symbol.upper() or "-C-" in symbol.upper() or symbol.startswith("C-"):
-                        call_symbol = symbol
-                        call_pid = pid
-                    elif "PUT" in symbol.upper() or "-P-" in symbol.upper() or symbol.startswith("P-"):
-                        put_symbol = symbol
-                        put_pid = pid
+                    db.set_param("crypto_active_symbol", symbol)
+                    db.set_param("crypto_active_product_id", pid)
+                    found = True
+                    break
             
-            db.set_param("active_call_symbol", call_symbol)
-            db.set_param("active_call_pid", call_pid)
-            db.set_param("active_put_symbol", put_symbol)
-            db.set_param("active_put_pid", put_pid)
-            
-            # Legacy support for dashboard
-            if call_symbol != "NONE" and put_symbol != "NONE":
-                db.set_param("crypto_active_symbol", "HEDGED (C+P)")
-            elif call_symbol != "NONE":
-                db.set_param("crypto_active_symbol", call_symbol)
-            elif put_symbol != "NONE":
-                db.set_param("crypto_active_symbol", put_symbol)
-            else:
+            if not found:
                 db.set_param("crypto_active_symbol", "NONE")
-                
-            return True 
+                db.set_param("crypto_active_product_id", "")
+            return True # Successfully verified position state
         else:
             from main import log_terminal
-            # Check for specifically 400 errors (often schema or IP)
-            err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
-            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}): {err_msg}", "ERROR")
+            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Msg: {resp.json().get('error', {}).get('message', 'Schema Error')}", "ERROR")
             db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
             return False 
     except Exception as e:
@@ -350,59 +330,40 @@ def send_weekly_summary():
     msg += f"----------------------------"
     send_telegram_msg(msg)
 
-def square_off_crypto(target_pid=None):
-    """
-    SQUARES OFF a position. 
-    If target_pid is provided, closes only that. 
-    Otherwise, syncs and closes everything.
-    """
+def square_off_crypto():
+    sync_delta_position()
+    symbol = db.get_param("crypto_active_symbol", "")
+    pid = db.get_param("crypto_active_product_id", "")
     mode = db.get_param('trade_mode', 'PAPER')
     
-    # If no PID, we sync first to see what's open
-    if not target_pid:
-        sync_delta_position()
-        pids = []
-        c_pid = db.get_param("active_call_pid", "")
-        p_pid = db.get_param("active_put_pid", "")
-        if c_pid: pids.append(c_pid)
-        if p_pid: pids.append(p_pid)
-    else:
-        pids = [target_pid]
-
-    if not pids: return True
+    if not symbol or not pid: return True
     
-    for pid in pids:
-        log_crypto(f"RETRYING SQUARE OFF for PID: {pid}")
-        if mode == "LIVE":
-            try:
-                # 1. Get current size from /v2/positions
-                url_pos = "https://api.india.delta.exchange/v2/positions"
-                h_pos = get_delta_auth_headers("GET", "/v2/positions")
-                r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-                
-                size = 0
-                if r_pos.status_code == 200:
-                    for p in r_pos.json().get('result', []):
-                        if str(p.get('product_id')) == str(pid):
-                            size = abs(int(float(p.get('size', 0))))
-                            break
-                
-                if size == 0: continue # Already closed
+    log_crypto(f"SQUARING OFF: {symbol}")
+    
+    if mode == "LIVE":
+        try:
+            url = "https://api.india.delta.exchange/v2/orders"
+            # Fetch size to close
+            url_pos = "https://api.india.delta.exchange/v2/positions"
+            h_pos = get_delta_auth_headers("GET", "/v2/positions")
+            r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+            size = 1
+            if r_pos.status_code == 200:
+                for p in r_pos.json().get('result', []):
+                    if str(p.get('product_id')) == str(pid):
+                        size = abs(int(float(p.get('size', 0))))
+                        break
+            
+            payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
+            h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
+            requests.post(url, headers=h_order, data=payload, timeout=10)
+        except Exception as e:
+            log_crypto(f"Square Off Error: {e}")
 
-                # 2. Send Market Close Order
-                url = "https://api.india.delta.exchange/v2/orders"
-                payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
-                h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-                resp = requests.post(url, headers=h_order, data=payload, timeout=10)
-                
-                if resp.status_code in [200, 201]:
-                    log_crypto(f"Square Off Order Sent for {pid}")
-                else:
-                    log_crypto(f"Square Off Failed for {pid}: {resp.status_code}")
-            except Exception as e:
-                log_crypto(f"Square Off Exception for {pid}: {e}")
-
-    # Don't reset DB immediately; let sync_delta_position do it on next cycle
+    # Reset DB immediately for fast Lego experience
+    db.set_param("crypto_active_symbol", "")
+    db.set_param("crypto_active_product_id", "")
+    db.set_param("crypto_active_entry_price", "0")
     return True
 
 def get_dynamic_quantity(option_price):
@@ -432,10 +393,6 @@ def get_dynamic_quantity(option_price):
     return manual_lots
 
 def execute_crypto_trade(asset, direction):
-    """
-    Executes a trade based on signal.
-    Does NOT block if previous position is still closing.
-    """
     from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
     
@@ -444,44 +401,35 @@ def execute_crypto_trade(asset, direction):
         send_telegram_msg("❌ CRITICAL: API Key missing in DB!")
         return
 
-    log_crypto(f"SIGNAL RECEIVED: {direction} {asset}")
+    log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
     
-    # 1. Update Target Signal in DB (for Janitor to handle exits)
-    db.set_param("signal_target", direction)
+    # --- MANDATORY SQUARE OFF ALL POSITIONS FIRST ---
+    log_terminal("CLEAN SLATE: Squaring off all positions before new entry.", "INFO")
+    square_off_crypto()
+    time.sleep(2) # Brief wait for exchange to process
     
-    # 2. Check if we ALREADY have a position in this direction
-    sync_delta_position()
-    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
-    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
+    # --- FAIL-SAFE SYNC ---
+    if not sync_delta_position():
+        log_terminal("🛑 SYNC FAILED: Aborting entry to prevent double-trade. Check API/IP!", "ERROR")
+        return
 
-    if direction == "BUY": # Wants CALL
-        if has_call:
-            log_terminal(f"STAY: Already have CALL active. Holding.", "INFO")
-            return
-        # If we have PUT, trigger exit but don't wait!
-        if has_put:
-            log_terminal("SAR FLIP: Opening CALL while closing PUT...", "TRADE")
-            square_off_crypto(db.get_param("active_put_pid"))
-    
-    elif direction == "SELL": # Wants PUT
-        if has_put:
-            log_terminal(f"STAY: Already have PUT active. Holding.", "INFO")
-            return
-        # If we have CALL, trigger exit but don't wait!
-        if has_call:
-            log_terminal("SAR FLIP: Opening PUT while closing CALL...", "TRADE")
-            square_off_crypto(db.get_param("active_call_pid"))
+    # Verify screen is empty
+    active = db.get_param("crypto_active_symbol", "")
+    if active and active != "NONE":
+        log_terminal(f"🛑 SAFETY BLOCK: Screen not empty ({active}). Cannot enter new trade.", "ERROR")
+        return
 
-    # 3. Find Best Option to Open
+    # --- SAFETY LOCK: PRE-SAVE STATE ---
+    db.set_param("crypto_active_symbol", "PENDING_ENTRY")
+    
     opt = find_gill_crypto_option(asset, direction)
     if not opt: 
-        log_terminal(f"ERROR: Could not find suitable {direction} option.", "ERROR")
+        db.set_param("crypto_active_symbol", "") # Release lock if no option found
         return
         
     symbol, price, strike, expiry, pid = opt
     qty = get_dynamic_quantity(price)
     
-    # 4. Execute Entry
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
@@ -489,23 +437,21 @@ def execute_crypto_trade(asset, direction):
             headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
-            if resp.status_code in [200, 201]:
-                log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
-                # Immediate sync to update DB
-                sync_delta_position()
+            if resp.status_code == 200 or resp.status_code == 201:
+                db.set_param("crypto_active_symbol", symbol)
+                db.set_param("crypto_active_product_id", str(pid))
+                db.set_param("crypto_active_entry_price", str(price))
+                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
             else:
-                log_terminal(f"LIVE ENTRY FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
+                db.set_param("crypto_active_symbol", "") # Release lock on failure
+                log_terminal(f"LIVE ORDER FAILED: {resp.status_code}", "ERROR")
         except Exception as e:
-            log_terminal(f"ENTRY EXCEPTION: {e}", "ERROR")
+            db.set_param("crypto_active_symbol", "") # Release lock on exception
+            log_terminal(f"API EXCEPTION: {e}", "ERROR")
     else:
         # Paper Trade
-        log_terminal(f"PAPER ENTRY: {symbol} @ {price}", "TRADE")
-        # Update DB for paper trade
-        if direction == "BUY":
-            db.set_param("active_call_symbol", symbol)
-            db.set_param("active_call_pid", str(pid))
-        else:
-            db.set_param("active_put_symbol", symbol)
-            db.set_param("active_put_pid", str(pid))
         db.set_param("crypto_active_symbol", symbol)
+        db.set_param("crypto_active_product_id", str(pid))
+        db.set_param("crypto_active_entry_price", str(price))
+        log_terminal(f"PAPER TRADE: {symbol} @ {price} (Qty: {qty})", "TRADE")
 

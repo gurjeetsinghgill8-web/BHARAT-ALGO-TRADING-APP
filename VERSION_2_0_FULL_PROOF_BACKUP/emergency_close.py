@@ -11,7 +11,7 @@ def get_param(key):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
+        cursor.execute("SELECT val FROM params WHERE key=?", (key,))
         row = cursor.fetchone()
         conn.close()
         return row[0] if row else ""
@@ -46,22 +46,21 @@ def emergency_close():
     
     if resp.status_code == 200:
         positions = resp.json().get('result', [])
-        found = False
         for p in positions:
             size = float(p.get('size', 0))
             if size != 0:
-                found = True
                 pid = p.get('product_id')
                 symbol = p.get('product', {}).get('symbol', 'Unknown')
                 print(f"Closing {symbol} (Size: {size})...")
                 
                 # Close Order
-                order_payload = '{"product_id":' + str(pid) + ',"size":' + str(abs(int(size))) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
+                side = "sell" if size > 0 else "buy"
+                order_payload = '{"product_id":' + str(pid) + ',"size":' + str(abs(int(size))) + ',"side":"' + side + '","order_type":"market_order"}'
                 headers = get_headers("POST", "/v2/orders", order_payload, api_key, api_secret)
                 close_resp = requests.post(base_url + "/v2/orders", headers=headers, data=order_payload)
                 print(f"DONE: {symbol} Close Status: {close_resp.status_code}")
         
-        if not found:
+        if not any(float(p.get('size', 0)) != 0 for p in positions):
             print("No active positions found.")
     else:
         print(f"Failed to fetch positions: {resp.status_code}")
@@ -69,16 +68,9 @@ def emergency_close():
 if __name__ == "__main__":
     emergency_close()
     # Reset DB Status
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        # Reset all tracking parameters
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('crypto_active_symbol', 'NONE')")
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('active_call_symbol', 'NONE')")
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('active_put_symbol', 'NONE')")
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('signal_target', 'WAIT')")
-        conn.commit()
-        conn.close()
-        print("🧹 Database Settings Reset to SAFE mode.")
-    except Exception as e:
-        print(f"DB Reset Error: {e}")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE params SET val='' WHERE key='crypto_active_symbol'")
+    conn.commit()
+    conn.close()
+    print("🧹 Database Cleared.")

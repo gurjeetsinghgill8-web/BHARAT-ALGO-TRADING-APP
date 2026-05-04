@@ -105,54 +105,27 @@ def log_terminal(msg, type="INFO"):
     if type in ["TRADE", "ALERT", "ERROR", "START"]:
         send_telegram_msg(full_msg)
 
-def run_janitor():
-    """
-    AGGRRESIVE JANITOR (The Reaper)
-    Runs frequently to ensure any 'zombie' positions that should be closed are actually closed.
-    Retries every 30 seconds until the screen is clean for the non-targeted side.
-    """
-    target = db.get_param("signal_target", "WAIT")
-    delta_executor.sync_delta_position()
-    
-    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
-    put_active = db.get_param("active_put_symbol", "NONE") != "NONE"
-    
-    if target == "BUY": # Only CALL should be open
-        if put_active:
-            log_terminal(f"JANITOR: Closing rogue PUT position {db.get_param('active_put_symbol')}...", "ALERT")
-            delta_executor.square_off_crypto(db.get_param("active_put_pid"))
-    elif target == "SELL": # Only PUT should be open
-        if call_active:
-            log_terminal(f"JANITOR: Closing rogue CALL position {db.get_param('active_call_symbol')}...", "ALERT")
-            delta_executor.square_off_crypto(db.get_param("active_call_pid"))
-    elif target == "WAIT": # Nothing should be open
-        if call_active or put_active:
-            log_terminal("JANITOR: Closing ALL positions (Signal WAIT)...", "ALERT")
-            delta_executor.square_off_crypto()
-
 def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
     asset = db.get_param('crypto_asset', 'BTC')
 
-    # STICKY SIGNAL RULE: Only check new entry signals on 5-minute boundaries
+    # Enforce 5-minute boundary rule (but allow immediate check on start)
     now = datetime.datetime.now()
-    is_boundary = (now.minute % 5 == 0)
+    if not hasattr(run_crypto_sar, "last_logic_run"): run_crypto_sar.last_logic_run = 0
     
-    # We allow a small window (first 30s of the 5th minute) to trigger logic
-    if not is_boundary:
-        # Not a 5m boundary, just run janitor and skip entry logic
-        run_janitor()
+    # Run logic if:
+    # 1. It's a 5-minute boundary (0, 5, 10...)
+    # 2. Or if we haven't run it yet (startup)
+    is_boundary = (now.minute % 5 == 0)
+    time_since_last = time.time() - run_crypto_sar.last_logic_run
+    
+    if not is_boundary and time_since_last < 300:
+        # Just heartbeat, no logic
         return
 
-    # To prevent multiple triggers within the same 5th minute
-    if not hasattr(run_crypto_sar, "last_logic_minute"): run_crypto_sar.last_logic_minute = -1
-    if run_crypto_sar.last_logic_minute == now.minute:
-        # Already ran entry logic for this 5m candle
-        run_janitor()
-        return
-        
-    run_crypto_sar.last_logic_minute = now.minute
+    run_crypto_sar.last_logic_run = time.time()
     
+    # Use DB parameters or defaults (Matches Aggressive SAR requirements)
     st_period = int(float(db.get_param('st_period', 10)))
     st_multiplier = float(db.get_param('st_multiplier', 1.5))
     
@@ -163,24 +136,42 @@ def run_crypto_sar():
             return
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
+        
+        # Signal Logic: Uses iloc[-2] internally for closed candle
         signal = logic.get_signal(df) 
         price = df['close'].iloc[-2]
         
-        log_terminal(f"5M SIGNAL CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
+        log_terminal(f"STRATEGY CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
         
-        # Execute trade logic (Now decoupled and parallel)
-        if signal != "WAIT":
-            delta_executor.execute_crypto_trade(asset, signal)
+        delta_executor.sync_delta_position()
+        active_symbol = db.get_param("crypto_active_symbol", "")
+        mode = db.get_param('trade_mode', 'PAPER')
+        
+        has_bullish = active_symbol.startswith("C-") or "-C-" in active_symbol or "CALL" in active_symbol.upper()
+        has_bearish = active_symbol.startswith("P-") or "-P-" in active_symbol or "PUT" in active_symbol.upper()
+        has_nothing = not active_symbol or active_symbol == "NONE"
+        is_locked = active_symbol == "API_ERROR_LOCK"
+
+        # SAR CORE LOGIC:
+        if is_locked:
+            log_terminal("SYSTEM LOCKED: Waiting for API sync to recover.", "ALERT")
+        elif has_nothing:
+            if signal != "WAIT":
+                log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
+                delta_executor.execute_crypto_trade(asset, "BUY" if signal == "BUY" else "SELL")
+        elif signal == "BUY" and has_bearish:
+            log_terminal(f"SAR FLIP: Bearish -> Bullish. Closing Put, Opening Call.", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "BUY")
+        elif signal == "SELL" and has_bullish:
+            log_terminal(f"SAR FLIP: Bullish -> Bearish. Closing Call, Opening Put.", "TRADE")
+            delta_executor.execute_crypto_trade(asset, "SELL")
         else:
-            db.set_param("signal_target", "WAIT")
-            run_janitor()
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Signal {signal} matches current position {active_symbol}. Holding.")
 
         # Periodic Heartbeat for Telegram (Every 30 mins)
         if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0
         if time.time() - run_crypto_sar.last_status > 1800:
-            active = db.get_param("crypto_active_symbol", "NONE")
-            mode = db.get_param('trade_mode', 'PAPER')
-            send_telegram_msg(f"✅ VPS Status [{mode}]: {asset} @ ${price} | Signal: {signal} | Active: {active}")
+            send_telegram_msg(f"✅ VPS Status Report [{mode}]: {asset} @ ${price} | Signal: {signal} | Position: {active_symbol or 'NONE'}")
             run_crypto_sar.last_status = time.time()
 
         crypto_roller.check_and_roll_crypto()
@@ -227,18 +218,16 @@ def main():
         
         while True:
             try:
-                # Run Crypto SAR Engine (Includes Signal Check & Janitor)
+                # Run Crypto SAR Engine
                 run_crypto_sar()
                 
                 # Terminal Heartbeat
-                active = db.get_param('crypto_active_symbol', 'NONE')
-                target = db.get_param('signal_target', 'NONE')
-                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Target: {target} | Active: {active}")
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
                 
                 # Telegram Status (Every 30 mins)
                 if time.time() - last_status_msg > 1800:
-                    mode = db.get_param('trade_mode', 'PAPER')
-                    msg = f"✅ VPS Heartbeat: System Running.\n📡 Active: {active}\n🎯 Target: {target}\n💰 Mode: {mode}"
+                    active = db.get_param('crypto_active_symbol', 'NONE')
+                    msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
                     send_telegram_msg(msg)
                     last_status_msg = time.time()
                 
@@ -249,7 +238,7 @@ def main():
                         delta_executor.send_weekly_summary()
                         main.last_weekly_report = now
                         
-                time.sleep(30) # Reduced from 60s to 30s for faster Janitor retries
+                time.sleep(60) 
             except KeyboardInterrupt: break
             except Exception as e:
                 log_terminal(f"Main Loop Error: {e}", "ERROR")

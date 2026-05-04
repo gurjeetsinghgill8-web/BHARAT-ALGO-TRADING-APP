@@ -98,9 +98,7 @@ st.title("🚀 BHARAT ALGOVERSE v2.0")
 # 1. LIVE METRICS (Block 1 Core)
 pnl_data, trade_count, win_rate, avg_pnl = db.get_stats(days=1)
 status = get_bot_status()
-call_active = db.get_param('active_call_symbol', 'NONE')
-put_active = db.get_param('active_put_symbol', 'NONE')
-target = db.get_param('signal_target', 'WAIT')
+active = db.get_param('crypto_active_symbol', 'NONE')
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -111,12 +109,9 @@ with c1:
     </div>''', unsafe_allow_html=True)
 with c2:
     st.markdown(f'''<div class="metric-card">
-        <p style="color: #94a3b8; margin:0;">BOT STATUS: {status}</p>
-        <p class="{'status-active' if target!='WAIT' else 'status-stopped'}" style="font-size:1.5rem;">TARGET: {target}</p>
-        <div style="display:flex; justify-content:space-around; margin-top:10px;">
-            <div style="color: {'#4ade80' if call_active!='NONE' else '#64748b'}">C: {call_active}</div>
-            <div style="color: {'#f87171' if put_active!='NONE' else '#64748b'}">P: {put_active}</div>
-        </div>
+        <p style="color: #94a3b8; margin:0;">BOT STATUS</p>
+        <p class="{'status-active' if status=='RUNNING' else 'status-stopped'}" style="font-size:2rem;">{status}</p>
+        <p style="color: #94a3b8; font-size:0.9rem;">Monitoring BTC</p>
     </div>''', unsafe_allow_html=True)
 with c3:
     st.markdown(f'''<div class="metric-card">
@@ -166,10 +161,9 @@ with tab2:
     
     # EMERGENCY RESET BUTTON
     if st.button("🚨 RESET BOT MEMORY (Emergency Only)"):
-        db.set_param("active_call_symbol", "NONE")
-        db.set_param("active_put_symbol", "NONE")
-        db.set_param("signal_target", "WAIT")
-        db.set_param("crypto_active_symbol", "NONE")
+        db.set_param("crypto_active_symbol", "")
+        db.set_param("crypto_active_product_id", "")
+        db.set_param("crypto_active_entry_price", "0")
         st.warning("⚠️ Bot memory cleared! Bot will now take a fresh entry on next signal.")
         st.rerun()
 
