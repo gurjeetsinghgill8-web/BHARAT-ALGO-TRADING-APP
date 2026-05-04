@@ -1,36 +1,36 @@
-
-
-# BHARAT ALGO-TRADING SYSTEM LOGIC (Dr. Saab Edition)
+# BHARAT ALGO-TRADING SYSTEM LOGIC (Stable System 2.0)
 
 ## 1. Core Signal Strategy
 - **Indicator**: Supertrend
 - **Settings**: 10 Period, 1.5 Multiplier
 - **Timeframe**: 5 Minutes (5M)
-- **Candle Rule**: Always use the **Closed Candle** (Previous Candle) for signals. Never use the running live candle.
-  - If `Previous Close > Supertrend`: Signal is **CALL (BUY)**
-  - If `Previous Close < Supertrend`: Signal is **PUT (SELL)**
+- **Candle Rule**: Always use the **Closed Candle** (Previous Candle) for signals. 
+  - `iloc[-2]` is used to avoid fluctuation from the live candle.
+  - If `Previous Close > Supertrend`: Signal is **BUY (CALL)**.
+  - If `Previous Close < Supertrend`: Signal is **SELL (PUT)**.
 
 ## 2. Execution Rules (The "Lego" System)
-- **Timeframe Restriction**: Signal checks occur every 5 minutes on the boundary (e.g., 10:00, 10:05, 10:10).
-- **Clean Slate Rule**: Before taking any new trade, the system MUST ensure all existing trades are closed. Square off everything first.
-- **Always-In-Trade Rule**: 
-  - If the screen is empty (no active trades), immediately check the signal and take a trade.
-  - Never leave the screen empty for long.
-- **Instrument Selection (Bitcoin BTC)**:
-  - **Expiry**: Never take same-day expiry. Use the next day's expiry (Next Day).
-  - **Strike**: Choose ATM (At The Money) or slightly OTM (Out of the Money) - 1 strike away.
-- **Order Type**: Always use **Market Orders** for closing positions to ensure guaranteed exit.
+- **Signal Boundary**: Signal is checked every 15 seconds, but it only changes when the 5M candle closes.
+- **Clean Slate Rule**: Before taking any new trade, all existing positions must be squared off.
+- **Always-In-Trade**: If no trade is active, the bot immediately takes the position indicated by the last closed candle.
+- **Instrument (Bitcoin BTC)**:
+  - **Expiry**: Never same-day. Uses the nearest expiry that is at least 1 day away.
+  - **Strike**: ATM or 1-strike OTM (Offset=1).
+- **Order Type**: Always use **Market Orders** for both Entry and Exit to ensure execution.
+- **Quantity Guard**: Maximum **1 lot** (Temporary for stability testing).
 
 ## 3. Risk Management & Safety
-- **Hard Stop Loss**: 40% loss on any active position must trigger an immediate market square-off.
-- **Janitor Mode**: A background process (Janitor) runs every 15 seconds to:
-  - Retry failed close orders.
-  - Ensure no "zombie" positions exist.
-  - Match the screen to the target signal.
-- **Process Lock**: Single-instance protection (singleton) to prevent multiple bots from running simultaneously.
+- **Hard Stop Loss**: 40% loss on entry value triggers an immediate market square-off.
+- **Janitor Mode**: Runs every 15 seconds to enforce the Signal-Reality match.
+  - If Signal flips, Janitor closes the current position first, then the Evaluator takes the new trade.
+  - If square-off fails, it retries every 15 seconds and notifies Telegram.
+- **Bracket Orders**: Server-side SL (-40%) and TP (+100%) are placed immediately after entry.
+- **Zombie Lock Recovery**: If the exchange is empty but memory says "active", the lock is automatically released.
 
 ## 4. Operational Guidelines
-- **Retry Logic**: If a trade fails to close, retry every 10-15 seconds.
-- **Lot Size**: Controlled via Dashboard (Standard: 3 or 4 lots).
-- **Mode**: Supports both PAPER and LIVE modes.
-- **Heartbeat**: 30-minute status updates sent to Telegram.
+- **Telegram Alerts**: 
+  - Notifies on trade entry/exit.
+  - Notifies on persistent square-off failures (manual intervention requested).
+  - 30-minute Pulse heartbeats.
+- **Mode**: Supports PAPER and LIVE modes via Dashboard.
+- **API Persistence**: Uses Delta Exchange India (api.india.delta.exchange) with IPv4 forcing.

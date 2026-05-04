@@ -21,8 +21,6 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 def run_janitor():
     """
     STABLE 2.0 RECONCILER
-    The 'Source of Truth' is the Delta Exchange. 
-    If Signal != Position, this function fixes it immediately.
     """
     # 1. Sync Reality from Exchange
     delta_executor.sync_delta_position()
@@ -30,6 +28,7 @@ def run_janitor():
     # 2. Get Current Signal
     asset = "BTC"
     signal = logic.get_supertrend_signal(asset)
+    db.set_param("signal_target", signal) # Update Dashboard
     
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
@@ -50,7 +49,7 @@ def run_janitor():
         log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
         delta_executor.square_off_crypto()
 
-    # CASE: QUANTITY OVERLOAD (3 Lots Limit)
+    # CASE: QUANTITY GUARD (3 Lots Limit)
     try:
         manual_lots = int(db.get_param('crypto_trade_size', '3'))
         total_size = 0
@@ -69,11 +68,6 @@ def run_janitor():
     except: pass
 
     # CASE: ZOMBIE LOCK RECOVERY
-    # If bot thinks a trade is active but exchange is empty
-    delta_executor.sync_delta_position() # Re-sync after potential closures
-    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
-    put_active = db.get_param("active_put_symbol", "NONE") != "NONE"
-    
     if db.get_param("local_trade_active", "NO") == "YES" and not call_active and not put_active:
         log_terminal("🚨 ZOMBIE LOCK: Memory was stuck. Releasing lock now.", "ALERT")
         db.set_param("local_trade_active", "NO")
@@ -81,13 +75,13 @@ def run_janitor():
 def run_crypto_sar():
     """
     STABLE 2.0 EVALUATOR
-    Evaluates entry only when the screen is clean.
     """
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
     
     # 1. Sync & Check Signal
     asset = "BTC"
     signal = logic.get_supertrend_signal(asset)
+    db.set_param("signal_target", signal) # Update Dashboard
     
     # 2. Check Reality
     delta_executor.sync_delta_position()
@@ -95,19 +89,24 @@ def run_crypto_sar():
     active_put = db.get_param("active_put_symbol", "NONE")
     active_any = (active_call != "NONE" or active_put != "NONE")
     
+    # Update Dashboard Status
+    if active_call != "NONE" and active_put != "NONE":
+        db.set_param("crypto_active_symbol", "HEDGED")
+    elif active_call != "NONE":
+        db.set_param("crypto_active_symbol", active_call)
+    elif active_put != "NONE":
+        db.set_param("crypto_active_symbol", active_put)
+    else:
+        db.set_param("crypto_active_symbol", "NONE")
+
     # 3. Decision
     if not active_any:
         if signal in ["BUY", "SELL"]:
             log_terminal(f"🎯 SIGNAL DETECTED: {signal}. Taking fresh entry.", "TRADE")
             delta_executor.execute_crypto_trade(asset, signal)
     else:
-        # Check if we are in the WRONG trade (should have been handled by janitor, but safety first)
-        if (signal == "BUY" and active_put != "NONE") or (signal == "SELL" and active_call != "NONE"):
-            log_terminal(f"🔄 WRONG TRADE DETECTED ({active_call if active_call != 'NONE' else active_put}). Fixing...", "ALERT")
-            delta_executor.square_off_crypto()
-        else:
-            # We are in the right trade, just maintain
-            pass
+        # Maintenance
+        crypto_roller.check_and_roll_crypto()
 
 def main():
     # --- BULLETPROOF SINGLETON ---
@@ -124,10 +123,9 @@ def main():
     
     if not db.load_secrets(): sys.exit(1)
     
-    # Set default parameters if not exists
     db.set_param('st_period', '10')
     db.set_param('st_multiplier', '1.5')
-    db.set_param('crypto_trade_size', '3')
+    db.set_param('crypto_trade_size', '1')
     
     log_terminal("Stable System 2.0 Started.", "START")
 
@@ -135,38 +133,22 @@ def main():
     
     while True:
         try:
-            # 1. ALWAYS CLEAN FIRST
             run_janitor()
-            
-            # 2. EVALUATE & ENTER
             run_crypto_sar()
-            
-            # 3. SAFETY CHECKS
             delta_executor.check_stop_loss()
             
-            # 4. HEARTBEAT (Telegram status)
             if time.time() - last_pulse > 1800:
                 signal = logic.get_supertrend_signal("BTC")
                 active = db.get_param('crypto_active_symbol', 'NONE')
                 send_telegram_msg(f"✅ STABLE 2.0 PULSE: {signal} | Active: {active}")
                 last_pulse = time.time()
 
-            time.sleep(15) # Standard Loop Time
+            time.sleep(15)
         except KeyboardInterrupt: break
         except Exception as e:
             print(f"Main Loop Error: {e}")
             traceback.print_exc()
             time.sleep(10)
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("="*60)
-        print("🚨 CRITICAL SYSTEM CRASH 🚨")
-        traceback.print_exc()
-        print("="*60)
-        sys.exit(1)
 
 if __name__ == "__main__":
     try:

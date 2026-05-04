@@ -279,9 +279,15 @@ def sync_delta_position():
             positions = [p for p in all_positions if p.get('product', {}).get('underlying_asset_symbol') == 'BTC' or 'BTC' in p.get('product', {}).get('symbol', '').upper()]
             
             # DEBUG: Log raw positions count
+            raw_symbols = [p.get('product',{}).get('symbol') for p in positions]
             print(f"[DEBUG] Raw Positions Count: {len(positions)}")
             if len(positions) > 0:
-                print(f"[DEBUG] Raw Symbols: {[p.get('product',{}).get('symbol') for p in positions]}")
+                print(f"[DEBUG] Raw Symbols: {raw_symbols}")
+                # Log to telegram once to help Dr. Saab see what's happening
+                if not hasattr(sync_delta_position, "last_diag"): sync_delta_position.last_diag = 0
+                if time.time() - sync_delta_position.last_diag > 300: # Every 5 mins
+                    send_telegram_msg(f"🔍 SYNC DIAGNOSTIC: Found {len(positions)} positions on Exchange.\nSymbols: {raw_symbols}")
+                    sync_delta_position.last_diag = time.time()
 
             call_symbol = "NONE"
             call_pid = ""
@@ -293,12 +299,11 @@ def sync_delta_position():
                 if size > 0:
                     symbol = p.get('product', {}).get('symbol', '')
                     pid = str(p.get('product_id', ''))
-                    print(f"[DEBUG] Processing Symbol: {symbol} (Size: {size})")
                     
                     symbol_up = symbol.upper()
                     # More robust matching patterns for Delta symbols like P-BTC-... or BTC-P-...
-                    is_call = "CALL" in symbol_up or "-C-" in symbol_up or symbol_up.startswith("C-") or (len(symbol_up.split('-')) > 0 and symbol_up.split('-')[0] == 'C')
-                    is_put = "PUT" in symbol_up or "-P-" in symbol_up or symbol_up.startswith("P-") or (len(symbol_up.split('-')) > 0 and symbol_up.split('-')[0] == 'P')
+                    is_call = "-C-" in symbol_up or symbol_up.startswith("C-") or "CALL" in symbol_up
+                    is_put = "-P-" in symbol_up or symbol_up.startswith("P-") or "PUT" in symbol_up
                     
                     if is_call:
                         call_symbol = symbol
@@ -522,7 +527,8 @@ def square_off_crypto(target_pid=None):
 def place_delta_bracket_orders(pid, qty, entry_price):
     """
     Places server-side Stop Loss and Take Profit orders on Delta Exchange.
-    SL: -40% | TP: +40%
+    SL: -40% | TP: +100%
+    Fix: Using 'market_order' per Delta V2 schema requirements.
     """
     url = "https://api.india.delta.exchange/v2/orders"
     
@@ -530,9 +536,9 @@ def place_delta_bracket_orders(pid, qty, entry_price):
     sl_price = round(entry_price * 0.60, 2)
     sl_payload = {
         "product_id": int(pid),
-        "size": int(qty),
+        "size": float(qty),
         "side": "sell",
-        "order_type": "stop_market_order",
+        "order_type": "market_order",
         "stop_order_type": "stop_loss_order",
         "stop_price": str(sl_price),
         "reduce_only": True
@@ -542,9 +548,10 @@ def place_delta_bracket_orders(pid, qty, entry_price):
     tp_price = round(entry_price * 2.00, 2)
     tp_payload = {
         "product_id": int(pid),
-        "size": int(qty),
+        "size": float(qty),
         "side": "sell",
-        "order_type": "take_profit_market_order",
+        "order_type": "market_order",
+        "stop_order_type": "take_profit_order",
         "stop_price": str(tp_price),
         "reduce_only": True
     }
@@ -564,8 +571,8 @@ def place_delta_bracket_orders(pid, qty, entry_price):
 
 def get_dynamic_quantity(option_price):
     # Lego Block: Priority Lot Selection
-    # Dr. Saab wants STRICTLY 3 lots per trade
-    manual_lots = int(db.get_param('crypto_trade_size', '3'))
+    # STABILITY TEST: Using only 1 lot for now
+    manual_lots = int(db.get_param('crypto_trade_size', '1'))
     return manual_lots
 
 def execute_crypto_trade(asset, direction):
