@@ -89,7 +89,8 @@ def get_delta_auth_headers(method, path, payload="", query_string=""):
         'api-key': api_key,
         'signature': signature,
         'timestamp': timestamp,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BHARAT-ALGO-V2'
     }
 
 def get_next_friday_expiry():
@@ -256,12 +257,13 @@ def sync_delta_position():
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # Use /v2/positions which is the standard endpoint
+    # CRITICAL: Delta V2 positions endpoint REQUIRES underlying_asset_symbol or product_id
     path = "/v2/positions"
-    url = f"https://api.india.delta.exchange{path}"
+    query = "?underlying_asset_symbol=BTC"
+    url = f"https://api.india.delta.exchange{path}{query}"
     
     try:
-        headers = get_delta_auth_headers("GET", path)
+        headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(url, headers=headers, timeout=10)
         
         if resp.status_code == 200:
@@ -391,7 +393,12 @@ def square_off_crypto(target_pid=None):
 
                 # 2. Send Market Close Order
                 url = "https://api.india.delta.exchange/v2/orders"
-                payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
+                # Determine side: if size is positive (long), we need to SELL to close.
+                # If size is negative (short), we need to BUY to close.
+                # (Though this bot only buys, let's make it robust).
+                side = "sell" # Default for our LONG positions
+                
+                payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"' + side + '","order_type":"market_order","close_on_trigger":true}'
                 h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
                 resp = requests.post(url, headers=h_order, data=payload, timeout=10)
                 
@@ -491,7 +498,8 @@ def execute_crypto_trade(asset, direction):
             
             if resp.status_code in [200, 201]:
                 log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
-                # Immediate sync to update DB
+                # Brief wait before sync to allow exchange to update
+                time.sleep(1)
                 sync_delta_position()
             else:
                 log_terminal(f"LIVE ENTRY FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
