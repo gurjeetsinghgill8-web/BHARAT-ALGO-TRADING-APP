@@ -273,7 +273,7 @@ def sync_delta_position():
             positions = all_positions 
             
             # DEBUG: Log raw positions count
-            raw_symbols = [p.get('product',{}).get('symbol') for p in positions]
+            raw_symbols = [p.get('product',{}).get('symbol') or p.get('symbol') or "UNKNOWN" for p in positions]
             print(f"[DEBUG] Raw Positions Count: {len(positions)}")
             if len(positions) > 0:
                 print(f"[DEBUG] Raw Symbols: {raw_symbols}")
