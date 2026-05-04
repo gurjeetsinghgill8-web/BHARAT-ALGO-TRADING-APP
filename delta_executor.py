@@ -463,6 +463,8 @@ def square_off_crypto(target_pid=None):
                 
                 if resp.status_code in [200, 201]:
                     log_crypto(f"Square Off Order Sent for {pid}")
+                    # Clear local lock ONLY after successful square off command
+                    db.set_param("local_trade_active", "NO")
                 else:
                     log_crypto(f"Square Off Failed for {pid}: {resp.status_code}")
             except Exception as e:
@@ -525,6 +527,34 @@ def execute_crypto_trade(asset, direction):
         log_terminal("⏳ PENDING ORDER DETECTED: Waiting for previous order to fill/cancel before new trade.", "INFO")
         return
 
+    # 2.2 LOCAL TRADE LOCK SAFETY (Double-Entry Prevention)
+    if db.get_param("local_trade_active", "NO") == "YES":
+        # Check if API also sees it. If API says NONE but Local says YES, we trust Local for 2 minutes (API Lag)
+        # unless we are sure it was a failure.
+        log_terminal("🛡️ LOCAL LOCK ACTIVE: System believes a trade is already running. Blocking new entry.", "ALERT")
+        return
+
+    # 2.3 TOTAL LOT GUARD
+    sync_delta_position()
+    manual_lots = int(db.get_param('crypto_trade_size', '3'))
+    # Calculate total size across all positions
+    total_open_size = 0
+    # Re-fetch positions to be absolutely sure
+    try:
+        path = "/v2/positions"
+        url = f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC"
+        headers = get_delta_auth_headers("GET", path, query_string="?underlying_asset_symbol=BTC")
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            for p in r.json().get('result', []):
+                total_open_size += abs(float(p.get('size', 0)))
+    except: pass
+    
+    if total_open_size >= manual_lots:
+        log_terminal(f"🛑 CAPACITY FULL: Current Size {total_open_size} >= Target {manual_lots}. No more entries allowed.", "ALERT")
+        db.set_param("local_trade_active", "YES") # Sync local lock
+        return
+
     # 2.5 CLEAN SLATE RULE: Close EVERYTHING before a new entry
     # This is an absolute rule per Dr. Saab.
     has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
@@ -567,6 +597,8 @@ def execute_crypto_trade(asset, direction):
             
             if resp.status_code in [200, 201]:
                 log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
+                # ACTIVATE LOCAL LOCK IMMEDIATELY
+                db.set_param("local_trade_active", "YES")
                 # Brief wait before sync to allow exchange to update
                 time.sleep(1)
                 sync_delta_position()

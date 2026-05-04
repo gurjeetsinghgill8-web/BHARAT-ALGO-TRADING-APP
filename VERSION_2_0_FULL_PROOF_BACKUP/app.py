@@ -98,7 +98,9 @@ st.title("🚀 BHARAT ALGOVERSE v2.0")
 # 1. LIVE METRICS (Block 1 Core)
 pnl_data, trade_count, win_rate, avg_pnl = db.get_stats(days=1)
 status = get_bot_status()
-active = db.get_param('crypto_active_symbol', 'NONE')
+call_active = db.get_param('active_call_symbol', 'NONE')
+put_active = db.get_param('active_put_symbol', 'NONE')
+target = db.get_param('signal_target', 'WAIT')
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -109,9 +111,12 @@ with c1:
     </div>''', unsafe_allow_html=True)
 with c2:
     st.markdown(f'''<div class="metric-card">
-        <p style="color: #94a3b8; margin:0;">BOT STATUS</p>
-        <p class="{'status-active' if status=='RUNNING' else 'status-stopped'}" style="font-size:2rem;">{status}</p>
-        <p style="color: #94a3b8; font-size:0.9rem;">Monitoring BTC</p>
+        <p style="color: #94a3b8; margin:0;">BOT STATUS: {status}</p>
+        <p class="{'status-active' if target!='WAIT' else 'status-stopped'}" style="font-size:1.5rem;">TARGET: {target}</p>
+        <div style="display:flex; justify-content:space-around; margin-top:10px;">
+            <div style="color: {'#4ade80' if call_active!='NONE' else '#64748b'}">C: {call_active}</div>
+            <div style="color: {'#f87171' if put_active!='NONE' else '#64748b'}">P: {put_active}</div>
+        </div>
     </div>''', unsafe_allow_html=True)
 with c3:
     st.markdown(f'''<div class="metric-card">
@@ -119,6 +124,17 @@ with c3:
         <p style="font-size:2.5rem; font-weight:700; color:#60a5fa;">{win_rate:.1f}%</p>
         <p style="color: #94a3b8; font-size:0.9rem;">{trade_count} Trades Today</p>
     </div>''', unsafe_allow_html=True)
+
+# 1.5 LIVE UNREALIZED PNL (The Real-Time Pulse)
+upnl = float(db.get_param('unrealized_pnl', '0'))
+st.markdown(f'''
+    <div style="background: rgba(255, 255, 255, 0.03); border-radius: 15px; padding: 15px; margin: 10px 0; border: 1px solid rgba(255,255,255,0.05); text-align: center;">
+        <span style="color: #94a3b8; font-size: 0.9rem;">LIVE POSITION PnL: </span>
+        <span style="color: {'#4ade80' if upnl >=0 else '#f87171'}; font-size: 1.5rem; font-weight: 600;">
+            ${upnl:.2f} ({"40% SL ACTIVE" if upnl != 0 else "NO TRADE"})
+        </span>
+    </div>
+''', unsafe_allow_html=True)
 
 import delta_executor
 
@@ -143,7 +159,11 @@ with tab1:
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
         if st.button("🔥 START ENGINE", key="start_main"):
-            if os.name != 'nt':
+            if os.name == 'nt':
+                # Windows startup
+                subprocess.Popen(["python", "main.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                # Linux startup
                 subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
             db.set_param('crypto_algo_running', 'ON')
             st.rerun()
@@ -151,7 +171,11 @@ with tab1:
         st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
         if st.button("🛑 STOP ENGINE", key="stop_main"):
             db.set_param('crypto_algo_running', 'OFF')
-            if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
+            if os.name == 'nt':
+                # Windows stop (kills all python processes running main.py)
+                subprocess.run("wmic process where \"CommandLine like '%main.py%'\" delete", shell=True)
+            else:
+                subprocess.run("pkill -f main.py", shell=True)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -161,9 +185,12 @@ with tab2:
     
     # EMERGENCY RESET BUTTON
     if st.button("🚨 RESET BOT MEMORY (Emergency Only)"):
-        db.set_param("crypto_active_symbol", "")
-        db.set_param("crypto_active_product_id", "")
-        db.set_param("crypto_active_entry_price", "0")
+        db.set_param("active_call_symbol", "NONE")
+        db.set_param("active_put_symbol", "NONE")
+        db.set_param("local_trade_active", "NO")
+        db.set_param("order_pending", "NO")
+        db.set_param("signal_target", "WAIT")
+        db.set_param("crypto_active_symbol", "NONE")
         st.warning("⚠️ Bot memory cleared! Bot will now take a fresh entry on next signal.")
         st.rerun()
 

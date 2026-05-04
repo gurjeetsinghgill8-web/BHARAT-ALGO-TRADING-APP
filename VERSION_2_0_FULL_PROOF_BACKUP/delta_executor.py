@@ -89,7 +89,8 @@ def get_delta_auth_headers(method, path, payload="", query_string=""):
         'api-key': api_key,
         'signature': signature,
         'timestamp': timestamp,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BHARAT-ALGO-V2'
     }
 
 def get_next_friday_expiry():
@@ -252,13 +253,12 @@ def find_gill_crypto_option(asset, direction):
     )
 
 def sync_delta_position():
-    """Syncs local DB with actual Delta Exchange positions. SAFETY FIRST."""
+    """Syncs local DB with actual Delta Exchange positions. Tracks CALL and PUT separately."""
     api_key = db.get_param('delta_api_key', '')
     if not api_key: return False
     
-    # Use /v2/positions/margined which is more stable on India servers
-    # Adding underlying_asset_symbol to avoid bad_schema errors
-    path = "/v2/positions/margined"
+    # CRITICAL: Delta V2 positions endpoint REQUIRES underlying_asset_symbol or product_id
+    path = "/v2/positions"
     query = "?underlying_asset_symbol=BTC"
     url = f"https://api.india.delta.exchange{path}{query}"
     
@@ -268,30 +268,111 @@ def sync_delta_position():
         
         if resp.status_code == 200:
             positions = resp.json().get('result', [])
-            found = False
+            
+            call_symbol = "NONE"
+            call_pid = ""
+            put_symbol = "NONE"
+            put_pid = ""
+            
             for p in positions:
                 size = float(p.get('size', 0))
                 if size != 0:
                     symbol = p.get('product', {}).get('symbol', '')
                     pid = str(p.get('product_id', ''))
-                    db.set_param("crypto_active_symbol", symbol)
-                    db.set_param("crypto_active_product_id", pid)
-                    found = True
-                    break
+                    
+                    if "CALL" in symbol.upper() or "-C-" in symbol.upper() or symbol.startswith("C-"):
+                        call_symbol = symbol
+                        call_pid = pid
+                    elif "PUT" in symbol.upper() or "-P-" in symbol.upper() or symbol.startswith("P-"):
+                        put_symbol = symbol
+                        put_pid = pid
+
+            # --- PREVENT OVER-TRADING: Check for Open Orders ---
+            try:
+                order_path = "/v2/orders"
+                order_query = "?symbol=BTC&state=open"
+                order_url = f"https://api.india.delta.exchange{order_path}{order_query}"
+                order_headers = get_delta_auth_headers("GET", order_path, query_string=order_query)
+                order_resp = requests.get(order_url, headers=order_headers, timeout=5)
+                if order_resp.status_code == 200:
+                    open_orders = order_resp.json().get('result', [])
+                    if open_orders:
+                        # If we have open orders, treat as "Trading in progress"
+                        db.set_param("order_pending", "YES")
+                    else:
+                        db.set_param("order_pending", "NO")
+            except: pass
             
-            if not found:
+            db.set_param("active_call_symbol", call_symbol)
+            db.set_param("active_call_pid", call_pid)
+            db.set_param("active_put_symbol", put_symbol)
+            db.set_param("active_put_pid", put_pid)
+            
+            # Legacy support for dashboard
+            if call_symbol != "NONE" and put_symbol != "NONE":
+                db.set_param("crypto_active_symbol", "HEDGED (C+P)")
+            elif call_symbol != "NONE":
+                db.set_param("crypto_active_symbol", call_symbol)
+            elif put_symbol != "NONE":
+                db.set_param("crypto_active_symbol", put_symbol)
+            else:
                 db.set_param("crypto_active_symbol", "NONE")
-                db.set_param("crypto_active_product_id", "")
-            return True # Successfully verified position state
+                
+            # Fetch Unrealized PnL for Stop Loss checking
+            unrealized_pnl = 0
+            for p in positions:
+                unrealized_pnl += float(p.get('unrealized_pnl', 0))
+            db.set_param("unrealized_pnl", str(unrealized_pnl))
+                
+            return True 
         else:
             from main import log_terminal
-            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}). Msg: {resp.json().get('error', {}).get('message', 'Schema Error')}", "ERROR")
+            # Check for specifically 400 errors (often schema or IP)
+            err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
+            log_terminal(f"🚨 API SYNC FAILED ({resp.status_code}): {err_msg}", "ERROR")
             db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
             return False 
     except Exception as e:
         print(f"[SYNC EXCEPTION] {e}")
         db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
         return False
+
+def check_stop_loss():
+    """
+    Checks if current open positions have hit the 40% loss threshold.
+    If so, triggers immediate square off.
+    """
+    mode = db.get_param('trade_mode', 'PAPER')
+    if mode != "LIVE": return False
+
+    try:
+        # 1. Get positions to find entry value and current PnL
+        path = "/v2/positions"
+        query = "?underlying_asset_symbol=BTC"
+        url = f"https://api.india.delta.exchange{path}{query}"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            positions = resp.json().get('result', [])
+            for p in positions:
+                size = abs(float(p.get('size', 0)))
+                if size > 0:
+                    upnl = float(p.get('unrealized_pnl', 0))
+                    # Entry value = size * entry_price
+                    # We can use margin or cost_value if available, but let's be safe.
+                    # Usually 40% SL on option premium.
+                    entry_value = float(p.get('entry_value', 0))
+                    if entry_value != 0:
+                        loss_pct = (upnl / abs(entry_value)) * 100
+                        if loss_pct <= -40: # 40% loss
+                            from main import log_terminal
+                            log_terminal(f"🚨 HARD STOP LOSS HIT: {loss_pct:.1f}%! Squaring off...", "ALERT")
+                            square_off_crypto(p.get('product_id'))
+                            return True
+    except Exception as e:
+        print(f"[SL CHECK ERROR] {e}")
+    return False
 
 def send_daily_summary():
     from main import send_telegram_msg
@@ -330,40 +411,66 @@ def send_weekly_summary():
     msg += f"----------------------------"
     send_telegram_msg(msg)
 
-def square_off_crypto():
-    sync_delta_position()
-    symbol = db.get_param("crypto_active_symbol", "")
-    pid = db.get_param("crypto_active_product_id", "")
+def square_off_crypto(target_pid=None):
+    """
+    SQUARES OFF a position. 
+    If target_pid is provided, closes only that. 
+    Otherwise, syncs and closes everything.
+    """
     mode = db.get_param('trade_mode', 'PAPER')
     
-    if not symbol or not pid: return True
-    
-    log_crypto(f"SQUARING OFF: {symbol}")
-    
-    if mode == "LIVE":
-        try:
-            url = "https://api.india.delta.exchange/v2/orders"
-            # Fetch size to close
-            url_pos = "https://api.india.delta.exchange/v2/positions"
-            h_pos = get_delta_auth_headers("GET", "/v2/positions")
-            r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-            size = 1
-            if r_pos.status_code == 200:
-                for p in r_pos.json().get('result', []):
-                    if str(p.get('product_id')) == str(pid):
-                        size = abs(int(float(p.get('size', 0))))
-                        break
-            
-            payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"sell","order_type":"market_order","close_on_trigger":true}'
-            h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-            requests.post(url, headers=h_order, data=payload, timeout=10)
-        except Exception as e:
-            log_crypto(f"Square Off Error: {e}")
+    # If no PID, we sync first to see what's open
+    if not target_pid:
+        sync_delta_position()
+        pids = []
+        c_pid = db.get_param("active_call_pid", "")
+        p_pid = db.get_param("active_put_pid", "")
+        if c_pid: pids.append(c_pid)
+        if p_pid: pids.append(p_pid)
+    else:
+        pids = [target_pid]
 
-    # Reset DB immediately for fast Lego experience
-    db.set_param("crypto_active_symbol", "")
-    db.set_param("crypto_active_product_id", "")
-    db.set_param("crypto_active_entry_price", "0")
+    if not pids: return True
+    
+    for pid in pids:
+        log_crypto(f"RETRYING SQUARE OFF for PID: {pid}")
+        if mode == "LIVE":
+            try:
+                # 1. Get current size from /v2/positions
+                url_pos = "https://api.india.delta.exchange/v2/positions"
+                h_pos = get_delta_auth_headers("GET", "/v2/positions")
+                r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
+                
+                size = 0
+                if r_pos.status_code == 200:
+                    for p in r_pos.json().get('result', []):
+                        if str(p.get('product_id')) == str(pid):
+                            size = abs(int(float(p.get('size', 0))))
+                            break
+                
+                if size == 0: continue # Already closed
+
+                # 2. Send Market Close Order
+                url = "https://api.india.delta.exchange/v2/orders"
+                # Determine side: if size is positive (long), we need to SELL to close.
+                # If size is negative (short), we need to BUY to close.
+                # (Though this bot only buys, let's make it robust).
+                side = "sell" # Default for our LONG positions
+                
+                payload = '{"product_id":' + str(pid) + ',"size":' + str(size) + ',"side":"' + side + '","order_type":"market_order","close_on_trigger":true}'
+                h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
+                resp = requests.post(url, headers=h_order, data=payload, timeout=10)
+                
+                if resp.status_code in [200, 201]:
+                    log_crypto(f"Square Off Order Sent for {pid}")
+                    # Clear local lock ONLY after successful square off command
+                    db.set_param("local_trade_active", "NO")
+                else:
+                    log_crypto(f"Square Off Failed for {pid}: {resp.status_code}")
+            except Exception as e:
+                log_crypto(f"Square Off Exception for {pid}: {e}")
+
+    # Don't reset DB immediately; let sync_delta_position do it on next cycle
     return True
 
 def get_dynamic_quantity(option_price):
@@ -393,6 +500,10 @@ def get_dynamic_quantity(option_price):
     return manual_lots
 
 def execute_crypto_trade(asset, direction):
+    """
+    Executes a trade based on signal.
+    Does NOT block if previous position is still closing.
+    """
     from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
     
@@ -401,35 +512,82 @@ def execute_crypto_trade(asset, direction):
         send_telegram_msg("❌ CRITICAL: API Key missing in DB!")
         return
 
-    log_crypto(f"EXECUTE ({mode}): {direction} {asset}")
+    log_crypto(f"SIGNAL RECEIVED: {direction} {asset}")
     
-    # --- MANDATORY SQUARE OFF ALL POSITIONS FIRST ---
-    log_terminal("CLEAN SLATE: Squaring off all positions before new entry.", "INFO")
-    square_off_crypto()
-    time.sleep(2) # Brief wait for exchange to process
+    # 1. Update Target Signal in DB (for Janitor to handle exits)
+    db.set_param("signal_target", direction)
     
-    # --- FAIL-SAFE SYNC ---
+    # 2. FAIL-SAFE SYNC: If we can't see the screen, we don't trade!
     if not sync_delta_position():
-        log_terminal("🛑 SYNC FAILED: Aborting entry to prevent double-trade. Check API/IP!", "ERROR")
+        log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed. Aborting entry to prevent over-trading!", "ERROR")
+        return
+        
+    # 2.1 PENDING ORDER SAFETY
+    if db.get_param("order_pending", "NO") == "YES":
+        log_terminal("⏳ PENDING ORDER DETECTED: Waiting for previous order to fill/cancel before new trade.", "INFO")
         return
 
-    # Verify screen is empty
-    active = db.get_param("crypto_active_symbol", "")
-    if active and active != "NONE":
-        log_terminal(f"🛑 SAFETY BLOCK: Screen not empty ({active}). Cannot enter new trade.", "ERROR")
+    # 2.2 LOCAL TRADE LOCK SAFETY (Double-Entry Prevention)
+    if db.get_param("local_trade_active", "NO") == "YES":
+        # Check if API also sees it. If API says NONE but Local says YES, we trust Local for 2 minutes (API Lag)
+        # unless we are sure it was a failure.
+        log_terminal("🛡️ LOCAL LOCK ACTIVE: System believes a trade is already running. Blocking new entry.", "ALERT")
         return
 
-    # --- SAFETY LOCK: PRE-SAVE STATE ---
-    db.set_param("crypto_active_symbol", "PENDING_ENTRY")
+    # 2.3 TOTAL LOT GUARD
+    sync_delta_position()
+    manual_lots = int(db.get_param('crypto_trade_size', '3'))
+    # Calculate total size across all positions
+    total_open_size = 0
+    # Re-fetch positions to be absolutely sure
+    try:
+        path = "/v2/positions"
+        url = f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC"
+        headers = get_delta_auth_headers("GET", path, query_string="?underlying_asset_symbol=BTC")
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            for p in r.json().get('result', []):
+                total_open_size += abs(float(p.get('size', 0)))
+    except: pass
     
+    if total_open_size >= manual_lots:
+        log_terminal(f"🛑 CAPACITY FULL: Current Size {total_open_size} >= Target {manual_lots}. No more entries allowed.", "ALERT")
+        db.set_param("local_trade_active", "YES") # Sync local lock
+        return
+
+    # 2.5 CLEAN SLATE RULE: Close EVERYTHING before a new entry
+    # This is an absolute rule per Dr. Saab.
+    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
+    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
+
+    if (direction == "BUY" and has_put) or (direction == "SELL" and has_call) or (has_call and has_put):
+        log_terminal("🧹 CLEAN SLATE: Closing all existing positions before fresh entry...", "TRADE")
+        square_off_crypto() # Closes everything
+        time.sleep(2) # Wait for execution
+        sync_delta_position()
+
+    # Re-check status after clean slate
+    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
+    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
+
+    if direction == "BUY" and has_call:
+        log_terminal(f"STAY: Already have CALL active. Holding.", "INFO")
+        return
+    
+    if direction == "SELL" and has_put:
+        log_terminal(f"STAY: Already have PUT active. Holding.", "INFO")
+        return
+
+    # 3. Find Best Option to Open
     opt = find_gill_crypto_option(asset, direction)
     if not opt: 
-        db.set_param("crypto_active_symbol", "") # Release lock if no option found
+        log_terminal(f"ERROR: Could not find suitable {direction} option.", "ERROR")
         return
         
     symbol, price, strike, expiry, pid = opt
     qty = get_dynamic_quantity(price)
     
+    # 4. Execute Entry
     if mode == "LIVE":
         try:
             url = "https://api.india.delta.exchange/v2/orders"
@@ -437,21 +595,26 @@ def execute_crypto_trade(asset, direction):
             headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
-            if resp.status_code == 200 or resp.status_code == 201:
-                db.set_param("crypto_active_symbol", symbol)
-                db.set_param("crypto_active_product_id", str(pid))
-                db.set_param("crypto_active_entry_price", str(price))
-                log_terminal(f"LIVE ORDER SUCCESS: {symbol} @ {price} (Qty: {qty})", "TRADE")
+            if resp.status_code in [200, 201]:
+                log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
+                # ACTIVATE LOCAL LOCK IMMEDIATELY
+                db.set_param("local_trade_active", "YES")
+                # Brief wait before sync to allow exchange to update
+                time.sleep(1)
+                sync_delta_position()
             else:
-                db.set_param("crypto_active_symbol", "") # Release lock on failure
-                log_terminal(f"LIVE ORDER FAILED: {resp.status_code}", "ERROR")
+                log_terminal(f"LIVE ENTRY FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
         except Exception as e:
-            db.set_param("crypto_active_symbol", "") # Release lock on exception
-            log_terminal(f"API EXCEPTION: {e}", "ERROR")
+            log_terminal(f"ENTRY EXCEPTION: {e}", "ERROR")
     else:
         # Paper Trade
+        log_terminal(f"PAPER ENTRY: {symbol} @ {price}", "TRADE")
+        # Update DB for paper trade
+        if direction == "BUY":
+            db.set_param("active_call_symbol", symbol)
+            db.set_param("active_call_pid", str(pid))
+        else:
+            db.set_param("active_put_symbol", symbol)
+            db.set_param("active_put_pid", str(pid))
         db.set_param("crypto_active_symbol", symbol)
-        db.set_param("crypto_active_product_id", str(pid))
-        db.set_param("crypto_active_entry_price", str(price))
-        log_terminal(f"PAPER TRADE: {symbol} @ {price} (Qty: {qty})", "TRADE")
 

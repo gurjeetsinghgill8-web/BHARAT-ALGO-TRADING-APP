@@ -224,22 +224,17 @@ def run_crypto_sar():
         log_terminal(f"SAR Engine Error: {e}", "ERROR")
 
 def main():
-    # --- LEGO BLOCK: SINGLETON PROCESS LOCK ---
-    # Prevents multiple bots from running and double-trading
+    # --- BULLETPROOF SINGLETON LOCK (Socket-based) ---
+    # This prevents multiple instances even if file locks fail.
+    try:
+        lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lock_socket.bind(('127.0.0.1', 47200)) # Unique port for BHARAT-ALGO
+    except socket.error:
+        print("🚨 CRITICAL: Bot is already running in another process. Exiting to prevent double-trading.")
+        sys.exit(1)
+
+    # Secondary File Lock (Keep for status tracking)
     lock_file = "bot.lock"
-    if os.path.exists(lock_file):
-        try:
-            with open(lock_file, "r") as f:
-                old_pid = int(f.read().strip())
-            # Check if process is actually running
-            os.kill(old_pid, 0) 
-            print(f"🚨 ALERT: Bot already running (PID: {old_pid}). Exiting.")
-            sys.exit(1)
-        except (OSError, ValueError, ProcessLookupError):
-            # Process is dead, safe to remove lock
-            try: os.remove(lock_file)
-            except: pass
-            
     with open(lock_file, "w") as f:
         f.write(str(os.getpid()))
 

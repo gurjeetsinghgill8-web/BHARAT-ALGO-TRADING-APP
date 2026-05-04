@@ -105,27 +105,78 @@ def log_terminal(msg, type="INFO"):
     if type in ["TRADE", "ALERT", "ERROR", "START"]:
         send_telegram_msg(full_msg)
 
+def run_recovery_mode(reason):
+    """
+    🆘 SELF-HEALING RECOVERY MODE
+    Triggered when the system detects a catastrophic state or persistent API errors.
+    1. Sends Alert. 2. Squares off everything. 3. Waits 5 mins. 4. Resumes fresh.
+    """
+    log_terminal(f"🆘 TRIGGERING AUTO-RECOVERY: {reason}", "ERROR")
+    send_telegram_msg(f"🆘 AUTO-RECOVERY ACTIVATED!\nReason: {reason}\nAction: Closing all trades and cooling down for 5 mins.")
+    
+    # 1. Emergency Square Off
+    delta_executor.square_off_crypto() 
+    
+    # 2. Reset DB to factory safe state
+    db.set_param("active_call_symbol", "NONE")
+    db.set_param("active_put_symbol", "NONE")
+    db.set_param("signal_target", "WAIT")
+    db.set_param("crypto_active_symbol", "NONE")
+    
+    # 3. Cooling Period
+    log_terminal("System is Cooling Down... Will resume in 5 minutes.", "ALERT")
+    time.sleep(300)
+    log_terminal("Recovery Complete. System Resuming Normal Operation.", "START")
+    send_telegram_msg("✅ Recovery Complete. System is now back online and waiting for fresh 5M signal.")
+
+def run_janitor():
+    """
+    AGGRRESIVE JANITOR (The Reaper)
+    Runs frequently to ensure any 'zombie' positions that should be closed are actually closed.
+    Retries every 30 seconds until the screen is clean for the non-targeted side.
+    """
+    target = db.get_param("signal_target", "WAIT")
+    delta_executor.sync_delta_position()
+    
+    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
+    put_active = db.get_param("active_put_symbol", "NONE") != "NONE"
+    
+    if target == "BUY": # Only CALL should be open
+        if put_active:
+            log_terminal(f"JANITOR: Closing rogue PUT position {db.get_param('active_put_symbol')}...", "ALERT")
+            delta_executor.square_off_crypto(db.get_param("active_put_pid"))
+    elif target == "SELL": # Only PUT should be open
+        if call_active:
+            log_terminal(f"JANITOR: Closing rogue CALL position {db.get_param('active_call_symbol')}...", "ALERT")
+            delta_executor.square_off_crypto(db.get_param("active_call_pid"))
+    elif target == "WAIT": # Nothing should be open
+        if call_active or put_active:
+            log_terminal("JANITOR: Closing ALL positions (Signal WAIT)...", "ALERT")
+            delta_executor.square_off_crypto()
+
 def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF': return
     asset = db.get_param('crypto_asset', 'BTC')
 
-    # Enforce 5-minute boundary rule (but allow immediate check on start)
+    # STICKY SIGNAL RULE: Only check new entry signals on 5-minute boundaries
     now = datetime.datetime.now()
-    if not hasattr(run_crypto_sar, "last_logic_run"): run_crypto_sar.last_logic_run = 0
-    
-    # Run logic if:
-    # 1. It's a 5-minute boundary (0, 5, 10...)
-    # 2. Or if we haven't run it yet (startup)
     is_boundary = (now.minute % 5 == 0)
-    time_since_last = time.time() - run_crypto_sar.last_logic_run
     
-    if not is_boundary and time_since_last < 300:
-        # Just heartbeat, no logic
+    # We allow a small window (first 30s of the 5th minute) to trigger logic
+    if not is_boundary:
+        # Not a 5m boundary, just run janitor and skip entry logic
+        run_janitor()
         return
 
-    run_crypto_sar.last_logic_run = time.time()
+    # To prevent multiple triggers within the same 5th minute
+    if not hasattr(run_crypto_sar, "last_logic_minute"): run_crypto_sar.last_logic_minute = -1
+    if run_crypto_sar.last_logic_minute == now.minute:
+        # Already ran entry logic for this 5m candle
+        run_janitor()
+        return
+        
+    run_crypto_sar.last_logic_minute = now.minute
     
-    # Use DB parameters or defaults (Matches Aggressive SAR requirements)
     st_period = int(float(db.get_param('st_period', 10)))
     st_multiplier = float(db.get_param('st_multiplier', 1.5))
     
@@ -136,42 +187,36 @@ def run_crypto_sar():
             return
         
         df = logic.calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
-        
-        # Signal Logic: Uses iloc[-2] internally for closed candle
         signal = logic.get_signal(df) 
         price = df['close'].iloc[-2]
         
-        log_terminal(f"STRATEGY CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
-        
-        delta_executor.sync_delta_position()
-        active_symbol = db.get_param("crypto_active_symbol", "")
-        mode = db.get_param('trade_mode', 'PAPER')
-        
-        has_bullish = active_symbol.startswith("C-") or "-C-" in active_symbol or "CALL" in active_symbol.upper()
-        has_bearish = active_symbol.startswith("P-") or "-P-" in active_symbol or "PUT" in active_symbol.upper()
-        has_nothing = not active_symbol or active_symbol == "NONE"
-        is_locked = active_symbol == "API_ERROR_LOCK"
+        # 2. IMMEDIATE ENTRY IF EMPTY SCREEN
+        active = db.get_param("crypto_active_symbol", "NONE")
+        if active == "NONE" and not is_boundary:
+            log_terminal(f"EMPTY SCREEN DETECTED: Taking immediate trade as per signal: {signal}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, signal)
+            return
 
-        # SAR CORE LOGIC:
-        if is_locked:
-            log_terminal("SYSTEM LOCKED: Waiting for API sync to recover.", "ALERT")
-        elif has_nothing:
-            if signal != "WAIT":
-                log_terminal(f"INITIAL ENTRY: {asset} is {signal}. Executing Trade.", "TRADE")
-                delta_executor.execute_crypto_trade(asset, "BUY" if signal == "BUY" else "SELL")
-        elif signal == "BUY" and has_bearish:
-            log_terminal(f"SAR FLIP: Bearish -> Bullish. Closing Put, Opening Call.", "TRADE")
-            delta_executor.execute_crypto_trade(asset, "BUY")
-        elif signal == "SELL" and has_bullish:
-            log_terminal(f"SAR FLIP: Bullish -> Bearish. Closing Call, Opening Put.", "TRADE")
-            delta_executor.execute_crypto_trade(asset, "SELL")
+        if not is_boundary:
+            run_janitor()
+            return
+            
+        # 3. BOUNDARY SIGNAL LOGIC
+        log_terminal(f"5M SIGNAL CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
+        
+        # Execute trade logic (Now decoupled and parallel)
+        if signal != "WAIT":
+            delta_executor.execute_crypto_trade(asset, signal)
         else:
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Signal {signal} matches current position {active_symbol}. Holding.")
+            db.set_param("signal_target", "WAIT")
+            run_janitor()
 
         # Periodic Heartbeat for Telegram (Every 30 mins)
         if not hasattr(run_crypto_sar, "last_status"): run_crypto_sar.last_status = 0
         if time.time() - run_crypto_sar.last_status > 1800:
-            send_telegram_msg(f"✅ VPS Status Report [{mode}]: {asset} @ ${price} | Signal: {signal} | Position: {active_symbol or 'NONE'}")
+            active = db.get_param("crypto_active_symbol", "NONE")
+            mode = db.get_param('trade_mode', 'PAPER')
+            send_telegram_msg(f"✅ VPS Status [{mode}]: {asset} @ ${price} | Signal: {signal} | Active: {active}")
             run_crypto_sar.last_status = time.time()
 
         crypto_roller.check_and_roll_crypto()
@@ -179,22 +224,17 @@ def run_crypto_sar():
         log_terminal(f"SAR Engine Error: {e}", "ERROR")
 
 def main():
-    # --- LEGO BLOCK: SINGLETON PROCESS LOCK ---
-    # Prevents multiple bots from running and double-trading
+    # --- BULLETPROOF SINGLETON LOCK (Socket-based) ---
+    # This prevents multiple instances even if file locks fail.
+    try:
+        lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lock_socket.bind(('127.0.0.1', 47200)) # Unique port for BHARAT-ALGO
+    except socket.error:
+        print("🚨 CRITICAL: Bot is already running in another process. Exiting to prevent double-trading.")
+        sys.exit(1)
+
+    # Secondary File Lock (Keep for status tracking)
     lock_file = "bot.lock"
-    if os.path.exists(lock_file):
-        try:
-            with open(lock_file, "r") as f:
-                old_pid = int(f.read().strip())
-            # Check if process is actually running
-            os.kill(old_pid, 0) 
-            print(f"🚨 ALERT: Bot already running (PID: {old_pid}). Exiting.")
-            sys.exit(1)
-        except (OSError, ValueError, ProcessLookupError):
-            # Process is dead, safe to remove lock
-            try: os.remove(lock_file)
-            except: pass
-            
     with open(lock_file, "w") as f:
         f.write(str(os.getpid()))
 
@@ -215,19 +255,47 @@ def main():
         db.set_param('crypto_asset', 'BTC')
         
         last_status_msg = time.time()
+        error_streak = 0
         
         while True:
             try:
-                # Run Crypto SAR Engine
+                # 1. Run Engine
                 run_crypto_sar()
                 
+                # 1.5 Check Stop Loss (40%)
+                delta_executor.check_stop_loss()
+
+                # 2. Check for Persistent API Errors (The 'Blindfold' issue)
+                active = db.get_param('crypto_active_symbol', 'NONE')
+                if active == "API_ERROR_LOCK":
+                    error_streak += 1
+                else:
+                    error_streak = 0
+                
+                # If API fails 5 times in a row (approx 1.25 mins with 15s sleep), trigger recovery
+                if error_streak >= 5:
+                    run_recovery_mode("Persistent API Sync Failure (Blindfold)")
+                    error_streak = 0
+                
+                # 3. Check for Position Mismatch (Hedged for too long)
+                c_act = db.get_param("active_call_symbol", "NONE") != "NONE"
+                p_act = db.get_param("active_put_symbol", "NONE") != "NONE"
+                if c_act and p_act:
+                    if not hasattr(main, "hedged_since"): main.hedged_since = time.time()
+                    if time.time() - main.hedged_since > 180: # 3 minutes max hedge
+                        run_recovery_mode("Position Mismatch (Hedged for too long)")
+                        delattr(main, "hedged_since")
+                elif hasattr(main, "hedged_since"):
+                    delattr(main, "hedged_since")
+
                 # Terminal Heartbeat
-                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Monitoring {db.get_param('crypto_active_symbol', 'NONE')}")
+                target = db.get_param('signal_target', 'NONE')
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Target: {target} | Active: {active}")
                 
                 # Telegram Status (Every 30 mins)
                 if time.time() - last_status_msg > 1800:
-                    active = db.get_param('crypto_active_symbol', 'NONE')
-                    msg = f"✅ VPS Heartbeat: System Running.\n📡 Monitoring: {active}\n💰 Mode: {db.get_param('trade_mode', 'PAPER')}"
+                    mode = db.get_param('trade_mode', 'PAPER')
+                    msg = f"✅ VPS Heartbeat: System Running.\n📡 Active: {active}\n🎯 Target: {target}\n💰 Mode: {mode}"
                     send_telegram_msg(msg)
                     last_status_msg = time.time()
                 
@@ -238,7 +306,7 @@ def main():
                         delta_executor.send_weekly_summary()
                         main.last_weekly_report = now
                         
-                time.sleep(60) 
+                time.sleep(15) # Reduced to 15s for faster Janitor and Empty Screen checks
             except KeyboardInterrupt: break
             except Exception as e:
                 log_terminal(f"Main Loop Error: {e}", "ERROR")

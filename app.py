@@ -187,6 +187,8 @@ with tab2:
     if st.button("🚨 RESET BOT MEMORY (Emergency Only)"):
         db.set_param("active_call_symbol", "NONE")
         db.set_param("active_put_symbol", "NONE")
+        db.set_param("local_trade_active", "NO")
+        db.set_param("order_pending", "NO")
         db.set_param("signal_target", "WAIT")
         db.set_param("crypto_active_symbol", "NONE")
         st.warning("⚠️ Bot memory cleared! Bot will now take a fresh entry on next signal.")
