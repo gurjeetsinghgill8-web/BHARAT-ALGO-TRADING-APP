@@ -297,11 +297,11 @@ def sync_delta_position():
             for p in positions:
                 size = abs(float(p.get('size', 0)))
                 if size > 0:
-                    symbol = p.get('product', {}).get('symbol', '')
-                    pid = str(p.get('product_id', ''))
+                    # Robust PID and Symbol fetching
+                    symbol = p.get('product', {}).get('symbol') or p.get('symbol') or ""
+                    pid = str(p.get('product_id') or p.get('id') or "")
                     
                     symbol_up = symbol.upper()
-                    # More robust matching patterns for Delta symbols like P-BTC-... or BTC-P-...
                     is_call = "-C-" in symbol_up or symbol_up.startswith("C-") or "CALL" in symbol_up
                     is_put = "-P-" in symbol_up or symbol_up.startswith("P-") or "PUT" in symbol_up
                     
@@ -466,8 +466,14 @@ def square_off_crypto(target_pid=None):
             r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
             if r_pos.status_code == 200:
                 raw_data = r_pos.json().get('result', [])
-                pids = [str(p.get('product_id')) for p in raw_data if abs(float(p.get('size', 0))) > 0]
-        except: pass
+                # Aggressive PID fetching: Grab anything with size > 0
+                for p in raw_data:
+                    if abs(float(p.get('size', 0))) > 0:
+                        pid = str(p.get('product_id') or p.get('id', ''))
+                        if pid and pid not in pids:
+                            pids.append(pid)
+        except Exception as e:
+            print(f"[NUCLEAR FAIL] {e}")
 
     if not pids:
         # Screen is truly clean
