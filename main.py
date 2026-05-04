@@ -105,6 +105,30 @@ def log_terminal(msg, type="INFO"):
     if type in ["TRADE", "ALERT", "ERROR", "START"]:
         send_telegram_msg(full_msg)
 
+def run_recovery_mode(reason):
+    """
+    🆘 SELF-HEALING RECOVERY MODE
+    Triggered when the system detects a catastrophic state or persistent API errors.
+    1. Sends Alert. 2. Squares off everything. 3. Waits 5 mins. 4. Resumes fresh.
+    """
+    log_terminal(f"🆘 TRIGGERING AUTO-RECOVERY: {reason}", "ERROR")
+    send_telegram_msg(f"🆘 AUTO-RECOVERY ACTIVATED!\nReason: {reason}\nAction: Closing all trades and cooling down for 5 mins.")
+    
+    # 1. Emergency Square Off
+    delta_executor.square_off_crypto() 
+    
+    # 2. Reset DB to factory safe state
+    db.set_param("active_call_symbol", "NONE")
+    db.set_param("active_put_symbol", "NONE")
+    db.set_param("signal_target", "WAIT")
+    db.set_param("crypto_active_symbol", "NONE")
+    
+    # 3. Cooling Period
+    log_terminal("System is Cooling Down... Will resume in 5 minutes.", "ALERT")
+    time.sleep(300)
+    log_terminal("Recovery Complete. System Resuming Normal Operation.", "START")
+    send_telegram_msg("✅ Recovery Complete. System is now back online and waiting for fresh 5M signal.")
+
 def run_janitor():
     """
     AGGRRESIVE JANITOR (The Reaper)
@@ -224,14 +248,37 @@ def main():
         db.set_param('crypto_asset', 'BTC')
         
         last_status_msg = time.time()
+        error_streak = 0
         
         while True:
             try:
-                # Run Crypto SAR Engine (Includes Signal Check & Janitor)
+                # 1. Run Engine
                 run_crypto_sar()
                 
-                # Terminal Heartbeat
+                # 2. Check for Persistent API Errors (The 'Blindfold' issue)
                 active = db.get_param('crypto_active_symbol', 'NONE')
+                if active == "API_ERROR_LOCK":
+                    error_streak += 1
+                else:
+                    error_streak = 0
+                
+                # If API fails 5 times in a row (approx 2.5 mins), trigger recovery
+                if error_streak >= 5:
+                    run_recovery_mode("Persistent API Sync Failure (Blindfold)")
+                    error_streak = 0
+                
+                # 3. Check for Position Mismatch (Hedged for too long)
+                c_act = db.get_param("active_call_symbol", "NONE") != "NONE"
+                p_act = db.get_param("active_put_symbol", "NONE") != "NONE"
+                if c_act and p_act:
+                    if not hasattr(main, "hedged_since"): main.hedged_since = time.time()
+                    if time.time() - main.hedged_since > 180: # 3 minutes max hedge
+                        run_recovery_mode("Position Mismatch (Hedged for too long)")
+                        delattr(main, "hedged_since")
+                elif hasattr(main, "hedged_since"):
+                    delattr(main, "hedged_since")
+
+                # Terminal Heartbeat
                 target = db.get_param('signal_target', 'NONE')
                 print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 💓 [HEARTBEAT] Target: {target} | Active: {active}")
                 
