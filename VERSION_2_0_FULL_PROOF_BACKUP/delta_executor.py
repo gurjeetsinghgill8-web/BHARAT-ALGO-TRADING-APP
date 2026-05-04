@@ -486,6 +486,50 @@ def square_off_crypto(target_pid=None):
     # Don't reset DB immediately; let sync_delta_position do it on next cycle
     return True
 
+def place_delta_bracket_orders(pid, qty, entry_price):
+    """
+    Places server-side Stop Loss and Take Profit orders on Delta Exchange.
+    SL: -40% | TP: +40%
+    """
+    from main import log_terminal
+    url = "https://api.india.delta.exchange/v2/orders"
+    
+    # 1. Stop Loss Order (-40%)
+    sl_price = round(entry_price * 0.60, 2)
+    sl_payload = {
+        "product_id": int(pid),
+        "size": int(qty),
+        "side": "sell",
+        "order_type": "stop_market_order",
+        "stop_order_type": "stop_loss_order",
+        "stop_price": str(sl_price),
+        "reduce_only": True
+    }
+    
+    # 2. Take Profit Order (+100%)
+    tp_price = round(entry_price * 2.00, 2)
+    tp_payload = {
+        "product_id": int(pid),
+        "size": int(qty),
+        "side": "sell",
+        "order_type": "take_profit_market_order",
+        "stop_price": str(tp_price),
+        "reduce_only": True
+    }
+    
+    import json
+    for name, payload_dict in [("STOP LOSS", sl_payload), ("TAKE PROFIT", tp_payload)]:
+        try:
+            payload = json.dumps(payload_dict)
+            headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
+            resp = requests.post(url, headers=headers, data=payload, timeout=10)
+            if resp.status_code in [200, 201]:
+                log_terminal(f"🛡️ {name} SET: @ {payload_dict['stop_price']} on Exchange", "INFO")
+            else:
+                log_terminal(f"⚠️ {name} FAILED: {resp.status_code} - {resp.text}", "ERROR")
+        except Exception as e:
+            log_terminal(f"⚠️ {name} EXCEPTION: {e}", "ERROR")
+
 def get_dynamic_quantity(option_price):
     # Lego Block: Priority Lot Selection
     # If user manually set lot size on dashboard, use it!
@@ -622,6 +666,10 @@ def execute_crypto_trade(asset, direction):
                 print(f"[DEBUG] Entry Response: {resp.text}")
                 # ACTIVATE LOCAL LOCK IMMEDIATELY
                 db.set_param("local_trade_active", "YES")
+                
+                # --- NEW: Place Server-Side Bracket Orders ---
+                place_delta_bracket_orders(pid, qty, price)
+                
                 # Brief wait before sync to allow exchange to update
                 time.sleep(1)
                 sync_delta_position()
