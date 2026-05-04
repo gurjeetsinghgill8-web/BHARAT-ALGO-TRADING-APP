@@ -125,6 +125,17 @@ with c3:
         <p style="color: #94a3b8; font-size:0.9rem;">{trade_count} Trades Today</p>
     </div>''', unsafe_allow_html=True)
 
+# 1.5 LIVE UNREALIZED PNL (The Real-Time Pulse)
+upnl = float(db.get_param('unrealized_pnl', '0'))
+st.markdown(f'''
+    <div style="background: rgba(255, 255, 255, 0.03); border-radius: 15px; padding: 15px; margin: 10px 0; border: 1px solid rgba(255,255,255,0.05); text-align: center;">
+        <span style="color: #94a3b8; font-size: 0.9rem;">LIVE POSITION PnL: </span>
+        <span style="color: {'#4ade80' if upnl >=0 else '#f87171'}; font-size: 1.5rem; font-weight: 600;">
+            ${upnl:.2f} ({"40% SL ACTIVE" if upnl != 0 else "NO TRADE"})
+        </span>
+    </div>
+''', unsafe_allow_html=True)
+
 import delta_executor
 
 # 2. CONTROL & STRATEGY (Block 2: Strategy Lab)
@@ -148,7 +159,11 @@ with tab1:
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
         if st.button("🔥 START ENGINE", key="start_main"):
-            if os.name != 'nt':
+            if os.name == 'nt':
+                # Windows startup
+                subprocess.Popen(["python", "main.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                # Linux startup
                 subprocess.Popen(["nohup", "python3", "main.py", "&"], shell=True)
             db.set_param('crypto_algo_running', 'ON')
             st.rerun()
@@ -156,7 +171,11 @@ with tab1:
         st.markdown('<div class="stop-btn">', unsafe_allow_html=True)
         if st.button("🛑 STOP ENGINE", key="stop_main"):
             db.set_param('crypto_algo_running', 'OFF')
-            if os.name != 'nt': subprocess.run("pkill -f main.py", shell=True)
+            if os.name == 'nt':
+                # Windows stop (kills all python processes running main.py)
+                subprocess.run("wmic process where \"CommandLine like '%main.py%'\" delete", shell=True)
+            else:
+                subprocess.run("pkill -f main.py", shell=True)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 

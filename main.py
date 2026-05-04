@@ -190,6 +190,18 @@ def run_crypto_sar():
         signal = logic.get_signal(df) 
         price = df['close'].iloc[-2]
         
+        # 2. IMMEDIATE ENTRY IF EMPTY SCREEN
+        active = db.get_param("crypto_active_symbol", "NONE")
+        if active == "NONE" and not is_boundary:
+            log_terminal(f"EMPTY SCREEN DETECTED: Taking immediate trade as per signal: {signal}", "TRADE")
+            delta_executor.execute_crypto_trade(asset, signal)
+            return
+
+        if not is_boundary:
+            run_janitor()
+            return
+            
+        # 3. BOUNDARY SIGNAL LOGIC
         log_terminal(f"5M SIGNAL CHECK: {asset} @ ${price} | Signal: {signal}", "INFO")
         
         # Execute trade logic (Now decoupled and parallel)
@@ -255,6 +267,9 @@ def main():
                 # 1. Run Engine
                 run_crypto_sar()
                 
+                # 1.5 Check Stop Loss (40%)
+                delta_executor.check_stop_loss()
+
                 # 2. Check for Persistent API Errors (The 'Blindfold' issue)
                 active = db.get_param('crypto_active_symbol', 'NONE')
                 if active == "API_ERROR_LOCK":
@@ -262,7 +277,7 @@ def main():
                 else:
                     error_streak = 0
                 
-                # If API fails 5 times in a row (approx 2.5 mins), trigger recovery
+                # If API fails 5 times in a row (approx 1.25 mins with 15s sleep), trigger recovery
                 if error_streak >= 5:
                     run_recovery_mode("Persistent API Sync Failure (Blindfold)")
                     error_streak = 0
@@ -296,7 +311,7 @@ def main():
                         delta_executor.send_weekly_summary()
                         main.last_weekly_report = now
                         
-                time.sleep(30) # Reduced from 60s to 30s for faster Janitor retries
+                time.sleep(15) # Reduced to 15s for faster Janitor and Empty Screen checks
             except KeyboardInterrupt: break
             except Exception as e:
                 log_terminal(f"Main Loop Error: {e}", "ERROR")

@@ -286,6 +286,22 @@ def sync_delta_position():
                     elif "PUT" in symbol.upper() or "-P-" in symbol.upper() or symbol.startswith("P-"):
                         put_symbol = symbol
                         put_pid = pid
+
+            # --- PREVENT OVER-TRADING: Check for Open Orders ---
+            try:
+                order_path = "/v2/orders"
+                order_query = "?symbol=BTC&state=open"
+                order_url = f"https://api.india.delta.exchange{order_path}{order_query}"
+                order_headers = get_delta_auth_headers("GET", order_path, query_string=order_query)
+                order_resp = requests.get(order_url, headers=order_headers, timeout=5)
+                if order_resp.status_code == 200:
+                    open_orders = order_resp.json().get('result', [])
+                    if open_orders:
+                        # If we have open orders, treat as "Trading in progress"
+                        db.set_param("order_pending", "YES")
+                    else:
+                        db.set_param("order_pending", "NO")
+            except: pass
             
             db.set_param("active_call_symbol", call_symbol)
             db.set_param("active_call_pid", call_pid)
@@ -302,6 +318,12 @@ def sync_delta_position():
             else:
                 db.set_param("crypto_active_symbol", "NONE")
                 
+            # Fetch Unrealized PnL for Stop Loss checking
+            unrealized_pnl = 0
+            for p in positions:
+                unrealized_pnl += float(p.get('unrealized_pnl', 0))
+            db.set_param("unrealized_pnl", str(unrealized_pnl))
+                
             return True 
         else:
             from main import log_terminal
@@ -314,6 +336,43 @@ def sync_delta_position():
         print(f"[SYNC EXCEPTION] {e}")
         db.set_param("crypto_active_symbol", "API_ERROR_LOCK")
         return False
+
+def check_stop_loss():
+    """
+    Checks if current open positions have hit the 40% loss threshold.
+    If so, triggers immediate square off.
+    """
+    mode = db.get_param('trade_mode', 'PAPER')
+    if mode != "LIVE": return False
+
+    try:
+        # 1. Get positions to find entry value and current PnL
+        path = "/v2/positions"
+        query = "?underlying_asset_symbol=BTC"
+        url = f"https://api.india.delta.exchange{path}{query}"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            positions = resp.json().get('result', [])
+            for p in positions:
+                size = abs(float(p.get('size', 0)))
+                if size > 0:
+                    upnl = float(p.get('unrealized_pnl', 0))
+                    # Entry value = size * entry_price
+                    # We can use margin or cost_value if available, but let's be safe.
+                    # Usually 40% SL on option premium.
+                    entry_value = float(p.get('entry_value', 0))
+                    if entry_value != 0:
+                        loss_pct = (upnl / abs(entry_value)) * 100
+                        if loss_pct <= -40: # 40% loss
+                            from main import log_terminal
+                            log_terminal(f"🚨 HARD STOP LOSS HIT: {loss_pct:.1f}%! Squaring off...", "ALERT")
+                            square_off_crypto(p.get('product_id'))
+                            return True
+    except Exception as e:
+        print(f"[SL CHECK ERROR] {e}")
+    return False
 
 def send_daily_summary():
     from main import send_telegram_msg
@@ -461,26 +520,33 @@ def execute_crypto_trade(asset, direction):
         log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed. Aborting entry to prevent over-trading!", "ERROR")
         return
         
+    # 2.1 PENDING ORDER SAFETY
+    if db.get_param("order_pending", "NO") == "YES":
+        log_terminal("⏳ PENDING ORDER DETECTED: Waiting for previous order to fill/cancel before new trade.", "INFO")
+        return
+
+    # 2.5 CLEAN SLATE RULE: Close EVERYTHING before a new entry
+    # This is an absolute rule per Dr. Saab.
     has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
     has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
 
-    if direction == "BUY": # Wants CALL
-        if has_call:
-            log_terminal(f"STAY: Already have CALL active. Holding.", "INFO")
-            return
-        # If we have PUT, trigger exit but don't wait!
-        if has_put:
-            log_terminal("SAR FLIP: Opening CALL while closing PUT...", "TRADE")
-            square_off_crypto(db.get_param("active_put_pid"))
+    if (direction == "BUY" and has_put) or (direction == "SELL" and has_call) or (has_call and has_put):
+        log_terminal("🧹 CLEAN SLATE: Closing all existing positions before fresh entry...", "TRADE")
+        square_off_crypto() # Closes everything
+        time.sleep(2) # Wait for execution
+        sync_delta_position()
+
+    # Re-check status after clean slate
+    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
+    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
+
+    if direction == "BUY" and has_call:
+        log_terminal(f"STAY: Already have CALL active. Holding.", "INFO")
+        return
     
-    elif direction == "SELL": # Wants PUT
-        if has_put:
-            log_terminal(f"STAY: Already have PUT active. Holding.", "INFO")
-            return
-        # If we have CALL, trigger exit but don't wait!
-        if has_call:
-            log_terminal("SAR FLIP: Opening PUT while closing CALL...", "TRADE")
-            square_off_crypto(db.get_param("active_call_pid"))
+    if direction == "SELL" and has_put:
+        log_terminal(f"STAY: Already have PUT active. Holding.", "INFO")
+        return
 
     # 3. Find Best Option to Open
     opt = find_gill_crypto_option(asset, direction)
