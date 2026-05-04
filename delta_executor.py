@@ -272,16 +272,6 @@ def sync_delta_position():
             all_positions = resp.json().get('result', [])
             positions = all_positions 
             
-            # DEBUG: Log raw positions count
-            raw_symbols = [p.get('product',{}).get('symbol') or p.get('symbol') or "UNKNOWN" for p in positions]
-            print(f"[DEBUG] Raw Positions Count: {len(positions)}")
-            if len(positions) > 0:
-                print(f"[DEBUG] Raw Symbols: {raw_symbols}")
-                # Log to telegram once to help Dr. Saab see what's happening
-                if not hasattr(sync_delta_position, "last_diag"): sync_delta_position.last_diag = 0
-                if time.time() - sync_delta_position.last_diag > 300: # Every 5 mins
-                    send_telegram_msg(f"🔍 SYNC DIAGNOSTIC: Found {len(positions)} positions on Exchange.\nSymbols: {raw_symbols}")
-                    sync_delta_position.last_diag = time.time()
 
             call_symbol = "NONE"
             call_pid = ""
@@ -362,7 +352,18 @@ def sync_delta_position():
             for p in positions:
                 unrealized_pnl += float(p.get('unrealized_pnl', 0))
             db.set_param("unrealized_pnl", str(unrealized_pnl))
-                
+
+            # --- FINAL DIAGNOSTIC REPORT ---
+            active_symbols = []
+            if call_symbol != "NONE": active_symbols.append(call_symbol)
+            if put_symbol != "NONE": active_symbols.append(put_symbol)
+            
+            if len(positions) > 0:
+                if not hasattr(sync_delta_position, "last_diag"): sync_delta_position.last_diag = 0
+                if time.time() - sync_delta_position.last_diag > 300: # Every 5 mins
+                    send_telegram_msg(f"🔍 SYNC DIAGNOSTIC: Found {len(positions)} positions on Exchange.\nSymbols: {active_symbols if active_symbols else 'UNKNOWN (Check Pulse)'}")
+                    sync_delta_position.last_diag = time.time()
+
             return True 
         else:
             from main import log_terminal
