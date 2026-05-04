@@ -456,8 +456,11 @@ def execute_crypto_trade(asset, direction):
     # 1. Update Target Signal in DB (for Janitor to handle exits)
     db.set_param("signal_target", direction)
     
-    # 2. Check if we ALREADY have a position in this direction
-    sync_delta_position()
+    # 2. FAIL-SAFE SYNC: If we can't see the screen, we don't trade!
+    if not sync_delta_position():
+        log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed. Aborting entry to prevent over-trading!", "ERROR")
+        return
+        
     has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
     has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
 
