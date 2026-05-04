@@ -269,6 +269,11 @@ def sync_delta_position():
         if resp.status_code == 200:
             positions = resp.json().get('result', [])
             
+            # DEBUG: Log raw positions count
+            print(f"[DEBUG] Raw Positions Count: {len(positions)}")
+            if len(positions) > 0:
+                print(f"[DEBUG] Raw Symbols: {[p.get('product',{}).get('symbol') for p in positions]}")
+
             call_symbol = "NONE"
             call_pid = ""
             put_symbol = "NONE"
@@ -605,6 +610,8 @@ def execute_crypto_trade(asset, direction):
             
             if resp.status_code in [200, 201]:
                 log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
+                print(f"[DEBUG] Entry Payload: {payload}")
+                print(f"[DEBUG] Entry Response: {resp.text}")
                 # ACTIVATE LOCAL LOCK IMMEDIATELY
                 db.set_param("local_trade_active", "YES")
                 # Brief wait before sync to allow exchange to update
