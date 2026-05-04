@@ -455,7 +455,11 @@ def square_off_crypto(target_pid=None):
                         log_terminal(f"☢️ NUCLEAR SWEEP: Found {len(raw_pids)} hidden positions. Cleaning screen...", "ALERT")
                         pids = raw_pids
                     else:
-                        print(f"[DEBUG] Nuclear Sweep positions fetch was empty even with BTC filter. Raw: {r_pos.text}")
+                        print(f"[DEBUG] Nuclear Sweep confirmed ZERO positions. Releasing Zombie Lock.")
+                        db.set_param("local_trade_active", "NO")
+                        db.set_param("crypto_active_symbol", "NONE")
+                        db.set_param("active_call_symbol", "NONE")
+                        db.set_param("active_put_symbol", "NONE")
                 else:
                     print(f"[DEBUG] Nuclear Sweep positions fetch FAILED: {r_pos.status_code} - {r_pos.text}")
             except Exception as e:
