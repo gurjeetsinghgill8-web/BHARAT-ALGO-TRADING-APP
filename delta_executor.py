@@ -451,99 +451,86 @@ def send_weekly_summary():
 
 def square_off_crypto(target_pid=None):
     """
-    SQUARES OFF a position. 
+    BRUTE FORCE SQUARE OFF (Search & Destroy)
     If target_pid is provided, closes only that. 
-    Otherwise, syncs and closes everything.
-    Aggressive Retry: If it fails, it will be called again by Janitor in 15s.
+    Otherwise, fetches LIVE positions and closes EVERYTHING with size > 0.
     """
     mode = db.get_param('trade_mode', 'PAPER')
     from main import log_terminal, send_telegram_msg
     
-    # 1. Sync first to see what's really open
-    sync_delta_position()
-    pids = []
+    pids_to_close = []
     
+    # 1. Gather PIDs to close
     if target_pid:
-        pids = [target_pid]
+        pids_to_close = [str(target_pid)]
     else:
-        c_pid = db.get_param("active_call_pid", "")
-        p_pid = db.get_param("active_put_pid", "")
-        if c_pid and c_pid != "NONE": pids.append(c_pid)
-        if p_pid and p_pid != "NONE": pids.append(p_pid)
-    
-    # NUCLEAR FALLBACK: If sync says none but we might have zombies
-    if not pids:
+        # AGGRESSIVE SEARCH: Fetch directly from Exchange to avoid DB Sync blindness
         try:
-            path_pos = "/v2/positions"
-            query_pos = "?underlying_asset_symbol=BTC"
-            url_pos = f"https://api.india.delta.exchange{path_pos}{query_pos}"
-            h_pos = get_delta_auth_headers("GET", path_pos, query_string=query_pos)
-            r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-            if r_pos.status_code == 200:
-                raw_data = r_pos.json().get('result', [])
-                # Aggressive PID fetching: Grab anything with size > 0
+            path = "/v2/positions"
+            query = "?underlying_asset_symbol=BTC"
+            url = f"https://api.india.delta.exchange{path}{query}"
+            headers = get_delta_auth_headers("GET", path, query_string=query)
+            resp = requests.get(url, headers=headers, timeout=10)
+            
+            if resp.status_code == 200:
+                raw_data = resp.json().get('result', [])
                 for p in raw_data:
-                    if abs(float(p.get('size', 0))) > 0:
-                        pid = str(p.get('product_id') or p.get('id', ''))
-                        if pid and pid not in pids:
-                            pids.append(pid)
+                    size = abs(float(p.get('size', 0)))
+                    if size > 0:
+                        # FALLBACK MATRIX for IDs
+                        pid = str(p.get('product_id') or p.get('id') or p.get('pid') or "")
+                        if pid and pid not in pids_to_close:
+                            pids_to_close.append(pid)
         except Exception as e:
-            print(f"[NUCLEAR FAIL] {e}")
+            log_crypto(f"Nuclear Search Error: {e}")
 
-    if not pids:
-        # Screen is truly clean
+    if not pids_to_close:
+        # Confirm Clean Slate in DB
         db.set_param("local_trade_active", "NO")
         db.set_param("crypto_active_symbol", "NONE")
         db.set_param("active_call_symbol", "NONE")
         db.set_param("active_put_symbol", "NONE")
         return True
     
-    success = True
-    for pid in pids:
-        log_crypto(f"Attempting Square Off for PID: {pid}")
+    # 2. Execute Market Exits
+    for pid in pids_to_close:
+        log_terminal(f"🧨 BRUTE FORCE EXIT: PID {pid}", "ALERT")
         if mode == "LIVE":
             try:
-                # Get current size
-                url_pos = "https://api.india.delta.exchange/v2/positions"
-                h_pos = get_delta_auth_headers("GET", "/v2/positions")
-                r_pos = requests.get(url_pos, headers=h_pos, timeout=10)
-                
+                # Get current size for this specific PID
                 size = 0
+                r_pos = requests.get("https://api.india.delta.exchange/v2/positions", headers=get_delta_auth_headers("GET", "/v2/positions"), timeout=10)
                 if r_pos.status_code == 200:
                     for p in r_pos.json().get('result', []):
-                        if str(p.get('product_id')) == str(pid):
+                        this_pid = str(p.get('product_id') or p.get('id') or "")
+                        if this_pid == pid:
                             size = abs(float(p.get('size', 0)))
                             break
                 
                 if size == 0: continue 
 
                 # Send Market Close Order
-                url = "https://api.india.delta.exchange/v2/orders"
                 payload_dict = {
                     "product_id": int(pid),
                     "size": float(size),
-                    "side": "sell", # Standard for our LONG only strategy
+                    "side": "sell",
                     "order_type": "market_order",
                     "reduce_only": True
                 }
-                import json
                 payload = json.dumps(payload_dict)
-                h_order = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-                resp = requests.post(url, headers=h_order, data=payload, timeout=10)
+                resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload), data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_terminal(f"✅ Square Off SENT: {pid}", "TRADE")
+                    log_terminal(f"✅ EXIT SUCCESS: {pid}", "TRADE")
+                    db.set_param("local_trade_active", "NO")
                 else:
-                    success = False
                     err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
-                    log_terminal(f"❌ Square Off FAILED for {pid}: {err_msg}", "ERROR")
-                    send_telegram_msg(f"⚠️ FAILED TO CLOSE TRADE {pid}: {err_msg}. Will retry in 15s. Please check manually if persistent.")
+                    log_terminal(f"❌ EXIT FAILED: {err_msg}", "ERROR")
+                    send_telegram_msg(f"🚨 CRITICAL: Could not close {pid}! {err_msg}. Settle manually!")
             except Exception as e:
-                success = False
-                log_crypto(f"⚠️ Square Off EXCEPTION: {e}")
-                send_telegram_msg(f"⚠️ EXCEPTION CLOSING TRADE: {e}")
-
-    return success
+                log_terminal(f"⚠️ EXIT EXCEPTION: {e}", "ERROR")
+    
+    return True
 
 def place_delta_bracket_orders(pid, qty, entry_price):
     """
