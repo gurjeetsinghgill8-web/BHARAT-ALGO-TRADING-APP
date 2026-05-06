@@ -821,11 +821,12 @@ elif page == "💹 Investment (RS)":
         _has_rot = False
         st.warning(f"Rotation engine not available: {_re}")
 
-    # ── 6 Tabs ───────────────────────────────────────────────
-    iv1, iv2, iv3, iv4, iv5, iv6 = st.tabs([
+    # ── 7 Tabs ───────────────────────────────────────────────
+    iv1, iv2, iv3, iv4, iv5, iv6, iv7 = st.tabs([
         "📊 Market Pulse",
         "🏆 Sector Ranking",
         "🎯 Stock Picks (2L+2M+2S)",
+        "🚀 Stock Alpha (RS-55)",
         "🔄 Rotation Backtest",
         "⚙️ Settings",
         "🤖 Research AI",
@@ -996,8 +997,41 @@ elif page == "💹 Investment (RS)":
         else:
             st.info("👉 Select a sector and click **Get Live Stock Picks**.")
 
-    # ══ TAB 4: ROTATION BACKTEST ════════════════════════════
+    # ══ TAB 4: STOCK ALPHA (RS-55) ══════════════════════════
     with iv4:
+        st.markdown('<div class="section-title">🚀 Pure Stock Alpha — Top RS-55 Momentum</div>', unsafe_allow_html=True)
+        st.markdown("> Scanning 150+ stocks across all sectors to find the absolute strongest leaders.")
+        
+        if st.button("🔥 Run Pure Stock Momentum Scan", key="iv_stock_alpha_btn"):
+            if _has_rot:
+                with st.spinner("Scanning all stocks..."):
+                    try:
+                        top_stocks = rot_eng.run_pure_stock_scan(top_n=20)
+                        
+                        cols = st.columns(2)
+                        for idx, s in enumerate(top_stocks):
+                            with cols[idx % 2]:
+                                rsi_col = "#10b981" if s["rsi"] >= 60 else ("#f59e0b" if s["rsi"] >= 50 else "#f43f5e")
+                                st.markdown(f"""<div class="sector-card" style="border-left:4px solid #6366f1;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                                        <div style="font-weight:700;font-size:1.1rem;color:#e2e8f0;">{s['symbol']}</div>
+                                        <div class="badge" style="background:rgba(99,102,241,0.1);color:#6366f1;">RS {s['rs']:.3f}</div>
+                                    </div>
+                                    <div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">{s['sector']} | {s['cap']} Cap</div>
+                                    <div style="display:flex;justify-content:space-between;margin-top:10px;">
+                                        <span style="color:#475569;font-size:0.8rem;">RSI: <b style="color:{rsi_col}">{s['rsi']:.1f}</b></span>
+                                        <span style="color:#10b981;font-weight:600;">₹{s['price']:,.1f}</span>
+                                    </div>
+                                </div>""", unsafe_allow_html=True)
+                    except Exception as _e:
+                        st.error(f"Stock scan failed: {_e}")
+            else:
+                st.error("Rotation engine not loaded.")
+        else:
+            st.info("👉 Click to see the strongest stocks in the entire market right now.")
+
+    # ══ TAB 5: ROTATION BACKTEST ════════════════════════════
+    with iv5:
         st.markdown('<div class="section-title">🔄 Rolling Sector Rotation Backtest</div>', unsafe_allow_html=True)
         st.markdown("""
         > **Sahi backtest:** Weekly sector rotation, 2L+2M+2S picks, hybrid exit, compound capital.
@@ -1114,16 +1148,16 @@ elif page == "💹 Investment (RS)":
                             for s in t["stocks"] if s.get("symbol")
                         )
                         rows.append({
-                            "#":       t["trade_id"],
-                            "Sector":  t["sector"],
-                            "Entry":   t["entry_date"],
-                            "Exit":    t["exit_date"],
-                            "Days":    t["days_held"],
+                            "#":       t.get("trade_id", "-"),
+                            "Sector":  t.get("sector", "Unknown"),
+                            "Entry":   t.get("entry_date", "-"),
+                            "Exit":    t.get("exit_date", "-"),
+                            "Days":    t.get("days_held", 0),
                             "Stocks":  stocks_str,
-                            "Return%": f"{t['portfolio_return_pct']:+.1f}%",
-                            "Capital After": f"₹{t['capital_after']:,.0f}",
-                            "vs Nifty":f"{t['nifty_return_pct']:+.1f}%",
-                            "Beat?":   "✅" if t["beat_nifty"] else "❌",
+                            "Return%": f"{t.get('portfolio_return_pct', 0):+.1f}%",
+                            "Capital After": f"₹{t.get('capital_after', 0):,.0f}",
+                            "vs Nifty":f"{t.get('nifty_return_pct', 0):+.1f}%",
+                            "Beat?":   "✅" if t.get("beat_nifty") else "❌",
                         })
                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -1161,8 +1195,8 @@ elif page == "💹 Investment (RS)":
                         send_telegram_msg(_tg_msg[:4000])
                         st.toast("\u2705 Sent to Telegram!")
 
-    # ══ TAB 5: Settings ══════════════════════════════════════
-    with iv5:
+    # ══ TAB 6: Settings ══════════════════════════════════════
+    with iv6:
         st.markdown('<div class="section-title">⚙️ RS LegoMaster Settings</div>', unsafe_allow_html=True)
         _rs_period_cur = int(db.get_param("invest_rs_period","55") or "55")
         iv_period = st.selectbox("RS Period",
@@ -1188,8 +1222,8 @@ elif page == "💹 Investment (RS)":
                 except Exception as _e:
                     st.error(f"Error: {_e}")
 
-    # ══ TAB 6: Research AI Chat ═══════════════════════════════
-    with iv6:
+    # ══ TAB 7: Research AI Chat ═══════════════════════════════
+    with iv7:
         st.markdown('<div class="section-title">🤖 Research AI — Apne Data Se Poochho</div>', unsafe_allow_html=True)
         st.markdown("> Kuch bhi poochho. System NSE data se real backtest karke jawab dega.")
 

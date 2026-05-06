@@ -434,6 +434,10 @@ def run_rotation_backtest(
                     "days_held":            (step_dt.date() - date.fromisoformat(pos["entry_date"])).days,
                     "stocks":               final_exits,
                     "portfolio_return_pct": round(sector_final_return, 2),
+                    "capital_before":       round(pos["capital_allocated"], 2),
+                    "capital_after":        round(pos["capital_allocated"] * (1 + sector_final_return / 100), 2),
+                    "nifty_return_pct":     0, # Will be filled later or handled by UI
+                    "beat_nifty":           sector_final_return > 0,
                     "exit_reason":          exit_reason,
                     "hard_stop":            hard_stop_triggered,
                 })
@@ -624,6 +628,41 @@ def run_live_sector_scan() -> dict:
     db.set_param("invest_top_sectors",   json.dumps([s["sector"] for s in top_sectors]))
 
     return result
+
+
+def run_pure_stock_scan(top_n: int = 15) -> list[dict]:
+    """
+    V5.0: Direct stock momentum scan across ALL sectors.
+    Returns top N stocks by RS-55, filtered by RSI > 50.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.now(IST).date()
+    start = today - timedelta(days=RS_PERIOD + 90)
+    df    = download_all_data(start, today)
+    now_dt = pd.Timestamp(today)
+
+    all_stocks = []
+    for sec_name, stocks in rs_engine.SECTOR_STOCKS.items():
+        for ticker, cap in stocks:
+            rs = _calc_rs_on(df, ticker, "^NSEI", now_dt)
+            rsi = _calc_rsi_on(df, ticker, now_dt)
+            
+            if rs is not None:
+                all_stocks.append({
+                    "symbol": ticker.replace(".NS", ""),
+                    "ticker": ticker,
+                    "sector": sec_name,
+                    "cap":    cap,
+                    "rs":     round(rs, 4),
+                    "rsi":    rsi,
+                    "price":  _price_on(df, ticker, now_dt)
+                })
+
+    # Filter by RSI and sort by RS
+    candidates = [s for s in all_stocks if s["rsi"] is not None and s["rsi"] >= 50]
+    candidates.sort(key=lambda x: x["rs"], reverse=True)
+
+    return candidates[:top_n]
 
 
 if __name__ == "__main__":
