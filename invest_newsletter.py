@@ -154,13 +154,22 @@ def _build_compass_text(scan_data, newsletter_type):
 
 def _build_html_version(scan_data, newsletter_type):
     """
-    Builds a premium, LIGHT THEME financial intelligence report.
-    Inspired by Bloomberg/Financial Times layout.
+    [GENERATIVE UI] Powered by Google Stitch Principles.
+    Implements Material 3 (M3) Design System for BHARAT AlgoVerse.
     """
     now_str    = datetime.now(IST).strftime("%d %b %Y")
     type_label = "DAILY INTELLIGENCE" if newsletter_type == "DAILY" else ("WEEKLY REVIEW" if newsletter_type == "WEEKLY" else "MONTHLY STRATEGIC OUTLOOK")
     market_mode = scan_data.get("market_mode", "UNKNOWN")
-    mode_color = "#059669" if market_mode == "AGGRESSIVE" else "#dc2626"
+    
+    # Material 3 Color Tokens
+    M3_PRIMARY = "#1a73e8"  # Google Blue
+    M3_SURFACE = "#ffffff"
+    M3_ON_SURFACE = "#202124"
+    M3_VARIANT = "#f1f3f4"  # Light Grey
+    M3_SUCCESS = "#1e8e3e"  # Google Green
+    M3_ERROR   = "#d93025"  # Google Red
+    
+    mode_color = M3_SUCCESS if market_mode == "AGGRESSIVE" else M3_ERROR
     
     top_secs   = scan_data.get("top_sectors", [])
     stock_picks = scan_data.get("stock_picks", {})
@@ -172,182 +181,200 @@ def _build_html_version(scan_data, newsletter_type):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             
-            :root {{
-                --primary: #1e3a8a;
-                --secondary: #6366f1;
-                --accent: #0f172a;
-                --bg: #f8fafc;
-                --card: #ffffff;
-                --text-main: #1e293b;
-                --text-muted: #64748b;
-                --border: #e2e8f0;
-            }}
-
             body {{ 
-                font-family: 'Inter', -apple-system, sans-serif; 
-                background-color: var(--bg); 
-                color: var(--text-main); 
+                font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+                background-color: #f8f9fa; 
+                color: {M3_ON_SURFACE}; 
                 margin: 0; 
-                padding: 40px 20px; 
-                line-height: 1.6;
+                padding: 40px 10px;
+                -webkit-font-smoothing: antialiased;
             }}
 
-            .container {{ 
-                max-width: 850px; 
+            .stitch-container {{ 
+                max-width: 800px; 
                 margin: 0 auto; 
-                background: var(--card); 
-                border-radius: 4px; 
-                border-top: 8px solid var(--primary);
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                background: {M3_SURFACE}; 
+                border-radius: 28px; 
+                border: 1px solid #e0e2e6;
+                box-shadow: 0 1px 3px rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+                overflow: hidden;
             }}
 
-            .header {{ 
-                padding: 60px 50px 40px; 
-                text-align: left; 
-                border-bottom: 1px solid var(--border);
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-end;
+            .stitch-header {{ 
+                padding: 48px 40px 32px; 
+                background: {M3_SURFACE};
+                text-align: left;
             }}
             
-            .branding {{ flex: 1; }}
-            .brand-name {{ font-size: 2.4rem; font-weight: 800; color: var(--accent); margin: 0; letter-spacing: -0.04em; }}
-            .brand-tagline {{ font-size: 0.85rem; color: var(--secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 5px; }}
+            .stitch-brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
+            .brand-icon {{ font-size: 2.5rem; }}
+            .brand-name {{ font-size: 1.75rem; font-weight: 700; color: {M3_ON_SURFACE}; margin: 0; }}
+            .report-badge {{ 
+                display: inline-block;
+                padding: 6px 16px;
+                background: {M3_VARIANT};
+                border-radius: 12px;
+                font-size: 0.75rem;
+                font-weight: 600;
+                color: {M3_PRIMARY};
+                letter-spacing: 0.05em;
+                margin-top: 16px;
+            }}
             
-            .report-meta {{ text-align: right; }}
-            .report-type {{ font-size: 0.9rem; font-weight: 700; color: var(--text-main); margin-bottom: 5px; }}
-            .report-date {{ font-size: 0.8rem; color: var(--text-muted); }}
-
-            .content {{ padding: 50px; }}
-            
-            .section-header {{ 
+            .meta-strip {{ 
+                padding: 12px 40px; 
+                background: {M3_VARIANT}; 
+                font-size: 0.75rem; 
+                color: #5f6368; 
                 display: flex; 
-                align-items: center; 
-                margin: 40px 0 25px; 
-                padding-bottom: 10px;
-                border-bottom: 2px solid var(--accent);
+                justify-content: space-between;
+                border-bottom: 1px solid #dadce0;
             }}
-            .section-title {{ font-size: 1.2rem; font-weight: 800; color: var(--accent); text-transform: uppercase; margin: 0; }}
+
+            .stitch-content {{ padding: 40px; }}
             
-            .pulse-grid {{ display: grid; grid-template-columns: 1fr 1.5fr; gap: 30px; margin-bottom: 40px; }}
-            .pulse-card {{ background: #f1f5f9; padding: 25px; border-radius: 8px; border-left: 4px solid var(--primary); }}
-            .pulse-label {{ font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 10px; }}
-            .pulse-val {{ font-size: 1.6rem; font-weight: 800; color: var(--accent); }}
-            .pulse-desc {{ font-size: 0.9rem; color: var(--text-muted); margin-top: 10px; }}
-
-            .sector-entry {{ margin-bottom: 50px; }}
-            .sector-meta {{ display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 15px; }}
-            .sector-name {{ font-size: 1.5rem; font-weight: 700; color: var(--primary); }}
-            .sector-status {{ font-size: 0.75rem; font-weight: 700; color: #059669; background: #ecfdf5; padding: 4px 12px; border-radius: 4px; }}
+            .section-label {{ 
+                font-size: 0.875rem; 
+                font-weight: 600; 
+                color: {M3_PRIMARY}; 
+                margin-bottom: 24px;
+                display: block;
+            }}
             
-            .thesis-box {{ background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 25px; margin-bottom: 20px; }}
-            .thesis-text {{ font-size: 1.1rem; font-weight: 500; color: var(--text-main); margin-bottom: 15px; line-height: 1.4; }}
-            .thesis-list {{ margin: 0; padding-left: 20px; color: var(--text-muted); font-size: 0.95rem; }}
-            .thesis-list li {{ margin-bottom: 8px; }}
+            .kpi-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 48px; }}
+            .kpi-card {{ 
+                background: {M3_VARIANT}; 
+                padding: 24px; 
+                border-radius: 24px; 
+                transition: transform 0.2s;
+            }}
+            .kpi-title {{ font-size: 0.75rem; font-weight: 500; color: #5f6368; text-transform: uppercase; margin-bottom: 8px; }}
+            .kpi-value {{ font-size: 2rem; font-weight: 700; color: {M3_ON_SURFACE}; }}
 
-            .picks-table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-            .picks-table th {{ text-align: left; font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); padding: 10px; border-bottom: 1px solid var(--border); }}
-            .picks-table td {{ padding: 15px 10px; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }}
-            .symbol-col {{ font-weight: 700; color: var(--accent); }}
-            .cap-badge {{ font-size: 0.65rem; padding: 2px 6px; background: #e2e8f0; border-radius: 3px; font-weight: 600; }}
+            .sector-entry {{ margin-bottom: 40px; }}
+            .sector-card {{ 
+                border: 1px solid #dadce0; 
+                border-radius: 24px; 
+                padding: 32px; 
+                background: {M3_SURFACE};
+            }}
+            .sector-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }}
+            .sector-title {{ font-size: 1.25rem; font-weight: 700; color: {M3_ON_SURFACE}; margin: 0; }}
+            .status-pill {{ 
+                font-size: 0.7rem; 
+                font-weight: 600; 
+                padding: 4px 12px; 
+                border-radius: 8px; 
+                background: #e6f4ea; 
+                color: #137333; 
+            }}
+            
+            .thesis-text {{ font-size: 1.1rem; color: #3c4043; line-height: 1.5; margin-bottom: 20px; }}
+            .reason-list {{ margin: 0; padding-left: 20px; color: #5f6368; font-size: 0.9rem; }}
+            .reason-list li {{ margin-bottom: 12px; }}
 
-            .footer {{ padding: 60px 50px; background: #f8fafc; border-top: 1px solid var(--border); }}
-            .disclaimer {{ font-size: 0.75rem; color: #94a3b8; line-height: 1.6; text-align: justify; }}
-            .signature {{ margin-top: 30px; text-align: center; font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }}
+            .picks-grid {{ 
+                display: grid; 
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+                gap: 16px; 
+                margin-top: 24px; 
+            }}
+            .pick-card {{ 
+                background: {M3_VARIANT}; 
+                padding: 16px; 
+                border-radius: 16px; 
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }}
+            .pick-sym {{ font-weight: 700; font-size: 1rem; }}
+            .pick-cap {{ font-size: 0.65rem; color: #5f6368; text-transform: uppercase; font-weight: 600; }}
+            .pick-rs {{ font-size: 0.9rem; font-weight: 600; color: {M3_PRIMARY}; margin-top: 8px; }}
+
+            .stitch-footer {{ 
+                padding: 48px 40px; 
+                background: {M3_VARIANT}; 
+                border-top: 1px solid #dadce0;
+                font-size: 0.75rem;
+                color: #5f6368;
+                line-height: 1.8;
+            }}
+            .disclaimer-box {{ margin-bottom: 24px; border-left: 4px solid #dadce0; padding-left: 16px; }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="header">
-                <div class="branding">
+        <div class="stitch-container">
+            <div class="stitch-header">
+                <div class="stitch-brand">
+                    <span class="brand-icon">{SYSTEM_ICON}</span>
                     <h1 class="brand-name">{SYSTEM_NAME}</h1>
-                    <div class="brand-tagline">{SYSTEM_TAGLINE}</div>
                 </div>
-                <div class="report-meta">
-                    <div class="report-type">{type_label}</div>
-                    <div class="report-date">{now_str.upper()}</div>
-                </div>
+                <div class="report-badge">{type_label}</div>
             </div>
             
-            <div class="content">
-                <div class="section-header">
-                    <h2 class="section-title">Market Regime Assessment</h2>
+            <div class="meta-strip">
+                <span>DATE: {now_str.upper()}</span>
+                <span>SYSTEM: {SYSTEM_VERSION}</span>
+            </div>
+            
+            <div class="stitch-content">
+                <span class="section-label">Market Intelligence Pulse</span>
+                <div class="kpi-row">
+                    <div class="kpi-card">
+                        <div class="kpi-title">Regime Status</div>
+                        <div class="kpi-value" style="color: {mode_color};">{market_mode}</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Benchmark RS</div>
+                        <div class="kpi-value">{scan_data.get('nifty_rsi', '—')}</div>
+                    </div>
                 </div>
                 
-                <div class="pulse-grid">
-                    <div class="pulse-card">
-                        <div class="pulse-label">Current Mode</div>
-                        <div class="pulse-val" style="color: {mode_color};">{market_mode}</div>
-                        <div class="pulse-desc">{'Strategic positioning: Risk-on / Aggressive accumulation.' if market_mode == 'AGGRESSIVE' else 'Strategic positioning: Capital preservation / Defensive.'}</div>
-                    </div>
-                    <div class="pulse-card" style="border-left-color: var(--secondary);">
-                        <div class="pulse-label">Relative Strength Index</div>
-                        <div class="pulse-val">{scan_data.get('nifty_rsi', '—')}</div>
-                        <div class="pulse-desc">Nifty 50 benchmark momentum factor vs 14-period standard.</div>
-                    </div>
-                </div>
-                
-                <div class="section-header">
-                    <h2 class="section-title">High-Conviction Sector Leadership</h2>
-                </div>
+                <span class="section-label">Top Conviction Sectors</span>
     """
     
     for sec in top_secs[:5]:
         thesis = fund_eng.get_sector_thesis(sec["sector"])
         html += f"""
         <div class="sector-entry">
-            <div class="sector-meta">
-                <div class="sector-name">{sec['sector'].upper()}</div>
-                <div class="sector-status">MOMENTUM LEADER</div>
-            </div>
-            
-            <div class="thesis-box">
-                <div class="thesis-text">"{thesis.get('short')}"</div>
-                <ul class="thesis-list">
+            <div class="sector-card">
+                <div class="sector-header">
+                    <h3 class="sector-title">{sec['sector'].upper()}</h3>
+                    <div class="status-pill">LEADING</div>
+                </div>
+                <div class="thesis-text">{thesis.get('short')}</div>
+                <ul class="reason-list">
         """
         for reason in thesis.get("reasons", [])[:3]:
             html += f"<li>{reason}</li>"
-        html += "</ul></div>"
+        html += "</ul>"
         
-        # Stocks Table
+        # Picks
         picks = stock_picks.get(sec["sector"], [])[:3]
         if picks:
-            html += """
-            <table class="picks-table">
-                <thead>
-                    <tr>
-                        <th style="width: 40%;">Ticker / Cap</th>
-                        <th style="width: 30%;">Strength Label</th>
-                        <th style="width: 30%; text-align: right;">Momentum RS</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
+            html += '<div class="picks-grid">'
             for p in picks:
-                st_label = "EXCEPTIONAL" if p.get("rs", 0) > 1.1 else "OUTPERFORMING"
                 html += f"""
-                <tr>
-                    <td>
-                        <span class="symbol-col">{p['symbol']}</span> 
-                        <span class="cap-badge">{p['cap'].upper()}</span>
-                    </td>
-                    <td style="font-weight: 600; font-size: 0.8rem; color: var(--secondary);">{st_label}</td>
-                    <td style="text-align: right; font-weight: 700; color: var(--primary);">+{((p['rs']-1)*100):.2f}%</td>
-                </tr>
+                <div class="pick-card">
+                    <div class="pick-sym">{p['symbol']}</div>
+                    <div class="pick-cap">{p['cap']} CAP</div>
+                    <div class="pick-rs">+{((p['rs']-1)*100):.2f}% RS</div>
+                </div>
                 """
-            html += "</tbody></table>"
-        html += "</div>"
+            html += "</div>"
+            
+        html += "</div></div>"
         
     html += f"""
             </div>
-            <div class="footer">
-                <div class="disclaimer">
-                    <strong>⚠️ CONFIDENTIAL & PROPRIETARY:</strong> {rep_eng.DISCLAIMER.replace('*', '')}
+            <div class="stitch-footer">
+                <div class="disclaimer-box">
+                    <strong>LEGAL NOTICE:</strong> {rep_eng.DISCLAIMER.replace('*', '')}
                 </div>
-                <div class="signature">
-                    {SYSTEM_NAME} | {SYSTEM_VERSION} | India Market Intelligence Unit
+                <div style="text-align: center; opacity: 0.7;">
+                    {SYSTEM_NAME} Intelligence | Powered by Google Stitch UI Framework
                 </div>
             </div>
         </div>
@@ -355,6 +382,8 @@ def _build_html_version(scan_data, newsletter_type):
     </html>
     """
     return html
+    
+
 
 def save_newsletter_to_file(html_content, newsletter_type):
     """Saves the newsletter as an HTML file for download."""
