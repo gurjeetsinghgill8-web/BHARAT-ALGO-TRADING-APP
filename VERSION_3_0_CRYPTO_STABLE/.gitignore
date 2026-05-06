@@ -1,0 +1,9 @@
+# Algoverse - Files to NEVER upload to GitHub
+.streamlit/secrets.toml
+*.db
+__pycache__/
+*.pyc
+.env
+reports/
+scratch/
+*.log
