@@ -1365,22 +1365,22 @@ elif page == "💎 Personal (Alpha King)":
                 st.markdown("### 🏆 Top 5 Personal Portfolio")
                 
                 for s in sigs:
-                st.markdown(f"""<div class="sector-card" style="border-left:5px solid #10b981;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div style="font-weight:700;font-size:1.4rem;color:#e2e8f0;">{s['symbol']}</div>
-                        <div class="badge badge-green">STATUS: BULLISH (10/1.5)</div>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;margin-top:10px;">
-                        <div>
-                            <span style="color:#94a3b8;font-size:0.8rem;">MOMENTUM: <b style="color:#10b981">{s['m']*100:+.1f}%</b></span><br>
-                            <span style="color:#94a3b8;font-size:0.8rem;">RS SCORE: <b style="color:#6366f1">{s['s']:.2f}</b></span>
+                    st.markdown(f"""<div class="sector-card" style="border-left:5px solid #10b981;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <div style="font-weight:700;font-size:1.4rem;color:#e2e8f0;">{s['symbol']}</div>
+                            <div class="badge badge-green">STATUS: BULLISH (10/1.5)</div>
                         </div>
-                        <div style="text-align:right;">
-                            <div style="color:#e2e8f0;font-size:0.75rem;">LTP</div>
-                            <div style="color:#10b981;font-weight:700;font-size:1.5rem;">₹{s['price']:,.1f}</div>
+                        <div style="display:flex;justify-content:space-between;margin-top:10px;">
+                            <div>
+                                <span style="color:#94a3b8;font-size:0.8rem;">MOMENTUM: <b style="color:#10b981">{s['m']*100:+.1f}%</b></span><br>
+                                <span style="color:#94a3b8;font-size:0.8rem;">RS SCORE: <b style="color:#6366f1">{s['s']:.2f}</b></span>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#e2e8f0;font-size:0.75rem;">LTP</div>
+                                <div style="color:#10b981;font-weight:700;font-size:1.5rem;">₹{s['price']:,.1f}</div>
+                            </div>
                         </div>
-                    </div>
-                </div>""", unsafe_allow_html=True)
+                    </div>""", unsafe_allow_html=True)
             
             st.divider()
             if st.button("📤 Send Portfolio to Telegram", key="p_tg"):
