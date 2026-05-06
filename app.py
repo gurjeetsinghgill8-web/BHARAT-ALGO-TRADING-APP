@@ -7,6 +7,7 @@ import subprocess
 import plotly.graph_objects as go
 import sqlite3
 from datetime import datetime
+import numpy as np
 
 # ── Optional module imports (safe) ─────────────────────────────
 try:
