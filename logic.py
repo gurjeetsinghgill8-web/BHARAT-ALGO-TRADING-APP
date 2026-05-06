@@ -125,16 +125,17 @@ def calculate_adx(df, period=14):
 # ============================================================
 # LEGO BLOCK 1: Signal Logic (Supertrend 10/1.5)
 # ============================================================
-def get_supertrend_signal(asset="BTC"):
+def get_supertrend_signal(asset="BTC", timeframe="5m"):
     """
     Fetches candles and calculates Supertrend signal.
     Uses iloc[-2] to look at the last completed candle only.
     Settings: 10 Period, 1.5 Multiplier (fetched from DB).
+    Timeframe: configurable (5m, 15m, 1h etc.)
     """
     from delta_executor import fetch_delta_candles
     
     # 1. Fetch Candles
-    df, err = fetch_delta_candles(asset, "5m", limit=100)
+    df, err = fetch_delta_candles(asset, timeframe, limit=100)
     if df.empty or len(df) < 3:
         return "WAIT"
         
@@ -154,4 +155,4 @@ def get_supertrend_signal(asset="BTC"):
     
     return "WAIT"
 
-# SUPREME CLOUD SYNC: 2026-05-03
+# BHARAT ALGOVERSE v3.0 - Full Auto
