@@ -8,6 +8,14 @@ import plotly.graph_objects as go
 import sqlite3
 from datetime import datetime
 
+# ── Optional module imports (safe) ─────────────────────────────
+try:
+    import nifty_logic
+    import nifty_executor
+    _has_nifty = True
+except Exception:
+    _has_nifty = False
+
 st.set_page_config(
     page_title="BHARAT ALGOVERSE v3.0",
     page_icon="🚀",
@@ -264,14 +272,28 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+
+    # ── PAGE SELECTOR ───────────────────────────────────────────
+    st.markdown('<div class="section-title">📂 Switch Module</div>', unsafe_allow_html=True)
+    page = st.radio(
+        "",
+        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)"],
+        key="page_selector",
+        label_visibility="collapsed"
+    )
+
+    st.divider()
     st.caption("Developed for Dr. Saab 🩺")
 
-# ── MAIN PAGE ──────────────────────────────────────────────────
-st.markdown("# 🚀 BHARAT ALGOVERSE v3.0")
+# ══════════════════════════════════════════════════════════════
+# PAGE 1 — CRYPTO (BTC)
+# ══════════════════════════════════════════════════════════════
+if page == "🚀 Crypto (BTC)":
+    st.markdown("# 🚀 BHARAT ALGOVERSE v3.0")
 
-# Live PnL banner
-upnl_col = "#10b981" if upnl >= 0 else "#f43f5e"
-st.markdown(f"""
+    # Live PnL banner
+    upnl_col = "#10b981" if upnl >= 0 else "#f43f5e"
+    st.markdown(f"""
 <div class="pulse-bar">
   <div>
     <div class="kpi-label">LIVE UNREALIZED PnL</div>
@@ -286,211 +308,448 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── PERFORMANCE TABS ───────────────────────────────────────────
-t1, t2, t3, t4 = st.tabs(["📊 Today", "📅 7 Days", "🗓 30 Days", "🏆 Quarter"])
+    # ── PERFORMANCE TABS ──────────────────────────────────────
+    t1, t2, t3, t4 = st.tabs(["📊 Today", "📅 7 Days", "🗓 30 Days", "🏆 Quarter"])
 
-def render_stats_tab(pnl, cnt, wr, avg, days_label, df_equity, tab_key: str):
-    """Render a stats tab — tab_key MUST be unique across all calls."""
-    c1, c2, c3, c4 = st.columns(4)
-    pnl_cls = "green" if pnl >= 0 else "red"
-    capital_str = db.get_param('estimated_capital', '240') or '240'
-    try:
-        capital = float(capital_str)
-    except Exception:
-        capital = 240.0
-    roi = (pnl / capital * 100) if capital else 0.0
-    roi_cls = "green" if roi >= 0 else "red"
-
-    with c1:
-        st.markdown(f"""<div class="kpi-card">
-            <div class="kpi-label">Net PnL ({days_label})</div>
-            <div class="kpi-value {pnl_cls}">${pnl:+.2f}</div>
-            <div class="kpi-sub">≈ ₹{pnl*85:+,.0f}</div>
-        </div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class="kpi-card">
-            <div class="kpi-label">Win Rate</div>
-            <div class="kpi-value blue">{wr:.1f}%</div>
-            <div class="kpi-sub">{int(cnt)} total trades</div>
-        </div>""", unsafe_allow_html=True)
-    with c3:
-        avg_cls = "green" if avg >= 0 else "red"
-        st.markdown(f"""<div class="kpi-card">
-            <div class="kpi-label">Avg PnL / Trade</div>
-            <div class="kpi-value {avg_cls}">${avg:+.2f}</div>
-            <div class="kpi-sub">per closed trade</div>
-        </div>""", unsafe_allow_html=True)
-    with c4:
-        st.markdown(f"""<div class="kpi-card">
-            <div class="kpi-label">ROI on Capital</div>
-            <div class="kpi-value {roi_cls}">{roi:+.2f}%</div>
-            <div class="kpi-sub">Est. capital: ${int(capital)}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    if df_equity is not None and not df_equity.empty and 'cum_pnl' in df_equity.columns:
-        line_color = "#10b981" if df_equity['cum_pnl'].iloc[-1] >= 0 else "#f43f5e"
-        fill_color = "rgba(16,185,129,0.1)" if line_color == "#10b981" else "rgba(244,63,94,0.1)"
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_equity['timestamp'],
-            y=df_equity['cum_pnl'],
-            mode='lines',
-            fill='tozeroy',
-            line=dict(color=line_color, width=2),
-            fillcolor=fill_color,
-            name='Equity Curve'
-        ))
-        fig.update_layout(
-            template="plotly_dark",
-            height=220,
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(showgrid=False, color='#475569'),
-            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#475569'),
-            showlegend=False,
-        )
-        # KEY FIX: unique key per tab to avoid StreamlitDuplicateElementId
-        st.plotly_chart(fig, use_container_width=True, key=f"equity_{tab_key}")
-    else:
-        st.info("📭 No trade data yet for this period — equity curve will appear after trades close.")
-
-with t1:
-    render_stats_tab(pnl_1d, cnt_1d, wr_1d, avg_1d, "1D", get_equity_curve(1), "1d")
-with t2:
-    render_stats_tab(pnl_7d, cnt_7d, wr_7d, avg_7d, "7D", get_equity_curve(7), "7d")
-with t3:
-    render_stats_tab(pnl_30d, cnt_30d, wr_30d, avg_30d, "30D", get_equity_curve(30), "30d")
-with t4:
-    render_stats_tab(pnl_90d, cnt_90d, wr_90d, avg_90d, "90D", get_equity_curve(90), "90d")
-
-st.divider()
-
-# ── LIVE CHART + STRATEGY LAB ──────────────────────────────────
-col_chart, col_lab = st.columns([3, 2])
-
-with col_chart:
-    st.markdown('<div class="section-title">📈 Live BTC Chart</div>', unsafe_allow_html=True)
-    tf_display = db.get_param('candle_timeframe', '5m') or '5m'
-    if _has_delta:
+    def render_stats_tab(pnl, cnt, wr, avg, days_label, df_equity, tab_key: str):
+        """Renders KPI cards + equity curve for one tab. tab_key must be unique."""
+        c1, c2, c3, c4 = st.columns(4)
+        pnl_cls     = "green" if pnl >= 0 else "red"
+        capital_str = db.get_param('estimated_capital', '240') or '240'
         try:
-            df_c, _ = delta_executor.fetch_delta_candles("BTC", tf_display, limit=60)
-            if df_c is not None and not df_c.empty:
-                fig2 = go.Figure(data=[go.Candlestick(
-                    x=df_c['time'],
-                    open=df_c['open'],
-                    high=df_c['high'],
-                    low=df_c['low'],
-                    close=df_c['close'],
-                    increasing_line_color='#10b981',
-                    decreasing_line_color='#f43f5e',
-                )])
-                fig2.update_layout(
-                    template="plotly_dark",
-                    height=320,
-                    margin=dict(l=0, r=0, t=10, b=0),
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    xaxis=dict(showgrid=False, rangeslider_visible=False, color='#475569'),
-                    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#475569'),
-                    showlegend=False,
-                )
-                # KEY FIX: unique key for live chart
-                st.plotly_chart(fig2, use_container_width=True, key="live_btc_chart")
-            else:
-                st.info("⏳ Loading chart data — waiting for API response...")
-        except Exception as ex:
-            st.info(f"⏳ Chart loading... ({ex})")
-    else:
-        st.info("⚠️ delta_executor not available — chart disabled.")
-
-with col_lab:
-    st.markdown('<div class="section-title">⚙️ Strategy Lab (Live Settings)</div>', unsafe_allow_html=True)
-
-    # Safe defaults for all selectbox/slider values
-    _mode_val  = db.get_param('trade_mode', 'LIVE') or 'LIVE'
-    _tf_val    = db.get_param('candle_timeframe', '5m') or '5m'
-    _lots_val  = int(db.get_param('crypto_trade_size', '1') or '1')
-    _strikes_val = int(db.get_param('num_strikes', '1') or '1')
-    _expiry_val  = int(db.get_param('expiry_threshold', '3') or '3')
-    _sl_val    = int(float(db.get_param('sl_percent', '40') or '40'))
-    _tp_val    = int(float(db.get_param('tp_percent', '100') or '100'))
-    _offset_raw = int(db.get_param('strike_offset', '0') or '0')
-    _period_val = int(float(db.get_param('st_period', '10') or '10'))
-    _mult_val   = float(db.get_param('st_multiplier', '1.5') or '1.5')
-    _capital_val = int(float(db.get_param('estimated_capital', '240') or '240'))
-
-    _tf_options   = ["5m", "15m", "1h", "4h"]
-    _tf_idx       = _tf_options.index(_tf_val) if _tf_val in _tf_options else 0
-    _offset_opts  = ["ATM (0)", "OTM +1", "OTM +2"]
-
-    s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
-                          index=1 if _mode_val == "LIVE" else 0, key="s_mode")
-    s_tf   = st.selectbox("Candle Timeframe", _tf_options, index=_tf_idx, key="s_tf")
-    s_lots = st.slider("Lot Size (Contracts)", 1, 50, max(1, _lots_val), key="s_lots")
-    s_strikes = st.slider("Number of Strike Prices", 1, 5, max(1, _strikes_val), key="s_strikes",
-                          help="Take multiple strikes at once (e.g. 3 = 3 separate option entries)")
-    s_expiry = st.slider("Min Expiry Days", 0, 14, max(0, _expiry_val), key="s_expiry")
-
-    col_sl, col_tp = st.columns(2)
-    with col_sl:
-        s_sl = st.number_input("Stop Loss %", 10, 90, max(10, min(90, _sl_val)), step=5, key="s_sl")
-    with col_tp:
-        s_tp = st.number_input("Take Profit %", 20, 500, max(20, min(500, _tp_val)), step=10, key="s_tp")
-
-    s_offset  = st.selectbox("Strike Selection", _offset_opts,
-                             index=min(_offset_raw, 2), key="s_offset")
-    s_period  = st.number_input("Supertrend Period", 5, 30,
-                                max(5, min(30, _period_val)), key="s_period")
-    s_mult    = st.number_input("Supertrend Multiplier", 0.5, 5.0,
-                                max(0.5, min(5.0, _mult_val)), step=0.1, key="s_mult")
-    s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
-                                max(50, min(10000, _capital_val)), step=10, key="s_cap")
-
-    if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
-        try:
-            db.set_param('trade_mode',        s_mode)
-            db.set_param('candle_timeframe',  s_tf)
-            db.set_param('crypto_trade_size', str(s_lots))
-            db.set_param('num_strikes',       str(s_strikes))
-            db.set_param('expiry_threshold',  str(s_expiry))
-            db.set_param('sl_percent',        str(s_sl))
-            db.set_param('tp_percent',        str(s_tp))
-            db.set_param('strike_offset',     str(0 if "ATM" in s_offset else (1 if "+1" in s_offset else 2)))
-            db.set_param('st_period',         str(s_period))
-            db.set_param('st_multiplier',     str(s_mult))
-            db.set_param('estimated_capital', str(s_capital))
-            st.success("✅ All settings saved! Bot will use these on next cycle.")
-        except Exception as e:
-            st.error(f"Save failed: {e}")
-
-st.divider()
-
-# ── TRADE JOURNAL ───────────────────────────────────────────────
-st.markdown('<div class="section-title">📜 Trade Journal (Last 30 Trades)</div>', unsafe_allow_html=True)
-df_hist = get_trade_history(90)
-if not df_hist.empty:
-    def color_direction(val):
-        return 'color: #10b981' if val == 'BUY' else ('color: #f43f5e' if val == 'SELL' else '')
-
-    def color_pnl(val):
-        try:
-            return 'color: #10b981' if float(val) >= 0 else 'color: #f43f5e'
+            capital = float(capital_str)
         except Exception:
-            return ''
+            capital = 240.0
+        roi     = (pnl / capital * 100) if capital else 0.0
+        roi_cls = "green" if roi >= 0 else "red"
 
-    show_cols = [c for c in ['timestamp', 'symbol', 'direction', 'entry_price', 'exit_price', 'pnl', 'status']
-                 if c in df_hist.columns]
-    subset_dir = ['direction'] if 'direction' in show_cols else []
-    subset_pnl = ['pnl'] if 'pnl' in show_cols else []
+        with c1:
+            st.markdown(f"""<div class="kpi-card">
+                <div class="kpi-label">Net PnL ({days_label})</div>
+                <div class="kpi-value {pnl_cls}">${pnl:+.2f}</div>
+                <div class="kpi-sub">≈ ₹{pnl*85:+,.0f}</div>
+            </div>""", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""<div class="kpi-card">
+                <div class="kpi-label">Win Rate</div>
+                <div class="kpi-value blue">{wr:.1f}%</div>
+                <div class="kpi-sub">{int(cnt)} total trades</div>
+            </div>""", unsafe_allow_html=True)
+        with c3:
+            avg_cls = "green" if avg >= 0 else "red"
+            st.markdown(f"""<div class="kpi-card">
+                <div class="kpi-label">Avg PnL / Trade</div>
+                <div class="kpi-value {avg_cls}">${avg:+.2f}</div>
+                <div class="kpi-sub">per closed trade</div>
+            </div>""", unsafe_allow_html=True)
+        with c4:
+            st.markdown(f"""<div class="kpi-card">
+                <div class="kpi-label">ROI on Capital</div>
+                <div class="kpi-value {roi_cls}">{roi:+.2f}%</div>
+                <div class="kpi-sub">Est. capital: ${int(capital)}</div>
+            </div>""", unsafe_allow_html=True)
 
-    styled = df_hist[show_cols].head(30).style \
-        .map(color_direction, subset=subset_dir) \
-        .map(color_pnl, subset=subset_pnl)
-    st.dataframe(styled, use_container_width=True, key="trade_journal")
-else:
-    st.info("📭 No trades yet. Bot will populate this table as trades execute.")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-st.caption("BHARAT AlgoVerse v3.0 • Built for Dr. Saab 🩺 • Market Order Engine")
+        if df_equity is not None and not df_equity.empty and 'cum_pnl' in df_equity.columns:
+            line_color = "#10b981" if df_equity['cum_pnl'].iloc[-1] >= 0 else "#f43f5e"
+            fill_color = "rgba(16,185,129,0.1)" if line_color == "#10b981" else "rgba(244,63,94,0.1)"
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df_equity['timestamp'], y=df_equity['cum_pnl'],
+                mode='lines', fill='tozeroy',
+                line=dict(color=line_color, width=2), fillcolor=fill_color,
+                name='Equity Curve'
+            ))
+            fig.update_layout(
+                template="plotly_dark", height=220,
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(showgrid=False, color='#475569'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#475569'),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, key=f"equity_{tab_key}")
+        else:
+            st.info("📭 No trade data yet for this period.")
+
+    with t1:
+        render_stats_tab(pnl_1d, cnt_1d, wr_1d, avg_1d, "1D", get_equity_curve(1), "1d")
+    with t2:
+        render_stats_tab(pnl_7d, cnt_7d, wr_7d, avg_7d, "7D", get_equity_curve(7), "7d")
+    with t3:
+        render_stats_tab(pnl_30d, cnt_30d, wr_30d, avg_30d, "30D", get_equity_curve(30), "30d")
+    with t4:
+        render_stats_tab(pnl_90d, cnt_90d, wr_90d, avg_90d, "90D", get_equity_curve(90), "90d")
+
+
+    st.divider()
+
+    # ── LIVE CHART + STRATEGY LAB ──────────────────────────────────
+    col_chart, col_lab = st.columns([3, 2])
+
+    with col_chart:
+        st.markdown('<div class="section-title">📈 Live BTC Chart</div>', unsafe_allow_html=True)
+        tf_display = db.get_param('candle_timeframe', '5m') or '5m'
+        if _has_delta:
+            try:
+                df_c, _ = delta_executor.fetch_delta_candles("BTC", tf_display, limit=60)
+                if df_c is not None and not df_c.empty:
+                    fig2 = go.Figure(data=[go.Candlestick(
+                        x=df_c['time'], open=df_c['open'], high=df_c['high'],
+                        low=df_c['low'], close=df_c['close'],
+                        increasing_line_color='#10b981', decreasing_line_color='#f43f5e',
+                    )])
+                    fig2.update_layout(
+                        template="plotly_dark", height=320,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(showgrid=False, rangeslider_visible=False, color='#475569'),
+                        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#475569'),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig2, use_container_width=True, key="live_btc_chart")
+                else:
+                    st.info("⏳ Loading chart data — waiting for API response...")
+            except Exception as ex:
+                st.info(f"⏳ Chart loading... ({ex})")
+        else:
+            st.info("⚠️ delta_executor not available — chart disabled.")
+
+    with col_lab:
+        st.markdown('<div class="section-title">⚙️ Strategy Lab (Live Settings)</div>', unsafe_allow_html=True)
+
+        _mode_val    = db.get_param('trade_mode', 'LIVE') or 'LIVE'
+        _tf_val      = db.get_param('candle_timeframe', '5m') or '5m'
+        _lots_val    = int(db.get_param('crypto_trade_size', '1') or '1')
+        _strikes_val = int(db.get_param('num_strikes', '1') or '1')
+        _expiry_val  = int(db.get_param('expiry_threshold', '3') or '3')
+        _sl_val      = int(float(db.get_param('sl_percent', '40') or '40'))
+        _tp_val      = int(float(db.get_param('tp_percent', '100') or '100'))
+        _offset_raw  = int(db.get_param('strike_offset', '0') or '0')
+        _period_val  = int(float(db.get_param('st_period', '10') or '10'))
+        _mult_val    = float(db.get_param('st_multiplier', '1.5') or '1.5')
+        _capital_val = int(float(db.get_param('estimated_capital', '240') or '240'))
+
+        _tf_options  = ["5m", "15m", "1h", "4h"]
+        _tf_idx      = _tf_options.index(_tf_val) if _tf_val in _tf_options else 0
+        _offset_opts = ["ATM (0)", "OTM +1", "OTM +2"]
+
+        s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
+                              index=1 if _mode_val == "LIVE" else 0, key="s_mode")
+        s_tf   = st.selectbox("Candle Timeframe", _tf_options, index=_tf_idx, key="s_tf")
+        s_lots = st.slider("Lot Size (Contracts)", 1, 50, max(1, _lots_val), key="s_lots")
+        s_strikes = st.slider("Number of Strike Prices", 1, 5, max(1, _strikes_val), key="s_strikes",
+                              help="Take multiple strikes at once")
+        s_expiry = st.slider("Min Expiry Days", 0, 14, max(0, _expiry_val), key="s_expiry")
+
+        col_sl, col_tp = st.columns(2)
+        with col_sl:
+            s_sl = st.number_input("Stop Loss %", 10, 90, max(10, min(90, _sl_val)), step=5, key="s_sl")
+        with col_tp:
+            s_tp = st.number_input("Take Profit %", 20, 500, max(20, min(500, _tp_val)), step=10, key="s_tp")
+
+        s_offset  = st.selectbox("Strike Selection", _offset_opts, index=min(_offset_raw, 2), key="s_offset")
+        s_period  = st.number_input("Supertrend Period", 5, 30, max(5, min(30, _period_val)), key="s_period")
+        s_mult    = st.number_input("Supertrend Multiplier", 0.5, 5.0,
+                                    max(0.5, min(5.0, _mult_val)), step=0.1, key="s_mult")
+        s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
+                                    max(50, min(10000, _capital_val)), step=10, key="s_cap")
+
+        if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
+            try:
+                db.set_param('trade_mode',        s_mode)
+                db.set_param('candle_timeframe',  s_tf)
+                db.set_param('crypto_trade_size', str(s_lots))
+                db.set_param('num_strikes',       str(s_strikes))
+                db.set_param('expiry_threshold',  str(s_expiry))
+                db.set_param('sl_percent',        str(s_sl))
+                db.set_param('tp_percent',        str(s_tp))
+                db.set_param('strike_offset',     str(0 if "ATM" in s_offset else (1 if "+1" in s_offset else 2)))
+                db.set_param('st_period',         str(s_period))
+                db.set_param('st_multiplier',     str(s_mult))
+                db.set_param('estimated_capital', str(s_capital))
+                st.success("✅ All settings saved! Bot will use these on next cycle.")
+            except Exception as e:
+                st.error(f"Save failed: {e}")
+
+    st.divider()
+
+    # ── TRADE JOURNAL ───────────────────────────────────────────────
+    st.markdown('<div class="section-title">📜 Trade Journal (Last 30 Trades)</div>', unsafe_allow_html=True)
+    df_hist = get_trade_history(90)
+    if not df_hist.empty:
+        def color_direction(val):
+            return 'color: #10b981' if val == 'BUY' else ('color: #f43f5e' if val == 'SELL' else '')
+
+        def color_pnl(val):
+            try:
+                return 'color: #10b981' if float(val) >= 0 else 'color: #f43f5e'
+            except Exception:
+                return ''
+
+        show_cols  = [c for c in ['timestamp','symbol','direction','entry_price','exit_price','pnl','status']
+                      if c in df_hist.columns]
+        subset_dir = ['direction'] if 'direction' in show_cols else []
+        subset_pnl = ['pnl'] if 'pnl' in show_cols else []
+
+        styled = df_hist[show_cols].head(30).style \
+            .map(color_direction, subset=subset_dir) \
+            .map(color_pnl, subset=subset_pnl)
+        st.dataframe(styled, use_container_width=True, key="trade_journal")
+    else:
+        st.info("📭 No trades yet. Bot will populate this table as trades execute.")
+
+    st.caption("BHARAT AlgoVerse v3.0 • Built for Dr. Saab 🩺 • Crypto Module")
+
+
+# ════════════════════════════════════════════════════════════
+# PAGE 2 — NIFTY (NSE)
+# ════════════════════════════════════════════════════════════
+elif page == "📈 Nifty (NSE)":
+    st.markdown("# 📈 BHARAT NIFTY MODULE v3.0")
+
+    # ── Market Status Banner ───────────────────────────────
+    _market_open  = nifty_logic.is_market_open() if _has_nifty else False
+    _nifty_signal = db.get_param('nifty_signal', 'WAIT') or 'WAIT'
+    _nifty_active = db.get_param('nifty_active_symbol', 'NONE') or 'NONE'
+    _nifty_upnl   = db.get_param('nifty_unrealized_pnl', '0') or '0'
+    _nifty_dir    = db.get_param('nifty_last_direction', 'NONE') or 'NONE'
+    _nifty_expiry = db.get_param('nifty_expiry', 'N/A') or 'N/A'
+    _nifty_prem   = db.get_param('nifty_entry_premium', '0') or '0'
+
+    mkt_col   = "#10b981" if _market_open else "#f59e0b"
+    mkt_label = "MARKET OPEN" if _market_open else "MARKET CLOSED"
+    mkt_extra = "" if _market_open else (f" — Opens in {nifty_logic.time_to_open_str()}" if _has_nifty else "")
+    sig_col   = "#10b981" if _nifty_signal == "BUY" else ("#f43f5e" if _nifty_signal == "SELL" else "#f59e0b")
+
+    st.markdown(f"""
+    <div class="pulse-bar">
+      <div>
+        <div class="kpi-label">MARKET STATUS</div>
+        <span style="font-size:1.6rem;font-weight:700;color:{mkt_col};">{mkt_label}</span>
+        <span style="color:#475569;margin-left:10px;font-size:0.85rem;">{mkt_extra}</span>
+      </div>
+      <div style="text-align:right;">
+        <div class="kpi-label">SUPERTREND SIGNAL</div>
+        <span style="font-size:1.6rem;font-weight:700;color:{sig_col};">{_nifty_signal}</span>
+        <div class="kpi-label" style="margin-top:4px;">Window: 9:25 AM – 3:10 PM IST</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Active Trade Info ───────────────────────────────────
+    n1, n2, n3, n4 = st.columns(4)
+    with n1:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">Active Position</div>
+            <div class="kpi-value blue" style="font-size:1rem;">{_nifty_active[:22] if _nifty_active != 'NONE' else '—'}</div>
+            <div class="kpi-sub">Direction: {_nifty_dir}</div>
+        </div>""", unsafe_allow_html=True)
+    with n2:
+        upnl_f   = float(_nifty_upnl) if _nifty_upnl else 0.0
+        upnl_cls = "green" if upnl_f >= 0 else "red"
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">Live PnL (%)</div>
+            <div class="kpi-value {upnl_cls}">{upnl_f:+.1f}%</div>
+            <div class="kpi-sub">vs entry premium</div>
+        </div>""", unsafe_allow_html=True)
+    with n3:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">Entry Premium</div>
+            <div class="kpi-value amber">₹{_nifty_prem}</div>
+            <div class="kpi-sub">Target ₹{db.get_param('nifty_target_premium','120')}</div>
+        </div>""", unsafe_allow_html=True)
+    with n4:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">Expiry</div>
+            <div class="kpi-value blue" style="font-size:1.1rem;">{_nifty_expiry}</div>
+            <div class="kpi-sub">Next-week expiry rule</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Live Nifty Chart + Settings Lab ───────────────────
+    nc_chart, nc_lab = st.columns([3, 2])
+
+    with nc_chart:
+        st.markdown('<div class="section-title">📈 Live Nifty 50 Chart</div>', unsafe_allow_html=True)
+        if _has_nifty:
+            _ntf = db.get_param('nifty_timeframe', '15m') or '15m'
+            try:
+                _ndf, _nerr = nifty_logic.fetch_nifty_candles('^NSEI', _ntf, limit=80)
+                if not _ndf.empty:
+                    _ndf = nifty_logic.calculate_supertrend(_ndf)
+                    nfig = go.Figure()
+                    nfig.add_trace(go.Candlestick(
+                        x=_ndf['time'], open=_ndf['open'], high=_ndf['high'],
+                        low=_ndf['low'], close=_ndf['close'],
+                        increasing_line_color='#10b981', decreasing_line_color='#f43f5e',
+                        name='Nifty 50'
+                    ))
+                    # Supertrend overlay
+                    if 'sar' in _ndf.columns:
+                        bull = _ndf[_ndf['st_dir'] == 1]
+                        bear = _ndf[_ndf['st_dir'] == -1]
+                        nfig.add_trace(go.Scatter(
+                            x=bull['time'], y=bull['sar'], mode='markers',
+                            marker=dict(color='#10b981', size=4), name='ST Bull'
+                        ))
+                        nfig.add_trace(go.Scatter(
+                            x=bear['time'], y=bear['sar'], mode='markers',
+                            marker=dict(color='#f43f5e', size=4), name='ST Bear'
+                        ))
+                    nfig.update_layout(
+                        template="plotly_dark", height=340,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(showgrid=False, rangeslider_visible=False, color='#475569'),
+                        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', color='#475569'),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(nfig, use_container_width=True, key="nifty_live_chart")
+                else:
+                    st.info(f"⏳ Loading Nifty chart... ({_nerr or 'fetching data'})")
+            except Exception as _nex:
+                st.info(f"⏳ Chart loading... ({_nex})")
+        else:
+            st.warning("⚠️ nifty_logic module not available.")
+
+    with nc_lab:
+        st.markdown('<div class="section-title">⚙️ Nifty Strategy Lab</div>', unsafe_allow_html=True)
+
+        # Read current settings
+        _nsym_opts = ["^NSEI", "^NSEBANK", "RELIANCE.NS", "INFY.NS", "TCS.NS"]
+        _nsym_cur  = db.get_param('nifty_symbol', '^NSEI') or '^NSEI'
+        _nsym_idx  = _nsym_opts.index(_nsym_cur) if _nsym_cur in _nsym_opts else 0
+        _ntf_opts  = ["5m", "15m", "30m", "1h", "1d"]
+        _ntf_cur   = db.get_param('nifty_timeframe', '15m') or '15m'
+        _ntf_idx   = _ntf_opts.index(_ntf_cur) if _ntf_cur in _ntf_opts else 1
+        _nper      = int(float(db.get_param('nifty_st_period', '10') or '10'))
+        _nmul      = float(db.get_param('nifty_st_multiplier', '1.5') or '1.5')
+        _nlots     = int(float(db.get_param('nifty_lots', '1') or '1'))
+        _nprem     = int(float(db.get_param('nifty_target_premium', '120') or '120'))
+        _nsl       = int(float(db.get_param('nifty_sl_percent', '30') or '30'))
+        _ntp       = int(float(db.get_param('nifty_tp_percent', '80') or '80'))
+        _nmode_cur = db.get_param('nifty_trade_mode', 'PAPER') or 'PAPER'
+
+        ns_mode  = st.selectbox("Trade Mode",   ["PAPER", "LIVE"],
+                                 index=1 if _nmode_cur == "LIVE" else 0, key="ns_mode")
+        ns_sym   = st.selectbox("Instrument",   _nsym_opts, index=_nsym_idx, key="ns_sym")
+        ns_tf    = st.selectbox("Timeframe",     _ntf_opts,  index=_ntf_idx,  key="ns_tf")
+        ns_per   = st.number_input("ST Period",  5, 30, max(5, min(30, _nper)), key="ns_per")
+        ns_mul   = st.number_input("ST Multiplier", 0.5, 5.0,
+                                    max(0.5, min(5.0, _nmul)), step=0.1, key="ns_mul",
+                                    help="Common: 10/1.0, 10/1.5, 10/2.5")
+        ns_lots  = st.slider("Lots",             1, 20, max(1, _nlots), key="ns_lots")
+        ns_prem  = st.number_input("Target Premium (₹)", 50, 500,
+                                    max(50, min(500, _nprem)), step=5, key="ns_prem",
+                                    help="Option whose LTP is nearest to this value will be selected")
+        c_sl2, c_tp2 = st.columns(2)
+        with c_sl2:
+            ns_sl = st.number_input("SL %",  10, 90, max(10, min(90, _nsl)), step=5, key="ns_sl")
+        with c_tp2:
+            ns_tp = st.number_input("TP %",  20, 300, max(20, min(300, _ntp)), step=10, key="ns_tp")
+
+        if st.button("💾 SAVE NIFTY SETTINGS", key="save_nifty"):
+            try:
+                db.set_param('nifty_trade_mode',      ns_mode)
+                db.set_param('nifty_symbol',          ns_sym)
+                db.set_param('nifty_timeframe',       ns_tf)
+                db.set_param('nifty_st_period',       str(ns_per))
+                db.set_param('nifty_st_multiplier',   str(ns_mul))
+                db.set_param('nifty_lots',            str(ns_lots))
+                db.set_param('nifty_target_premium',  str(ns_prem))
+                db.set_param('nifty_sl_percent',      str(ns_sl))
+                db.set_param('nifty_tp_percent',      str(ns_tp))
+                st.success("✅ Nifty settings saved! Bot uses on next cycle.")
+            except Exception as _se:
+                st.error(f"Save failed: {_se}")
+
+    st.divider()
+
+    # ── Nifty Bot Controls ───────────────────────────────────
+    st.markdown('<div class="section-title">🔧 Nifty Bot Controls</div>', unsafe_allow_html=True)
+    bc1, bc2, bc3 = st.columns(3)
+
+    with bc1:
+        if st.button("▶️ START Nifty Bot", key="nifty_start"):
+            try:
+                if os.name == 'nt':
+                    subprocess.Popen(["python", "nifty_main.py"],
+                                     creationflags=subprocess.CREATE_NEW_CONSOLE)
+                else:
+                    subprocess.Popen("nohup python3 nifty_main.py &", shell=True)
+                db.set_param('nifty_algo_running', 'ON')
+                st.success("✅ Nifty bot started!")
+            except Exception as _e:
+                st.error(f"Start failed: {_e}")
+            st.rerun()
+
+    with bc2:
+        if st.button("■ STOP Nifty Bot", key="nifty_stop"):
+            try:
+                db.set_param('nifty_algo_running', 'OFF')
+                if os.name == 'nt':
+                    subprocess.run('wmic process where "CommandLine like \'%nifty_main.py%\'" delete', shell=True)
+                else:
+                    subprocess.run("pkill -f nifty_main.py", shell=True)
+                st.success("✅ Nifty bot stopped.")
+            except Exception as _e:
+                st.error(f"Stop failed: {_e}")
+            st.rerun()
+
+    with bc3:
+        if st.button("💥 EMERGENCY EXIT (Nifty)", key="nifty_exit"):
+            if _has_nifty:
+                with st.spinner("Closing all Nifty positions..."):
+                    try:
+                        nifty_executor.square_off_nifty_all()
+                        st.success("✅ All Nifty positions closed.")
+                    except Exception as _e:
+                        st.error(f"Exit failed: {_e}")
+            else:
+                st.error("nifty_executor not loaded.")
+            st.rerun()
+
+    # Running status indicator
+    _nifty_running = db.get_param('nifty_algo_running', 'OFF') or 'OFF'
+    if _nifty_running == 'ON':
+        st.markdown('<span class="badge badge-green">● NIFTY BOT RUNNING</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="badge badge-red">● NIFTY BOT STOPPED</span>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Manual Signal Test (Paper Mode) ────────────────────
+    st.markdown('<div class="section-title">🧪 Live Signal Test</div>', unsafe_allow_html=True)
+    st.caption("Click to fetch a live Supertrend signal right now (uses saved settings above).")
+    if st.button("📸 GET LIVE NIFTY SIGNAL NOW", key="nifty_test_signal"):
+        if _has_nifty:
+            with st.spinner("Fetching candles and computing Supertrend..."):
+                try:
+                    _sym  = db.get_param('nifty_symbol', '^NSEI') or '^NSEI'
+                    _tf2  = db.get_param('nifty_timeframe', '15m') or '15m'
+                    _sig  = nifty_logic.get_nifty_signal(symbol=_sym, timeframe=_tf2)
+                    _col  = "green" if _sig == "BUY" else ("red" if _sig == "SELL" else "amber")
+                    st.markdown(
+                        f'<div style="font-size:1.8rem;font-weight:700;" '  
+                        f'class="{_col}">📊 Live Signal: {_sig}</div>',
+                        unsafe_allow_html=True
+                    )
+                    db.set_param('nifty_signal', _sig)
+                except Exception as _e:
+                    st.error(f"Signal fetch error: {_e}")
+        else:
+            st.error("⚠️ nifty_logic not available.")
+
+    # ── Next Week Expiry Info ───────────────────────────
+    if _has_nifty:
+        _next_exp = nifty_executor.get_next_week_thursday()
+        st.info(
+            f"📅 **Next-Week Expiry Rule Active**\n\n"
+            f"All trades will use expiry: **{_next_exp}** (next Thursday).\n\n"
+            f"⚠️ Current week's options are always skipped to avoid heavy theta decay."
+        )
+
+    st.caption("BHARAT AlgoVerse v3.0 • Nifty Module • Built for Dr. Saab 🩺")
