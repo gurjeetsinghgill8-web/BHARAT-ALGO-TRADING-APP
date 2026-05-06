@@ -19,6 +19,7 @@ except Exception:
 try:
     import invest_rs_engine
     import invest_report
+    import invest_query_engine
     _has_invest = True
 except Exception:
     _has_invest = False
@@ -783,11 +784,12 @@ elif page == "\U0001f4b9 Investment (RS)":
         st.stop()
 
     # ── Tabs ────────────────────────────────────────────────
-    iv1, iv2, iv3, iv4 = st.tabs([
+    iv1, iv2, iv3, iv4, iv5 = st.tabs([
         "\U0001f4ca Market Pulse",
         "\U0001f3c6 Sector Ranking",
         "\U0001f3af Top Stocks",
-        "\u2699\ufe0f Settings"
+        "\u2699\ufe0f Settings",
+        "\U0001f916 Research AI"
     ])
 
     # ── Pull cached scan from DB ─────────────────────────────
@@ -1036,6 +1038,88 @@ elif page == "\U0001f4b9 Investment (RS)":
             if st.button("\u25a0 STOP Invest Bot", key="iv_stop_bot"):
                 db.set_param("invest_algo_running","OFF")
                 st.warning("Bot set to OFF. Will stop on next loop check.")
+
+    
+    # ══ TAB 5: RESEARCH AI CHAT ═══════════════════════
+    with iv5:
+        st.markdown('<div class="section-title">\U0001f916 Research AI — Apne Data Se Poochho</div>', unsafe_allow_html=True)
+        st.markdown("""
+        > **Kuch bhi poochho apni investment research ke baare mein.**
+        > System aapke NSE data se real backtest karke jawab dega.
+        """)
+
+        # Quick question buttons
+        st.markdown("**\U0001f50d Quick Questions:**")
+        quick_q_result = None
+        qcols = st.columns(4)
+        for idx, (label, q_text) in enumerate(invest_query_engine.QUICK_QUESTIONS):
+            col_idx = idx % 4
+            with qcols[col_idx]:
+                if st.button(label, key=f"qq_{idx}"):
+                    quick_q_result = q_text
+
+        st.divider()
+
+        # Chat history in session state
+        if "invest_chat_history" not in st.session_state:
+            st.session_state["invest_chat_history"] = []
+
+        # Display chat history
+        for msg in st.session_state["invest_chat_history"]:
+            with st.chat_message(msg["role"],
+                                 avatar="\U0001f9ba" if msg["role"]=="user" else "\U0001f4b9"):
+                st.markdown(msg["content"])
+
+                # Send to Telegram button for AI responses
+                if msg["role"] == "assistant":
+                    _tg_key = f"tg_{hash(msg['content'][:30])}"
+                    if st.button("\U0001f4e4 Send to Telegram", key=_tg_key):
+                        from utils import send_telegram_msg
+                        send_telegram_msg(msg["content"][:4000])
+                        st.toast("\u2705 Sent to Telegram!")
+
+        # Handle quick question click
+        if quick_q_result:
+            st.session_state["invest_chat_history"].append(
+                {"role": "user", "content": quick_q_result}
+            )
+            with st.chat_message("user", avatar="\U0001f9ba"):
+                st.markdown(quick_q_result)
+            with st.chat_message("assistant", avatar="\U0001f4b9"):
+                with st.spinner("\U0001f4ca Data fetch + analysis chal raha hai... (30-60 sec)"):
+                    _ai_resp = invest_query_engine.process_query(quick_q_result)
+                st.markdown(_ai_resp)
+            st.session_state["invest_chat_history"].append(
+                {"role": "assistant", "content": _ai_resp}
+            )
+            st.rerun()
+
+        # Manual text input
+        user_query = st.chat_input("Kuch bhi poochho... jaise: Pichhle 2 saal mein kaun sa sector best tha?")
+        if user_query:
+            st.session_state["invest_chat_history"].append(
+                {"role": "user", "content": user_query}
+            )
+            with st.chat_message("user", avatar="\U0001f9ba"):
+                st.markdown(user_query)
+
+            with st.chat_message("assistant", avatar="\U0001f4b9"):
+                with st.spinner("\U0001f4ca NSE data fetch + backtest running... (30-90 sec)"):
+                    _resp = invest_query_engine.process_query(user_query)
+                st.markdown(_resp)
+                if st.button("\U0001f4e4 Send to Telegram", key=f"tg_new_{len(st.session_state['invest_chat_history'])}"):
+                    from utils import send_telegram_msg
+                    send_telegram_msg(_resp[:4000])
+                    st.toast("\u2705 Sent to Telegram!")
+
+            st.session_state["invest_chat_history"].append(
+                {"role": "assistant", "content": _resp}
+            )
+
+        if st.session_state["invest_chat_history"]:
+            if st.button("\U0001f9f9 Clear Chat History", key="iv_clear_chat"):
+                st.session_state["invest_chat_history"] = []
+                st.rerun()
 
     st.caption("BHARAT AlgoVerse v3.0 \u2022 RS LegoMaster \u2022 Built for Dr. Saab \U0001f9ba")
 
