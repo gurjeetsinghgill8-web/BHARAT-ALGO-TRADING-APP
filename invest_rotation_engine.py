@@ -35,15 +35,25 @@ import invest_rs_engine as rs_engine
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ── Config (can be overridden from DB) ──────────────────────
-RS_PERIOD        = 55       # Primary RS period (days)
-RS_ENTRY_MIN     = 1.05     # Sector must be 5% above Nifty to enter
-RS_EXIT_BUFFER   = 0.95     # Exit when sector RS drops below this
-MAX_SECTORS      = 2        # Max parallel sectors at once
-REENTRY_DAYS     = 28       # Min days before re-entering same sector
-STOCK_GRACE_DAYS = 14       # Days to hold stock if it's still RS>1.0
-STEP_DAYS        = 7        # Backtest step size (weekly)
-STOCKS_PER_CAP   = 2        # Top N stocks per cap category
+# ── Config V2 "FORTRESS" (upgraded 2026-05-06) ─────────────
+RS_PERIOD         = 55      # Primary RS period (days)
+RS_ENTRY_MIN      = 1.15    # V2: Raised from 1.05 → stronger conviction needed
+RS_EXIT_BUFFER    = 0.95    # Exit when RS drops below this
+HARD_STOP_LOSS    = -0.07   # V2: NEW — -7% max loss per trade, then force exit
+TRAIL_TRIGGER_1   = 0.15    # V2: Once +15% profit → lock floor
+TRAIL_FLOOR_1     = 0.08    # V2: Floor at +8% once triggered
+TRAIL_TRIGGER_2   = 0.25    # V2: Once +25% profit → higher lock
+TRAIL_FLOOR_2     = 0.18    # V2: Floor at +18% once triggered
+NIFTY_RSI_AGGR    = 55      # V2: Raised from 50 → stricter market gate
+CONSISTENCY_WEEKS = 8       # V2: Sector RS must be > 1.0 for 8 weeks before entry
+MAX_SECTORS       = 2       # Max parallel sectors
+REENTRY_WIN_DAYS  = 28      # Re-entry wait after WINNING trade
+REENTRY_LOSS_DAYS = 56      # V2: Stricter re-entry after LOSING trade (8 weeks)
+STOCK_GRACE_DAYS  = 14      # Grace period for strong stocks on sector exit
+STEP_DAYS         = 7       # Backtest step size (weekly)
+STOCKS_PER_CAP    = 2       # Top N stocks per cap category
+# Backward compat
+REENTRY_DAYS      = REENTRY_WIN_DAYS
 
 
 # ════════════════════════════════════════════════════════════
@@ -135,11 +145,32 @@ def _calc_rsi_on(df: pd.DataFrame, ticker: str,
 # ════════════════════════════════════════════════════════════
 
 def get_market_mode_on(df: pd.DataFrame, target_date: pd.Timestamp) -> str:
-    """AGGRESSIVE if Nifty RSI > 50, else DEFENSIVE."""
+    """V2: AGGRESSIVE only if Nifty RSI > 55 (raised from 50)."""
     rsi = _calc_rsi_on(df, "^NSEI", target_date)
     if rsi is None:
-        return "AGGRESSIVE"   # default to invest if unknown
-    return "AGGRESSIVE" if rsi > 50 else "DEFENSIVE"
+        return "AGGRESSIVE"
+    if rsi > NIFTY_RSI_AGGR:       # V2: 55 (was 50)
+        return "AGGRESSIVE"
+    elif rsi > 50:
+        return "CAUTIOUS"           # V2: new mode — hold but don't enter
+    else:
+        return "DEFENSIVE"
+
+
+def check_rs_consistency(df: pd.DataFrame, ticker: str,
+                          target_date: pd.Timestamp,
+                          weeks: int = CONSISTENCY_WEEKS) -> bool:
+    """
+    V2: Sector RS must be > 1.0 for N consecutive weeks before entry.
+    Prevents false breakouts from sectors that briefly cross RS 1.05.
+    """
+    for w in range(1, weeks + 1):
+        check_dt = target_date - timedelta(days=w * 7)
+        rs = _calc_rs_on(df, ticker, "^NSEI", check_dt)
+        if rs is None or rs < 1.0:
+            return False
+    return True
+
 
 
 # ════════════════════════════════════════════════════════════
@@ -170,12 +201,14 @@ def scan_sectors_on(df: pd.DataFrame, target_date: pd.Timestamp) -> list[dict]:
 # ════════════════════════════════════════════════════════════
 
 def should_enter_sector(sector_rs: float, sector_rank: int,
-                        market_mode: str) -> bool:
-    """True if sector qualifies for entry."""
+                        market_mode: str,
+                        consistency_ok: bool = True) -> bool:
+    """V2: Stricter entry — higher bar + consistency check + stronger market gate."""
     return (
         market_mode == "AGGRESSIVE" and
-        sector_rs >= RS_ENTRY_MIN and
-        sector_rank <= 5
+        sector_rs >= RS_ENTRY_MIN and   # V2: 1.15 (was 1.05)
+        sector_rank <= 5 and
+        consistency_ok                  # V2: 8-week RS consistency
     )
 
 
@@ -243,10 +276,12 @@ def run_rotation_backtest(
     # ── Download all data ──────────────────────────────────
     df = download_all_data(start_date, end_date)
 
-    # ── State tracking ─────────────────────────────────────
+    # ── State tracking (V2 extended) ───────────────────────
     current_capital    = float(capital)
-    active_positions   = {}   # sector_name → {entry_date, sector_rs, stocks[]}
+    active_positions   = {}   # sector_name → {entry_date, sector_rs, stocks[], trail_floor}
     last_exit_dates    = {}   # sector_name → last exit date (for reentry gap)
+    last_exit_profits  = {}   # V2: sector_name → True if last trade was profitable
+    _gap_overrides     = {}   # V2: sector_name → actual gap to use (28 or 56)
     stock_grace_ends   = {}   # ticker → date when grace period ends
     trade_log          = []   # List of completed trades
     portfolio_curve    = []   # [{date, capital}] for equity chart
@@ -269,7 +304,7 @@ def run_rotation_backtest(
         sector_rankings = scan_sectors_on(df, step_dt)
         sector_rs_map   = {s["sector"]: s for s in sector_rankings}
 
-        # ── 3. Check active positions: HOLD or EXIT ─────────
+        # ── 3. Check active positions: HOLD, STOP LOSS, or EXIT ──
         sectors_to_exit = []
         for sec_name, pos in active_positions.items():
             sec_info = sector_rs_map.get(sec_name)
@@ -277,7 +312,168 @@ def run_rotation_backtest(
                 sectors_to_exit.append(sec_name)
                 continue
 
-            if should_exit_sector(sec_info["rs"], sec_info["rank"]):
+            # ── V2: HARD STOP LOSS CHECK (-7%) ────────────────
+            # Calculate current avg return of the position
+            current_returns = []
+            for st in pos["stocks"]:
+                cur_px = _price_on(df, st["ticker"], step_dt)
+                if cur_px and st["entry_price"] > 0:
+                    current_returns.append((cur_px / st["entry_price"]) - 1)
+            avg_cur_return = float(np.mean(current_returns)) if current_returns else 0
+
+            hard_stop_triggered = avg_cur_return <= HARD_STOP_LOSS  # -7%
+
+            # ── V2: TRAILING STOP CHECK ────────────────────────
+            trail_stop_triggered = False
+            trail_floor = pos.get("trail_floor", None)
+            if trail_floor is not None and avg_cur_return < trail_floor:
+                trail_stop_triggered = True
+            # Raise trail floor if new profit threshold reached
+            if avg_cur_return >= TRAIL_TRIGGER_2 and pos.get("trail_floor", 0) < TRAIL_FLOOR_2:
+                active_positions[sec_name]["trail_floor"] = TRAIL_FLOOR_2
+            elif avg_cur_return >= TRAIL_TRIGGER_1 and pos.get("trail_floor") is None:
+                active_positions[sec_name]["trail_floor"] = TRAIL_FLOOR_1
+
+            exit_triggered = (
+                hard_stop_triggered or
+                trail_stop_triggered or
+                should_exit_sector(sec_info["rs"], sec_info["rank"])
+            )
+
+            if exit_triggered:
+                exit_reason = (
+                    f"HARD STOP: {avg_cur_return*100:.1f}% <= {HARD_STOP_LOSS*100:.0f}%" if hard_stop_triggered else
+                    f"TRAIL STOP: locked {trail_floor*100:.0f}%, fell to {avg_cur_return*100:.1f}%" if trail_stop_triggered else
+                    f"RS exit: {sec_info['rs']:.3f} < {RS_EXIT_BUFFER}"
+                )
+
+                # HYBRID STOCK EXIT (unchanged from V1)
+                stocks_out = []
+                stocks_grace = []
+                for st in pos["stocks"]:
+                    stock_rs  = _calc_rs_on(df, st["ticker"], "^NSEI", step_dt, rs_period)
+                    grace_end = stock_grace_ends.get(st["ticker"])
+
+                    # On hard stop → skip grace, exit everything immediately
+                    if hard_stop_triggered:
+                        stocks_out.append(st)
+                        continue
+
+                    if grace_end and step_dt.date() < grace_end:
+                        stocks_grace.append(st)
+                    elif stock_rs and stock_rs > 1.0 and not grace_end:
+                        stock_grace_ends[st["ticker"]] = step_dt.date() + timedelta(days=STOCK_GRACE_DAYS)
+                        stocks_grace.append(st)
+                    else:
+                        stocks_out.append(st)
+
+                if stocks_grace and not stocks_out:
+                    active_positions[sec_name]["stocks"] = stocks_grace
+                    active_positions[sec_name]["grace"] = True
+                    continue
+
+                # Force-exit grace stocks too
+                all_stocks_done = stocks_out.copy()
+                for st in stocks_grace:
+                    exit_price = _price_on(df, st["ticker"], step_dt)
+                    if exit_price and st["entry_price"] > 0:
+                        st["exit_price"] = round(exit_price, 2)
+                        st["exit_date"]  = step_dt.strftime("%Y-%m-%d")
+                        st["return_pct"] = round((exit_price / st["entry_price"] - 1) * 100, 2)
+                        st["days_held"]  = (step_dt.date() - date.fromisoformat(st["entry_date"])).days
+                        stock_grace_ends.pop(st["ticker"], None)
+                    all_stocks_done.append(st)
+
+                # Exit all stocks now
+                for st in all_stocks_done:
+                    if "exit_price" not in st:
+                        exit_price = _price_on(df, st["ticker"], step_dt)
+                        if exit_price and st["entry_price"] > 0:
+                            st["exit_price"] = round(exit_price, 2)
+                            st["exit_date"]  = step_dt.strftime("%Y-%m-%d")
+                            st["return_pct"] = round((exit_price / st["entry_price"] - 1) * 100, 2)
+                            st["days_held"]  = (step_dt.date() - date.fromisoformat(st["entry_date"])).days
+
+                valid      = [s for s in all_stocks_done if s.get("return_pct") is not None]
+                avg_return = np.mean([s["return_pct"] for s in valid]) if valid else 0
+
+                nifty_entry = _price_on(df, "^NSEI", pd.Timestamp(pos["entry_date"]))
+                nifty_exit  = _price_on(df, "^NSEI", step_dt)
+                nifty_ret   = round((nifty_exit / nifty_entry - 1) * 100, 2) if (nifty_entry and nifty_exit) else 0
+
+                capital_before = pos["capital_allocated"]
+                capital_after  = capital_before * (1 + avg_return / 100)
+                current_capital += (capital_after - capital_before)
+
+                was_winner = avg_return > 0
+                trade_log.append({
+                    "trade_id":             len(trade_log) + 1,
+                    "sector":               sec_name,
+                    "entry_date":           pos["entry_date"],
+                    "exit_date":            step_dt.strftime("%Y-%m-%d"),
+                    "days_held":            (step_dt.date() - date.fromisoformat(pos["entry_date"])).days,
+                    "stocks":               all_stocks_done,
+                    "sector_entry_rs":      round(pos["entry_rs"], 4),
+                    "sector_exit_rs":       round(sec_info["rs"], 4),
+                    "portfolio_return_pct": round(avg_return, 2),
+                    "capital_before":       round(capital_before, 2),
+                    "capital_after":        round(capital_after, 2),
+                    "nifty_return_pct":     nifty_ret,
+                    "beat_nifty":           avg_return > nifty_ret,
+                    "exit_reason":          exit_reason,
+                    "hard_stop":            hard_stop_triggered,
+                })
+                # V2: Stricter re-entry gap if trade LOST
+                reentry_gap = REENTRY_LOSS_DAYS if not was_winner else REENTRY_WIN_DAYS
+                last_exit_dates[sec_name] = step_dt.date()
+                last_exit_profits[sec_name] = was_winner
+                _gap_overrides[sec_name] = reentry_gap
+                sectors_to_exit.append(sec_name)
+
+        for sec_name in sectors_to_exit:
+            active_positions.pop(sec_name, None)
+
+        # ── 4. Enter new sectors if capacity available ───────
+        # V2: Only in AGGRESSIVE mode (not CAUTIOUS)
+        if market_mode == "AGGRESSIVE" and len(active_positions) < max_sectors:
+            free_slots        = max_sectors - len(active_positions)
+            capital_per_slot  = current_capital / max(max_sectors, 1)
+            active_names      = set(active_positions.keys())
+
+            candidates = []
+            for s in sector_rankings:
+                if s["sector"] in active_names:
+                    continue
+                gap_needed = _gap_overrides.get(s["sector"], REENTRY_WIN_DAYS)
+                days_since_exit = (step_dt.date() - last_exit_dates.get(s["sector"], date(2000, 1, 1))).days
+                if days_since_exit < gap_needed:
+                    continue
+                # V2: Consistency check — RS must be > 1.0 for 8 consecutive weeks
+                sec_ticker   = rs_engine.SECTOR_INDICES.get(s["sector"], "")
+                consistent   = check_rs_consistency(df, sec_ticker, step_dt) if sec_ticker else True
+                if not should_enter_sector(s["rs"], s["rank"], market_mode, consistent):
+                    continue
+                candidates.append(s)
+
+            for candidate in candidates[:free_slots]:
+                stocks = pick_stocks_for_sector(df, candidate["sector"], step_dt)
+                if not stocks:
+                    continue
+                active_positions[candidate["sector"]] = {
+                    "entry_date":        step_dt.strftime("%Y-%m-%d"),
+                    "entry_rs":          candidate["rs"],
+                    "stocks":            stocks,
+                    "capital_allocated": capital_per_slot,
+                    "grace":             False,
+                    "trail_floor":       None,   # V2: trailing stop init
+                }
+                log_terminal(
+                    f"[ROTATION-V2] ENTER: {candidate['sector']} RS:{candidate['rs']:.3f} "
+                    f"| {len(stocks)} stocks | {market_mode} | consistent:yes",
+                    "INFO"
+                )
+
+
                 # HYBRID STOCK EXIT: check each stock RS
                 stocks_out = []
                 stocks_grace = []
