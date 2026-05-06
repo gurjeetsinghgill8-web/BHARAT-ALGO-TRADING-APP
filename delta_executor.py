@@ -526,7 +526,7 @@ def square_off_crypto(target_pid=None):
                     "size": float(size),
                     "side": "sell",
                     "order_type": "limit_order",
-                    "price": "0.1", # Aggressive price for options to ensure immediate fill
+                    "limit_price": "0.1", # Aggressive price for options to ensure immediate fill
                     "reduce_only": True
                 }
                 payload = json.dumps(payload_dict)
@@ -562,7 +562,7 @@ def place_delta_bracket_orders(pid, qty, entry_price):
         "order_type": "limit_order",
         "stop_order_type": "stop_loss_order",
         "stop_price": str(sl_trigger),
-        "price": str(sl_limit),
+        "limit_price": str(sl_limit),
         "reduce_only": True
     }
     
@@ -576,7 +576,7 @@ def place_delta_bracket_orders(pid, qty, entry_price):
         "order_type": "limit_order",
         "stop_order_type": "take_profit_order",
         "stop_price": str(tp_trigger),
-        "price": str(tp_limit),
+        "limit_price": str(tp_limit),
         "reduce_only": True
     }
     
