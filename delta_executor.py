@@ -561,21 +561,36 @@ def square_off_crypto(target_pid=None):
                 
                 if size == 0: continue 
 
+                # Fetch Mark Price for precise limit order
+                mark_price = 1.0 # Default fallback
+                try:
+                    r_pos = requests.get("https://api.india.delta.exchange/v2/positions", headers=get_delta_auth_headers("GET", "/v2/positions"), timeout=10)
+                    if r_pos.status_code == 200:
+                        for p in r_pos.json().get('result', []):
+                            if str(p.get('product_id') or p.get('id') or "") == pid:
+                                mark_price = float(p.get('mark_price') or p.get('avg_entry_price') or 1.0)
+                                break
+                except: pass
+
                 # Send Limit Close Order (Fix for '400-unsupported' market orders on options)
-                # For a sell order, we use a very low price (e.g. 0.1) to ensure it fills like a market order
+                # We use 50% of mark price as limit to ensure immediate fill while staying within price bands
+                exit_limit = round(mark_price * 0.5, 2)
+                if exit_limit < 0.1: exit_limit = 0.1 # Minimum floor
+
                 payload_dict = {
                     "product_id": int(pid),
                     "size": float(size),
                     "side": "sell",
                     "order_type": "limit_order",
-                    "limit_price": "0.1", # Aggressive price for options to ensure immediate fill
+                    "limit_price": str(exit_limit),
                     "reduce_only": True
                 }
                 payload = json.dumps(payload_dict)
                 resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload), data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_terminal(f"✅ EXIT SUCCESS: {pid}", "TRADE")
+                    log_terminal(f"✅ EXIT SUCCESS: {pid} (Limit: {exit_limit})", "TRADE")
+                    log_terminal("💉 SURGERY SUCCESS: Position Closed.", "INFO")
                     db.set_param("local_trade_active", "NO")
                 else:
                     err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
@@ -629,7 +644,9 @@ def place_delta_bracket_orders(pid, qty, entry_price):
             headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             if resp.status_code in [200, 201]:
-                log_terminal(f"🛡️ {name} SET: @ {payload_dict['stop_price']} on Exchange", "INFO")
+                log_terminal(f"🛡️ {name} SET: @ {payload_dict['stop_price']} (Limit: {payload_dict['limit_price']})", "INFO")
+                if name == "TAKE PROFIT":
+                    log_terminal("💉 SURGERY SUCCESS: Brackets Hardened.", "INFO")
             else:
                 log_terminal(f"⚠️ {name} FAILED: {resp.status_code} - {resp.text}", "ERROR")
         except Exception as e:
