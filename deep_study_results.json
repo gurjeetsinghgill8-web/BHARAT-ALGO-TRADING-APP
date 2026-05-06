@@ -1,0 +1,194 @@
+[
+    {
+        "year": 2021,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 23.79,
+        "return": 31.88
+    },
+    {
+        "year": 2022,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 4.33,
+        "return": 7.39
+    },
+    {
+        "year": 2023,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 20.03,
+        "return": 16.88
+    },
+    {
+        "year": 2024,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 2.58,
+        "return": 13.04
+    },
+    {
+        "year": 2021,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 23.79,
+        "return": 13.03
+    },
+    {
+        "year": 2022,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 4.33,
+        "return": 2.1
+    },
+    {
+        "year": 2023,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 20.03,
+        "return": 49.74
+    },
+    {
+        "year": 2024,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.5,
+        "nifty": 2.58,
+        "return": 3.95
+    },
+    {
+        "year": 2021,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 23.79,
+        "return": 41.21
+    },
+    {
+        "year": 2022,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 4.33,
+        "return": -2.71
+    },
+    {
+        "year": 2023,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 20.03,
+        "return": 32.67
+    },
+    {
+        "year": 2024,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 2.58,
+        "return": 9.2
+    },
+    {
+        "year": 2021,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 23.79,
+        "return": 45.77
+    },
+    {
+        "year": 2022,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 4.33,
+        "return": 17.55
+    },
+    {
+        "year": 2023,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 20.03,
+        "return": 37.95
+    },
+    {
+        "year": 2024,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 1.0,
+        "nifty": 2.58,
+        "return": 3.8
+    },
+    {
+        "year": 2021,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 23.79,
+        "return": 59.68
+    },
+    {
+        "year": 2022,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 4.33,
+        "return": -21.75
+    },
+    {
+        "year": 2023,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 20.03,
+        "return": 25.64
+    },
+    {
+        "year": 2024,
+        "strat": "EMERGING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 2.58,
+        "return": 11.4
+    },
+    {
+        "year": 2021,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 23.79,
+        "return": 26.31
+    },
+    {
+        "year": 2022,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 4.33,
+        "return": 6.35
+    },
+    {
+        "year": 2023,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 20.03,
+        "return": 61.37
+    },
+    {
+        "year": 2024,
+        "strat": "RUNNING",
+        "st_p": 15,
+        "st_m": 2.0,
+        "nifty": 2.58,
+        "return": 6.42
+    }
+]
