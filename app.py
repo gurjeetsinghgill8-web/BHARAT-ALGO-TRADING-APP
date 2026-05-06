@@ -313,7 +313,7 @@ with st.sidebar:
     st.markdown('<div class="section-title">📂 Switch Module</div>', unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)", "💹 Investment (RS)"],
+        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)", "💹 Investment (RS)", "💎 Personal (Alpha King)"],
         key="page_selector",
         label_visibility="collapsed"
     )
@@ -1281,5 +1281,123 @@ elif page == "💹 Investment (RS)":
                 st.rerun()
 
     st.caption("BHARAT AlgoVerse v3.1 • RS LegoMaster • Built for Dr. Saab 🦺")
+
+# ════════════════════════════════════════════════════════════
+# PAGE 4 — PERSONAL (ALPHA KING - RANK 1)
+# ════════════════════════════════════════════════════════════
+
+elif page == "💎 Personal (Alpha King)":
+    st.markdown("# 💎 BHARAT PERSONAL — ALPHA KING")
+    st.markdown("##### Strategic Alpha | Small Cap Rotation | ST 10/1.5 | 2L+2M+2S Ranking")
+
+    try:
+        import rank1_engine
+    except Exception as e:
+        st.error(f"Personal engine not loaded: {e}")
+        st.stop()
+
+    # ── KPI Header ──
+    bt = rank1_engine.get_rank1_backtest_summary()
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">TOTAL STRATEGY RETURN</div>
+            <div class="kpi-value green">{bt['total_return']}</div>
+            <div class="kpi-sub">Since Jan 2021</div>
+        </div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">ALPHA VS NIFTY</div>
+            <div class="kpi-value blue">{bt['alpha']}</div>
+            <div class="kpi-sub">Outperformance</div>
+        </div>""", unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">AVG WIN RATE</div>
+            <div class="kpi-value amber">{bt['avg_win_rate']}</div>
+            <div class="kpi-sub">Rolling probability</div>
+        </div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-label">BEST YEAR</div>
+            <div class="kpi-value blue" style="font-size:1.2rem;">{bt['best_year']}</div>
+            <div class="kpi-sub">Maximum YoY Alpha</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Tabs ──
+    p1, p2 = st.tabs(["🚀 LIVE PAPER TRADE", "📊 BACKTEST REPORT"])
+
+    with p1:
+        st.markdown('<div class="section-title">📡 LIVE PORTFOLIO SCANNER (PAPER TRADE)</div>', unsafe_allow_html=True)
+        st.info("Scanner picks top 5 Small Cap stocks that are in **Bullish Supertrend (10/1.5)** and have the highest **2L+2M+2S Score**.")
+        
+        if st.button("🔥 RUN LIVE SCAN (RANK 1)", key="p_run_scan"):
+            with st.spinner("Scanning Small Cap Universe..."):
+                try:
+                    signals = rank1_engine.get_live_rank1_signals()
+                    if signals:
+                        st.session_state['rank1_signals'] = signals
+                        st.success(f"Found {len(signals)} top-tier stocks!")
+                    else:
+                        st.warning("No Bullish Small Cap stocks found matching criteria today.")
+                except Exception as e:
+                    st.error(f"Scan failed: {e}")
+
+        if 'rank1_signals' in st.session_state:
+            sigs = st.session_state['rank1_signals']
+            st.markdown("### 🏆 Top 5 Personal Portfolio")
+            
+            for s in sigs:
+                st.markdown(f"""<div class="sector-card" style="border-left:5px solid #10b981;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="font-weight:700;font-size:1.4rem;color:#e2e8f0;">{s['symbol']}</div>
+                        <div class="badge badge-green">STATUS: BULLISH (10/1.5)</div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:10px;">
+                        <div>
+                            <span style="color:#94a3b8;font-size:0.8rem;">MOMENTUM: <b style="color:#10b981">{s['m']*100:+.1f}%</b></span><br>
+                            <span style="color:#94a3b8;font-size:0.8rem;">RS SCORE: <b style="color:#6366f1">{s['s']:.2f}</b></span>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="color:#e2e8f0;font-size:0.75rem;">LTP</div>
+                            <div style="color:#10b981;font-weight:700;font-size:1.5rem;">₹{s['price']:,.1f}</div>
+                        </div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+            
+            st.divider()
+            if st.button("📤 Send Portfolio to Telegram", key="p_tg"):
+                from utils import send_telegram_msg
+                msg = "💎 *PERSONAL RANK 1 PORTFOLIO*\n\n"
+                for s in sigs:
+                    msg += f"✅ *{s['symbol']}* | ₹{s['price']:,.1f} | RS: {s['s']:.2f}\n"
+                send_telegram_msg(msg)
+                st.toast("Sent to Telegram!")
+
+    with p2:
+        st.markdown('<div class="section-title">📊 YEAR-ON-YEAR PERFORMANCE ANALYSIS</div>', unsafe_allow_html=True)
+        
+        # YOY Table
+        yoy_data = []
+        for yr, ret in bt['yoy'].items():
+            yoy_data.append({"Year": yr, "Return": ret, "Status": "Beat Nifty" if float(ret.replace('%','')) > 10 else "Normal"})
+        
+        df_yoy = pd.DataFrame(yoy_data)
+        st.table(df_yoy)
+
+        # Visual Curve (Simulated based on YOY)
+        st.markdown("### 📈 Visual Alpha Projection")
+        years = sorted(bt['yoy'].keys())
+        rets = [float(bt['yoy'][y].replace('%','')) for y in years]
+        cumulative = np.cumsum(rets)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=years, y=cumulative, mode='lines+markers', line=dict(color='#10b981', width=3), name='Strategy Alpha'))
+        fig.update_layout(template="plotly_dark", height=300, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.caption("Developed for Personal Use • Alpha King Module • v1.0")
 
 
