@@ -6,6 +6,7 @@ import datetime
 import socket
 import db
 import pandas as pd
+import json
 from utils import log_terminal, send_telegram_msg
 
 # --- FORCE IPv4 GLOBALLY ---
@@ -214,16 +215,25 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Expiry Rule: Never same day. Pick nearest expiry AFTER today.
-    today_str = datetime.date.today().strftime('%Y-%m-%d')
-    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today_str])))
+    # 2. Expiry Rule: Smart Expiry (Lego Block 2)
+    # We pick expiries based on the threshold (default 3 days) to avoid theta decay.
+    today = datetime.date.today()
+    threshold = int(db.get_param('expiry_threshold', '3'))
+    min_expiry_dt = today + datetime.timedelta(days=threshold)
+    min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
+    
+    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] >= min_expiry_str])))
     
     if not valid_expiries:
-        log_crypto("No expiries found after today!")
+        log_crypto(f"No expiries found after {min_expiry_str}! Falling back to nearest available.")
+        valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
+    
+    if not valid_expiries:
+        log_crypto("No valid future expiries found!")
         return None
         
-    best_expiry = valid_expiries[0] # Nearest expiry that is NOT today
-    log_crypto(f"Selected Expiry: {best_expiry} (Target: {target_type})")
+    best_expiry = valid_expiries[0] 
+    log_crypto(f"Selected Expiry: {best_expiry} (3-Day Rule applied)")
     
     # 3. Filter for options with that specific expiry
     near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
@@ -509,12 +519,14 @@ def square_off_crypto(target_pid=None):
                 
                 if size == 0: continue 
 
-                # Send Market Close Order
+                # Send Limit Close Order (Fix for '400-unsupported' market orders on options)
+                # For a sell order, we use a very low price (e.g. 0.1) to ensure it fills like a market order
                 payload_dict = {
                     "product_id": int(pid),
                     "size": float(size),
                     "side": "sell",
-                    "order_type": "market_order",
+                    "order_type": "limit_order",
+                    "price": "0.1", # Aggressive price for options to ensure immediate fill
                     "reduce_only": True
                 }
                 payload = json.dumps(payload_dict)
@@ -540,27 +552,31 @@ def place_delta_bracket_orders(pid, qty, entry_price):
     """
     url = "https://api.india.delta.exchange/v2/orders"
     
-    # 1. Stop Loss Order (-40%)
-    sl_price = round(entry_price * 0.60, 2)
+    # 1. Stop Loss Order (-40%) - Lego Block 3: The Selling Fix
+    sl_trigger = round(entry_price * 0.60, 2)
+    sl_limit = round(sl_trigger * 0.95, 2) # 5% lower than trigger to ensure fill
     sl_payload = {
         "product_id": int(pid),
         "size": float(qty),
         "side": "sell",
-        "order_type": "market_order",
+        "order_type": "limit_order",
         "stop_order_type": "stop_loss_order",
-        "stop_price": str(sl_price),
+        "stop_price": str(sl_trigger),
+        "price": str(sl_limit),
         "reduce_only": True
     }
     
     # 2. Take Profit Order (+100%)
-    tp_price = round(entry_price * 2.00, 2)
+    tp_trigger = round(entry_price * 2.00, 2)
+    tp_limit = round(tp_trigger, 2) # Exact price for TP
     tp_payload = {
         "product_id": int(pid),
         "size": float(qty),
         "side": "sell",
-        "order_type": "market_order",
+        "order_type": "limit_order",
         "stop_order_type": "take_profit_order",
-        "stop_price": str(tp_price),
+        "stop_price": str(tp_trigger),
+        "price": str(tp_limit),
         "reduce_only": True
     }
     

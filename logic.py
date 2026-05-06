@@ -135,7 +135,7 @@ def get_supertrend_signal(asset="BTC"):
     
     # 1. Fetch Candles
     df, err = fetch_delta_candles(asset, "5m", limit=100)
-    if df.empty:
+    if df.empty or len(df) < 3:
         return "WAIT"
         
     # 2. Calculate Supertrend
