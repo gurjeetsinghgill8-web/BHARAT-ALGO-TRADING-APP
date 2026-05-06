@@ -1,18 +1,31 @@
 @echo off
-echo 🩺 BHARAT ALGOVERSE: AUTO-DEPLOYMENT TOOL 🩺
-echo ------------------------------------------
+chcp 65001 > nul
+echo ====================================================
+echo   BHARAT ALGOVERSE v3.0 - ONE-CLICK DEPLOY TOOL
+echo ====================================================
 echo.
+
 echo [1/3] Pushing latest code to GitHub...
 git add .
-git commit -m "Auto-deploy update"
+git commit -m "Auto-deploy: v3.0 update [%date% %time%]"
 git push origin main_temp:main -f
+if %ERRORLEVEL% NEQ 0 (
+    echo WARNING: Git push had issues. Continuing with SSH deploy...
+)
 echo.
-echo [2/3] Connecting to Hostasia VPS (46.224.133.16)...
-echo IMPORTANT: When prompted, please type your VPS password.
+
+echo [2/3] Connecting to VPS and deploying...
+echo (Password NOT needed if SETUP_PASSWORDLESS_LOGIN.bat was run once)
 echo.
-ssh -o StrictHostKeyChecking=no root@46.224.133.16 "sudo pkill -9 python3; sudo pkill -9 streamlit; rm -f ~/BHARAT-ALGO-TRADING-APP/bot.lock; cd ~/BHARAT-ALGO-TRADING-APP && git fetch --all && git reset --hard origin/main && git pull origin main && sudo chmod +x vps_setup.sh && ./vps_setup.sh"
+ssh -o StrictHostKeyChecking=no root@46.224.133.16 "cd ~/BHARAT-ALGO-TRADING-APP && git fetch --all && git reset --hard origin/main && git pull origin main && chmod +x vps_setup.sh && bash vps_setup.sh"
+
 echo.
-echo [3/3] Deployment Finished!
-echo Check your Dashboard at: http://46.224.133.16:8501
+echo [3/3] Deployment Complete!
+echo.
+echo ====================================================
+echo   LIVE LINKS:
+echo   Dashboard : http://46.224.133.16:8501
+echo   (Crypto + Nifty pages both available)
+echo ====================================================
 echo.
 pause
