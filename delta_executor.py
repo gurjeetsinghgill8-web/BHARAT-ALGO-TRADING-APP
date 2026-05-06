@@ -424,6 +424,48 @@ def check_stop_loss():
         print(f"[SL CHECK ERROR] {e}")
     return False
 
+def reconcile_bracket_orders():
+    """
+    STABLE 2.0 AUTO-HEALER
+    Ensures every open position has a SL and TP on the exchange.
+    """
+    mode = db.get_param('trade_mode', 'PAPER')
+    if mode != "LIVE": return
+    
+    try:
+        # 1. Fetch Positions
+        path = "/v2/positions"
+        url = f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC"
+        headers = get_delta_auth_headers("GET", path, query_string="?underlying_asset_symbol=BTC")
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200: return
+        
+        positions = resp.json().get('result', [])
+        for p in positions:
+            size = abs(float(p.get('size', 0)))
+            if size > 0:
+                pid = p.get('product_id')
+                entry_price = float(p.get('avg_entry_price', 0))
+                
+                # 2. Check for Open SL/TP Orders for this PID
+                order_path = "/v2/orders"
+                order_query = f"?product_id={pid}&state=open"
+                order_url = f"https://api.india.delta.exchange{order_path}{order_query}"
+                order_headers = get_delta_auth_headers("GET", order_path, query_string=order_query)
+                order_resp = requests.get(order_url, headers=order_headers, timeout=5)
+                
+                if order_resp.status_code == 200:
+                    open_orders = order_resp.json().get('result', [])
+                    has_sl = any(o.get('stop_order_type') == 'stop_loss_order' for o in open_orders)
+                    has_tp = any(o.get('stop_order_type') == 'take_profit_order' for o in open_orders)
+                    
+                    if not has_sl or not has_tp:
+                        from main import log_terminal
+                        log_terminal(f"🛡️ AUTO-HEAL: Setting missing brackets for {pid}...", "INFO")
+                        place_delta_bracket_orders(pid, size, entry_price)
+    except Exception as e:
+        print(f"[RECONCILE ERROR] {e}")
+
 def send_daily_summary():
     # Lego Block 5: The Daily Auditor
     pnl_24h, count, win_rate, avg_pnl = db.get_stats(days=1)

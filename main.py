@@ -136,6 +136,7 @@ def main():
             run_janitor()
             run_crypto_sar()
             delta_executor.check_stop_loss()
+            delta_executor.reconcile_bracket_orders()
             
             if time.time() - last_pulse > 1800:
                 signal = logic.get_supertrend_signal("BTC")
