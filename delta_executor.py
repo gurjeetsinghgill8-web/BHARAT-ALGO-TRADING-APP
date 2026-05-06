@@ -460,9 +460,10 @@ def reconcile_bracket_orders():
                     has_tp = any(o.get('stop_order_type') == 'take_profit_order' for o in open_orders)
                     
                     if not has_sl or not has_tp:
-                        from main import log_terminal
-                        log_terminal(f"🛡️ AUTO-HEAL: Setting missing brackets for {pid}...", "INFO")
-                        place_delta_bracket_orders(pid, size, entry_price)
+                        # from main import log_terminal
+                        # log_terminal(f"🛡️ AUTO-HEAL: Setting missing brackets for {pid}...", "INFO")
+                        # place_delta_bracket_orders(pid, size, entry_price)
+                        pass
     except Exception as e:
         print(f"[RECONCILE ERROR] {e}")
 
@@ -572,25 +573,19 @@ def square_off_crypto(target_pid=None):
                                 break
                 except: pass
 
-                # Send Limit Close Order (Fix for '400-unsupported' market orders on options)
-                # We use 50% of mark price as limit to ensure immediate fill while staying within price bands
-                exit_limit = round(mark_price * 0.5, 2)
-                if exit_limit < 0.1: exit_limit = 0.1 # Minimum floor
-
+                # Send Market Close Order (Simplified for Dr. Saab)
                 payload_dict = {
                     "product_id": int(pid),
                     "size": float(size),
                     "side": "sell",
-                    "order_type": "limit_order",
-                    "limit_price": str(exit_limit),
+                    "order_type": "market_order",
                     "reduce_only": True
                 }
                 payload = json.dumps(payload_dict)
                 resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload), data=payload, timeout=10)
                 
                 if resp.status_code in [200, 201]:
-                    log_terminal(f"✅ EXIT SUCCESS: {pid} (Limit: {exit_limit})", "TRADE")
-                    log_terminal("💉 SURGERY SUCCESS: Position Closed.", "INFO")
+                    log_terminal(f"✅ MARKET EXIT SUCCESS: {pid}", "TRADE")
                     db.set_param("local_trade_active", "NO")
                 else:
                     err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
@@ -769,8 +764,8 @@ def execute_crypto_trade(asset, direction):
                 # ACTIVATE LOCAL LOCK IMMEDIATELY
                 db.set_param("local_trade_active", "YES")
                 
-                # --- NEW: Place Server-Side Bracket Orders ---
-                place_delta_bracket_orders(pid, qty, price)
+                # --- Removed: Server-Side Brackets (Simplified Version) ---
+                # place_delta_bracket_orders(pid, qty, price)
                 
                 # Brief wait before sync to allow exchange to update
                 time.sleep(1)

@@ -179,6 +179,15 @@ with tab1:
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
+    st.divider()
+    if st.button("🧨 EMERGENCY MARKET EXIT (Square Off All)", key="emergency_exit"):
+        with st.spinner("Executing Brute Force Market Exit..."):
+            import delta_executor
+            delta_executor.square_off_crypto()
+            st.success("✅ Market Exit command sent to Exchange!")
+            time.sleep(1)
+            st.rerun()
+
 with tab2:
     st.markdown("### 🔬 Strategy Tuning")
     st.write("Adjust parameters in real-time. No coding required.")
