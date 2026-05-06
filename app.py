@@ -1337,20 +1337,34 @@ elif page == "💎 Personal (Alpha King)":
         if st.button("🔥 RUN LIVE SCAN (RANK 1)", key="p_run_scan"):
             with st.spinner("Scanning Small Cap Universe..."):
                 try:
-                    signals = rank1_engine.get_live_rank1_signals()
-                    if signals:
-                        st.session_state['rank1_signals'] = signals
-                        st.success(f"Found {len(signals)} top-tier stocks!")
+                    result = rank1_engine.get_live_rank1_signals()
+                    market_regime = result['status']
+                    signals = result['signals']
+                    
+                    st.session_state['rank1_status'] = market_regime
+                    st.session_state['rank1_signals'] = signals
+                    
+                    if market_regime != "SAFE":
+                        st.error(f"🚨 [LAYER 3: GUARDRAIL ACTIVE] Market Regime is {market_regime}. New entries blocked. Move to CASH.")
+                    elif signals:
+                        st.success(f"✅ Market is SAFE! Found {len(signals)} top-tier stocks!")
                     else:
-                        st.warning("No Bullish Small Cap stocks found matching criteria today.")
+                        st.warning("Market is SAFE, but no Bullish Small Cap stocks found matching criteria today.")
                 except Exception as e:
                     st.error(f"Scan failed: {e}")
 
         if 'rank1_signals' in st.session_state:
+            regime = st.session_state.get('rank1_status', 'UNKNOWN')
             sigs = st.session_state['rank1_signals']
-            st.markdown("### 🏆 Top 5 Personal Portfolio")
             
-            for s in sigs:
+            st.markdown(f"### 🛡️ MARKET REGIME: **{regime}**")
+            
+            if regime != "SAFE":
+                st.info("The Supreme Graph-Harness Architecture has blocked trading to prevent capital erosion.")
+            else:
+                st.markdown("### 🏆 Top 5 Personal Portfolio")
+                
+                for s in sigs:
                 st.markdown(f"""<div class="sector-card" style="border-left:5px solid #10b981;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div style="font-weight:700;font-size:1.4rem;color:#e2e8f0;">{s['symbol']}</div>

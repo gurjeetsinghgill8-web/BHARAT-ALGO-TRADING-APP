@@ -119,18 +119,25 @@ def run_rotation_backtest(all_data, universe_name, st_period=10, st_mult=1.5, st
                     del portfolio[t]
 
         if len(portfolio) < max_stocks:
-            candidates = []
-            for t in tickers:
-                if t in portfolio or t not in all_data or dt not in all_data[t].index: continue
-                st_dir = all_data[t]['ST_DIR'].loc[dt]
-                if st_dir == 1:
-                    idx = all_data[t].index.get_loc(dt)
-                    if idx < 90: continue
-                    df_sub = all_data[t].iloc[idx-90:idx+1]
-                    bench_sub = all_data[bench_ticker].iloc[idx-90:idx+1]
-                    l, m, s = calculate_factors(df_sub, bench_sub)
-                    if l is not None:
-                        candidates.append({'ticker': t, 'l': l, 'm': m, 's': s})
+            # Regime Filter: Only enter if Nifty is Bullish (ST 10/1.5)
+            # Actually, let's calculate Nifty's Supertrend and use it.
+            # We already have ST_DIR in all_data, but for Nifty we might need a fixed one.
+            nifty_st = all_data[bench_ticker]['ST_DIR_10_1.5'].loc[dt] if 'ST_DIR_10_1.5' in all_data[bench_ticker].columns else 1
+            
+            if nifty_st == 1:
+                candidates = []
+                for t in tickers:
+                    if t in portfolio or t not in all_data or dt not in all_data[t].index: continue
+                    st_dir = all_data[t]['ST_DIR'].loc[dt]
+                    if st_dir == 1:
+                        idx = all_data[t].index.get_loc(dt)
+                        if idx < 90: continue
+                        df_sub = all_data[t].iloc[idx-90:idx+1]
+                        bench_sub = all_data[bench_ticker].iloc[idx-90:idx+1]
+                        l, m, s = calculate_factors(df_sub, bench_sub)
+                        if l is not None:
+                            candidates.append({'ticker': t, 'l': l, 'm': m, 's': s})
+
             
             if candidates:
                 df_cand = pd.DataFrame(candidates)
@@ -146,7 +153,11 @@ def run_rotation_backtest(all_data, universe_name, st_period=10, st_mult=1.5, st
                     alloc_per_stock = capital / slots
                     for _, row in to_buy.iterrows():
                         t = row['ticker']
-                        px = all_data[t]['Close'].loc[dt]
+                        try:
+                            px = float(all_data[t]['Close'].loc[dt])
+                        except KeyError:
+                            continue
+                        
                         if not np.isnan(px) and px > 0:
                             shares = alloc_per_stock / px
                             capital -= alloc_per_stock
