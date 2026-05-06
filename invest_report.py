@@ -416,13 +416,15 @@ def build_weekly_report(scan_data: dict) -> str:
     em_weak    = scan_data.get("emerg_weak", {})
     pulse      = scan_data.get("pulse", {})
 
+    _bull = "BULLISH \U0001f7e2"
+    _caut = "CAUTION \U0001f534"
+    _trend = _bull if pulse.get("mode") == "AGGRESSIVE" else _caut
     lines = [
         "\u2501" * 32,
-        f"{SYSTEM_ICON} *{SYSTEM_NAME} — WEEKLY OUTLOOK*",
+        f"{SYSTEM_ICON} *{SYSTEM_NAME} \u2014 WEEKLY OUTLOOK*",
         f"\U0001f4c5 Week of {now_str}",
         "\u2501" * 32, "",
-        f"\U0001f4c8 Nifty: \u20b9{pulse.get('close',0):,.0f} | "
-        f"Trend: {'BULLISH \U0001f7e2' if pulse.get('mode')=='AGGRESSIVE' else 'CAUTION \U0001f534'}",
+        f"\U0001f4c8 Nifty: \u20b9{pulse.get('close',0):,.0f} | Trend: {_trend}",
         "",
         "\U0001f3c6 *SECTORS IN LEADERSHIP THIS WEEK:*",
     ]
