@@ -775,351 +775,449 @@ elif page == "📈 Nifty (NSE)":
 # ════════════════════════════════════════════════════════════
 # PAGE 3 — INVESTMENT (RS LEGOMASTER)
 # ════════════════════════════════════════════════════════════
-elif page == "\U0001f4b9 Investment (RS)":
-    st.markdown("# \U0001f4b9 RS LEGOMASTER — Investment Intelligence")
-    st.markdown("##### Momentum-based sector & stock ranking | Relative Strength 55-day")
+
+elif page == "💹 Investment (RS)":
+    st.markdown("# 💹 RS LEGOMASTER v3.1 — Sector Rotation Intelligence")
+    st.markdown("##### Rolling Sector Rotation | RS-55 | 2L+2M+2S Stock Picks | Compound Backtest")
 
     if not _has_invest:
-        st.error("invest_rs_engine not loaded. Run: pip install yfinance pandas-ta")
+        st.error("invest modules not loaded. Run: pip install yfinance python-dateutil")
         st.stop()
 
-    # ── Tabs ────────────────────────────────────────────────
-    iv1, iv2, iv3, iv4, iv5 = st.tabs([
-        "\U0001f4ca Market Pulse",
-        "\U0001f3c6 Sector Ranking",
-        "\U0001f3af Top Stocks",
-        "\u2699\ufe0f Settings",
-        "\U0001f916 Research AI"
+    # Import rotation + fundamentals lazily
+    try:
+        import invest_rotation_engine as rot_eng
+        import invest_fundamentals   as fund_eng
+        _has_rot = True
+    except Exception as _re:
+        _has_rot = False
+        st.warning(f"Rotation engine not available: {_re}")
+
+    # ── 6 Tabs ───────────────────────────────────────────────
+    iv1, iv2, iv3, iv4, iv5, iv6 = st.tabs([
+        "📊 Market Pulse",
+        "🏆 Sector Ranking",
+        "🎯 Stock Picks (2L+2M+2S)",
+        "🔄 Rotation Backtest",
+        "⚙️ Settings",
+        "🤖 Research AI",
     ])
 
-    # ── Pull cached scan from DB ─────────────────────────────
-    _last_scan_dt = db.get_param("invest_last_scan_dt", "Never") or "Never"
-    _market_mode  = db.get_param("invest_market_mode", "UNKNOWN") or "UNKNOWN"
-    _nifty_rsi    = db.get_param("invest_nifty_rsi", "—") or "—"
-    _top_sectors_raw = db.get_param("invest_top_sectors", "[]") or "[]"
-
+    _last_scan_dt  = db.get_param("invest_last_scan_dt",  "Never") or "Never"
+    _market_mode   = db.get_param("invest_market_mode",   "UNKNOWN") or "UNKNOWN"
+    _nifty_rsi_val = db.get_param("invest_nifty_rsi",     "—") or "—"
     mode_color = "#10b981" if _market_mode == "AGGRESSIVE" else "#f43f5e"
-    mode_label = "AGGRESSIVE \U0001f7e2 (RSI > 50 — Be Invested)" if _market_mode == "AGGRESSIVE" else "DEFENSIVE \U0001f534 (RSI \u2264 50 — Stay Selective)"
+    mode_icon  = "🟢 AGGRESSIVE" if _market_mode == "AGGRESSIVE" else "🔴 DEFENSIVE"
 
-    # ── TAB 1: Market Pulse ──────────────────────────────────
+    # ══ TAB 1: Market Pulse ══════════════════════════════════
     with iv1:
         st.markdown(f"""
-        <div class="kpi-card" style="text-align:center; padding: 24px;">
+        <div class="kpi-card" style="text-align:center;padding:24px;">
           <div class="kpi-label">NIFTY 50 RSI(14)</div>
-          <div class="kpi-value blue" style="font-size:3rem;">{_nifty_rsi}</div>
-          <div style="color:{mode_color}; font-weight:700; font-size:1.1rem; margin-top:8px;">{mode_label}</div>
+          <div class="kpi-value blue" style="font-size:3rem;">{_nifty_rsi_val}</div>
+          <div style="color:{mode_color};font-weight:700;font-size:1.1rem;margin-top:8px;">{mode_icon}</div>
           <div class="kpi-sub">Last scan: {_last_scan_dt}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("""
-            <div class="kpi-card">
-              <div class="kpi-label">\U0001f7e2 RSI > 50 (Aggressive Mode)</div>
-              <div class="kpi-sub">\u2022 Be fully invested in strong sectors</div>
-              <div class="kpi-sub">\u2022 Buy momentum stocks with RS > 1.0</div>
-              <div class="kpi-sub">\u2022 Max position size allowed</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("""<div class="kpi-card">
+              <div class="kpi-label">🟢 RSI > 50 — AGGRESSIVE</div>
+              <div class="kpi-sub">• Stay in top sectors with RS > 1.05</div>
+              <div class="kpi-sub">• Hold stocks until sector exits</div>
+              <div class="kpi-sub">• Max 2 sectors at once</div>
+            </div>""", unsafe_allow_html=True)
         with c2:
-            st.markdown("""
-            <div class="kpi-card">
-              <div class="kpi-label">\U0001f534 RSI \u2264 50 (Defensive Mode)</div>
-              <div class="kpi-sub">\u2022 Reduce position sizes</div>
-              <div class="kpi-sub">\u2022 Hold cash / Gold / bonds</div>
-              <div class="kpi-sub">\u2022 Avoid new entries until recovery</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("""<div class="kpi-card">
+              <div class="kpi-label">🔴 RSI ≤ 50 — DEFENSIVE</div>
+              <div class="kpi-sub">• No new entries</div>
+              <div class="kpi-sub">• Hold existing till RS drops</div>
+              <div class="kpi-sub">• 100% cash if no positions</div>
+            </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("\U0001f504 Run Live Market Pulse Scan", key="iv_pulse_btn"):
-            with st.spinner("Fetching Nifty RSI from NSE..."):
-                try:
-                    pulse = invest_rs_engine.get_market_pulse()
-                    if pulse.get("error"):
-                        st.error(f"Error: {pulse['error']}")
-                    else:
+        if st.button("🔄 Run Live Scan Now", key="iv_pulse_btn"):
+            if _has_rot:
+                with st.spinner("Running live sector scan (60-90 sec)..."):
+                    try:
+                        live = rot_eng.run_live_sector_scan()
                         st.success(
-                            f"Nifty RSI: **{pulse['rsi']}** | "
-                            f"Close: **\u20b9{pulse['close']:,.0f}** | "
-                            f"Mode: **{pulse['mode']}**"
+                            f"RSI: **{live['nifty_rsi']}** | "
+                            f"Mode: **{live['market_mode']}** | "
+                            f"Top sectors: **{len(live['top_sectors'])}**"
                         )
                         st.rerun()
-                except Exception as _e:
-                    st.error(f"Scan failed: {_e}")
+                    except Exception as _e:
+                        st.error(f"Scan failed: {_e}")
+            else:
+                st.error("Rotation engine not loaded.")
 
-    # ── TAB 2: Sector Ranking ────────────────────────────────
+    # ══ TAB 2: Sector Ranking ════════════════════════════════
     with iv2:
-        st.markdown('<div class="section-title">\U0001f3c6 Sector RS-55 Ranking vs Nifty 50</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🏆 Sector RS-55 Ranking vs Nifty 50</div>', unsafe_allow_html=True)
+        st.markdown("RS > 1.05 = Entry eligible 🟢 | RS < 0.95 = Exit zone 🔴")
 
-        if st.button("\U0001f504 Scan All Sectors Now", key="iv_sector_btn"):
-            with st.spinner("Scanning all NSE sectors (may take 60-90 sec)..."):
-                try:
-                    _period = int(db.get_param("invest_rs_period", "55") or "55")
-                    sectors = invest_rs_engine.scan_sectors(_period)
-                    if sectors:
-                        import pandas as pd
-                        df_sec = pd.DataFrame(sectors)
-                        df_sec["Status"] = df_sec["outperforming"].map(
-                            {True: "\U0001f7e2 Above Nifty", False: "\U0001f534 Below Nifty"}
-                        )
-                        df_sec["RS-55"] = df_sec["rs"].map(lambda x: f"{x:.3f}")
-                        df_sec["vs Nifty %"] = df_sec["vs_nifty_pct"].map(lambda x: f"{x:+.1f}%")
-                        st.dataframe(
-                            df_sec[["rank","sector","RS-55","vs Nifty %","Status"]],
-                            use_container_width=True, hide_index=True
-                        )
-                        # Bar chart
-                        import plotly.express as px
+        if st.button("🔄 Scan All Sectors Live", key="iv_sector_btn"):
+            if _has_rot:
+                with st.spinner("Scanning 20 NSE sectors..."):
+                    try:
+                        import pandas as pd, plotly.express as px
+                        from datetime import date, timedelta
+                        today = __import__('datetime').date.today()
+                        df_data = rot_eng.download_all_data(today - timedelta(days=120), today)
+                        ts_now  = __import__('pandas').Timestamp(today)
+                        sectors = rot_eng.scan_sectors_on(df_data, ts_now)
+                        mode    = rot_eng.get_market_mode_on(df_data, ts_now)
+
+                        rows = []
+                        for s in sectors:
+                            entry_ok = s["rs"] >= rot_eng.RS_ENTRY_MIN
+                            exit_zone= s["rs"] < rot_eng.RS_EXIT_BUFFER
+                            status = "🟢 BUY ZONE" if entry_ok else ("🔴 EXIT ZONE" if exit_zone else "🟡 WATCH")
+                            rows.append({
+                                "Rank": s["rank"], "Sector": s["sector"],
+                                "RS-55": f"{s['rs']:.3f}",
+                                "vs Nifty": f"{(s['rs']-1)*100:+.1f}%",
+                                "Status": status,
+                            })
+                        df_show = pd.DataFrame(rows)
+                        st.markdown(f"**Market Mode: {mode}**")
+                        st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+                        colors = {True:"#10b981", False:"#f43f5e"}
                         fig = px.bar(
-                            df_sec.head(12), x="sector", y="vs_nifty_pct",
-                            color="outperforming",
-                            color_discrete_map={True: "#10b981", False: "#f43f5e"},
-                            labels={"vs_nifty_pct": "% vs Nifty", "sector": "Sector"},
-                            title=f"Sector RS-{_period} Relative to Nifty 50",
+                            pd.DataFrame(sectors).head(15),
+                            x="sector", y="rs",
+                            color=[r["rs"] >= rot_eng.RS_ENTRY_MIN for r in sectors[:15]],
+                            color_discrete_map={True:"#10b981",False:"#f43f5e"},
                             template="plotly_dark",
+                            title="Sector RS-55 (Green = Entry Zone)",
                         )
-                        fig.update_layout(
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            showlegend=False, height=360,
-                        )
+                        fig.add_hline(y=rot_eng.RS_ENTRY_MIN, line_dash="dash", line_color="#f59e0b",
+                                      annotation_text=f"Entry Min ({rot_eng.RS_ENTRY_MIN})")
+                        fig.add_hline(y=rot_eng.RS_EXIT_BUFFER, line_dash="dot", line_color="#f43f5e",
+                                      annotation_text=f"Exit ({rot_eng.RS_EXIT_BUFFER})")
+                        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                                          showlegend=False,height=360,xaxis_tickangle=-30)
                         st.plotly_chart(fig, use_container_width=True, key="iv_sector_chart")
-                    else:
-                        st.warning("No sector data returned. Check network.")
-                except Exception as _e:
-                    st.error(f"Sector scan failed: {_e}")
+                    except Exception as _e:
+                        st.error(f"Scan error: {_e}")
+            else:
+                st.error("Rotation engine not loaded.")
         else:
-            st.info("\U0001f449 Click **Scan All Sectors Now** to fetch live RS-55 rankings.")
-            st.markdown("""
-            **How RS-55 works:**
-            - `RS = (Sector_Today / Sector_55d_ago) / (Nifty_Today / Nifty_55d_ago)`
-            - RS > 1.0 = Outperforming Nifty \U0001f7e2
-            - RS < 1.0 = Underperforming Nifty \U0001f534
-            - Higher RS = Stronger momentum = Better to invest
-            """)
+            st.info("👉 Click **Scan All Sectors Live** to fetch RS-55 rankings.")
 
-    # ── TAB 3: Top Stocks ────────────────────────────────────
+    # ══ TAB 3: Stock Picks 2L+2M+2S ═════════════════════════
     with iv3:
-        st.markdown('<div class="section-title">\U0001f3af Top Stocks by RS-55 (Within Sectors)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🎯 Stock Picks — 2 Large + 2 Mid + 2 Small per Sector</div>', unsafe_allow_html=True)
+        st.markdown("Per blueprint: **Entry = best RS within cap category. Exit = sector RS < 0.95 (hybrid rule)**")
 
         _sector_list = list(invest_rs_engine.SECTOR_STOCKS.keys())
-        _sel_sector  = st.selectbox("Pick a Sector to Scan Stocks", _sector_list, key="iv_sector_sel")
+        _sel_sector  = st.selectbox("Choose Sector", _sector_list, key="iv_sector_sel3")
 
-        if st.button("\U0001f504 Scan Stocks in This Sector", key="iv_stock_btn"):
-            with st.spinner(f"Scanning {_sel_sector} stocks..."):
-                try:
-                    _period = int(db.get_param("invest_rs_period", "55") or "55")
-                    stocks  = invest_rs_engine.scan_stocks_in_sector(_sel_sector, _period)
-                    if stocks:
-                        import pandas as pd, plotly.express as px
-                        df_st = pd.DataFrame(stocks)
-                        df_st["RS-55"]     = df_st["rs"].map(lambda x: f"{x:.3f}")
-                        df_st["vs Nifty"]  = df_st["vs_nifty_pct"].map(lambda x: f"{x:+.1f}%")
-                        df_st["Status"]    = df_st["outperforming"].map(
-                            {True: "\U0001f7e2 Strong", False: "\U0001f534 Weak"}
-                        )
-                        st.dataframe(
-                            df_st[["rank","symbol","cap","RS-55","vs Nifty","Status"]],
-                            use_container_width=True, hide_index=True
-                        )
-                        colors = {"Large":"#10b981","Mid":"#6366f1","Small":"#f59e0b"}
-                        df_st["color"] = df_st["cap"].map(colors)
-                        fig2 = px.bar(
-                            df_st, x="symbol", y="vs_nifty_pct",
-                            color="cap",
-                            color_discrete_map=colors,
-                            labels={"vs_nifty_pct":"% vs Nifty","symbol":"Stock"},
-                            title=f"{_sel_sector} — Stock RS-{_period}",
-                            template="plotly_dark",
-                        )
-                        fig2.update_layout(
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            height=340,
-                        )
-                        st.plotly_chart(fig2, use_container_width=True, key="iv_stock_chart")
+        if st.button("🔄 Get Live Stock Picks", key="iv_stock_btn3"):
+            if _has_rot:
+                with st.spinner(f"Picking best 2L+2M+2S in {_sel_sector}..."):
+                    try:
+                        from datetime import date, timedelta
+                        today   = __import__('datetime').date.today()
+                        df_data = rot_eng.download_all_data(today - timedelta(days=120), today)
+                        ts_now  = __import__('pandas').Timestamp(today)
+                        picks   = rot_eng.pick_stocks_for_sector(df_data, _sel_sector, ts_now)
 
-                        # Allocation hint
-                        top3 = stocks[:3]
-                        if top3:
-                            st.markdown("**\U0001f4b0 Suggested Allocation (Top 3):**")
-                            ac1, ac2, ac3 = st.columns(3)
-                            cols = [ac1, ac2, ac3]
-                            pcts = [50, 30, 20]
-                            for idx, (col, st_data, pct) in enumerate(zip(cols, top3, pcts)):
-                                with col:
-                                    cap_icon = {"Large":"\U0001f3e6","Mid":"\U0001f3e2","Small":"\U0001f3ea"}.get(st_data["cap"],"\U0001f4e6")
-                                    st.markdown(f"""
-                                    <div class="kpi-card">
-                                      <div class="kpi-label">{cap_icon} {st_data["symbol"]}</div>
-                                      <div class="kpi-value blue">{pct}%</div>
-                                      <div class="kpi-sub">{st_data["cap"]} Cap | RS: {st_data["rs"]:.3f}</div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                    else:
-                        st.warning("No stocks found for this sector.")
-                except Exception as _e:
-                    st.error(f"Stock scan error: {_e}")
+                        # Sector thesis
+                        sec_rs_data = rot_eng.scan_sectors_on(df_data, ts_now)
+                        sec_rs = next((s["rs"] for s in sec_rs_data if s["sector"]==_sel_sector), 1.0)
+                        thesis = fund_eng.get_sector_thesis(_sel_sector, sec_rs)
+
+                        st.markdown(f"### 📌 {_sel_sector} | RS-55: {sec_rs:.3f}")
+                        st.markdown(f"*{thesis['short']}*")
+
+                        # Display 2+2+2
+                        by_cap = {"Large":[], "Mid":[], "Small":[]}
+                        for p in picks:
+                            by_cap[p["cap"]].append(p)
+
+                        cap_icons = {"Large":"🏦","Mid":"🏢","Small":"🏪"}
+                        cap_colors= {"Large":"#10b981","Mid":"#6366f1","Small":"#f59e0b"}
+
+                        c_l, c_m, c_s = st.columns(3)
+                        for col, cap_name in zip([c_l,c_m,c_s],["Large","Mid","Small"]):
+                            with col:
+                                st.markdown(f"**{cap_icons[cap_name]} {cap_name} Cap**")
+                                for p in by_cap[cap_name][:2]:
+                                    beat = "🟢" if p["rs"] >= 1.0 else "🔴"
+                                    st.markdown(f"""<div class="kpi-card">
+                                      <div class="kpi-label">{beat} {p['symbol']}</div>
+                                      <div class="kpi-value" style="color:{cap_colors[cap_name]};font-size:1.4rem;">RS {p['rs']:.3f}</div>
+                                      <div class="kpi-sub">Entry: ₹{p['entry_price']:,.1f}</div>
+                                    </div>""", unsafe_allow_html=True)
+                                if not by_cap[cap_name]:
+                                    st.info("None in this cap")
+
+                        st.divider()
+                        st.markdown("**💡 Why this sector?**")
+                        for r in thesis["reasons"]:
+                            st.markdown(f"  {r}")
+                        st.warning(f"⚠️ Risk: {thesis['risk']}")
+                    except Exception as _e:
+                        st.error(f"Pick error: {_e}")
+            else:
+                st.error("Rotation engine not loaded.")
         else:
-            st.info("\U0001f449 Select a sector above and click **Scan Stocks**.")
-            st.markdown("**Cap Priority:** \U0001f3e6 Large Cap first | \U0001f3e2 Mid | \U0001f3ea Small (highest risk/reward)")
+            st.info("👉 Select a sector and click **Get Live Stock Picks**.")
 
-    # ── TAB 4: Settings ──────────────────────────────────────
+    # ══ TAB 4: ROTATION BACKTEST ════════════════════════════
     with iv4:
-        st.markdown('<div class="section-title">\u2699\ufe0f RS LegoMaster Settings</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔄 Rolling Sector Rotation Backtest</div>', unsafe_allow_html=True)
+        st.markdown("""
+        > **Sahi backtest:** Weekly sector rotation, 2L+2M+2S picks, hybrid exit, compound capital.
+        > *Agar har strong sector mein rotate karta to kitna milta?*
+        """)
 
-        _rs_period_cur = int(db.get_param("invest_rs_period", "55") or "55")
-        _iv_running    = db.get_param("invest_algo_running", "ON") or "ON"
+        if not _has_rot:
+            st.error("Rotation engine not loaded.")
+        else:
+            import datetime as _dt_mod, plotly.graph_objects as go, pandas as pd
 
-        iv_period = st.selectbox(
-            "RS Period (days)",
-            [30, 55, 110],
+            b1, b2, b3, b4 = st.columns(4)
+            with b1:
+                _bt_start = st.date_input("Start Date", value=_dt_mod.date(2023,1,1), key="bt_start")
+            with b2:
+                _bt_end   = st.date_input("End Date",   value=_dt_mod.date.today(), key="bt_end")
+            with b3:
+                _bt_cap   = st.number_input("Capital (₹)", min_value=10000, max_value=10000000,
+                                            value=100000, step=10000, key="bt_cap")
+            with b4:
+                _bt_secs  = st.slider("Max Sectors", 1, 3, 2, key="bt_secs")
+
+            if st.button("🚀 RUN ROTATION BACKTEST", key="bt_run", type="primary"):
+                with st.spinner("Running weekly rotation backtest (2-5 min for 2Y period)..."):
+                    try:
+                        result = rot_eng.run_rotation_backtest(
+                            start_date=_bt_start, end_date=_bt_end,
+                            capital=float(_bt_cap), max_sectors=_bt_secs,
+                        )
+                        summ   = result["summary"]
+                        trades = result["trade_log"]
+                        curve  = result["portfolio_curve"]
+                        st.session_state["bt_result"] = result
+                    except Exception as _e:
+                        st.error(f"Backtest failed: {_e}")
+                        st.stop()
+
+            # Show results if available
+            if "bt_result" in st.session_state:
+                result = st.session_state["bt_result"]
+                summ   = result["summary"]
+                trades = result["trade_log"]
+                curve  = result["portfolio_curve"]
+
+                # ── Summary KPIs ──────────────────────────────
+                st.markdown("### 📊 Results")
+                k1,k2,k3,k4,k5 = st.columns(5)
+                kpi_data = [
+                    (k1,"Total Return", f"{summ['total_return_pct']:+.1f}%",
+                     "#10b981" if summ["total_return_pct"]>0 else "#f43f5e"),
+                    (k2,"Nifty Return", f"{summ['nifty_return_pct']:+.1f}%","#6366f1"),
+                    (k3,"Alpha",        f"{summ['alpha']:+.1f}%",
+                     "#10b981" if summ["alpha"]>0 else "#f43f5e"),
+                    (k4,"Win Rate",     f"{summ['win_rate_pct']:.0f}%","#f59e0b"),
+                    (k5,"Trades",       str(summ["total_trades"]),"#6366f1"),
+                ]
+                for col,label,val,color in kpi_data:
+                    with col:
+                        st.markdown(f"""<div class="kpi-card" style="text-align:center">
+                          <div class="kpi-label">{label}</div>
+                          <div class="kpi-value" style="color:{color};font-size:1.6rem;">{val}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                m1,m2 = st.columns(2)
+                with m1:
+                    st.metric("💰 Starting Capital", f"₹{summ['starting_capital']:,.0f}")
+                    st.metric("💰 Final Capital",    f"₹{summ['final_capital']:,.0f}",
+                              delta=f"₹{summ['final_capital']-summ['starting_capital']:+,.0f}")
+                with m2:
+                    beat = "🏆 BEAT NIFTY!" if summ["beat_nifty"] else "📉 Nifty beat us"
+                    st.metric("vs Nifty", beat, delta=f"Alpha: {summ['alpha']:+.1f}%")
+                    st.metric("Avg Trade Return", f"{summ['avg_trade_return']:+.1f}%")
+
+                # ── Equity Curve ──────────────────────────────
+                if curve:
+                    st.markdown("### 📈 Equity Curve")
+                    df_curve = pd.DataFrame(curve)
+                    df_curve["date"] = pd.to_datetime(df_curve["date"])
+                    fig_eq = go.Figure()
+                    fig_eq.add_trace(go.Scatter(
+                        x=df_curve["date"], y=df_curve["capital"],
+                        name="RS Rotation Portfolio",
+                        line=dict(color="#10b981", width=2),
+                        fill="tozeroy", fillcolor="rgba(16,185,129,0.08)",
+                    ))
+                    # Nifty benchmark curve
+                    nifty_start_cap = summ["starting_capital"]
+                    nifty_mult = (1 + summ["nifty_return_pct"]/100)
+                    nifty_vals = [
+                        nifty_start_cap * (1 + i/len(df_curve) * (nifty_mult-1))
+                        for i in range(len(df_curve))
+                    ]
+                    fig_eq.add_trace(go.Scatter(
+                        x=df_curve["date"], y=nifty_vals,
+                        name="Nifty 50 Buy & Hold",
+                        line=dict(color="#6366f1", width=1, dash="dash"),
+                    ))
+                    fig_eq.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        height=350, legend=dict(orientation="h"),
+                        yaxis_tickprefix="₹",
+                    )
+                    st.plotly_chart(fig_eq, use_container_width=True, key="iv_eq_chart")
+
+                # ── Trade Log Table ───────────────────────────
+                if trades:
+                    st.markdown("### 📋 Trade Log (All Rotations)")
+                    rows = []
+                    for t in trades:
+                        stocks_str = ", ".join(
+                            f"{s['symbol']}({s['cap'][0]})"
+                            for s in t["stocks"] if s.get("symbol")
+                        )
+                        rows.append({
+                            "#":       t["trade_id"],
+                            "Sector":  t["sector"],
+                            "Entry":   t["entry_date"],
+                            "Exit":    t["exit_date"],
+                            "Days":    t["days_held"],
+                            "Stocks":  stocks_str,
+                            "Return%": f"{t['portfolio_return_pct']:+.1f}%",
+                            "Capital After": f"₹{t['capital_after']:,.0f}",
+                            "vs Nifty":f"{t['nifty_return_pct']:+.1f}%",
+                            "Beat?":   "✅" if t["beat_nifty"] else "❌",
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                    # ── Sector Thesis for each trade ──────────
+                    if _has_rot:
+                        st.markdown("### 💡 Why Each Sector Ran?")
+                        unique_sectors = list({t["sector"] for t in trades})
+                        for sec_name in unique_sectors:
+                            with st.expander(f"📌 {sec_name}"):
+                                thesis = fund_eng.get_sector_thesis(sec_name)
+                                st.markdown(f"*{thesis['short']}*")
+                                for r in thesis["reasons"]:
+                                    st.markdown(f"  {r}")
+                                st.warning(f"⚠️ Risk: {thesis['risk']}")
+
+                    # ── Send to Telegram ──────────────────────
+                    if st.button("\U0001f4e4 Send Backtest Report to Telegram", key="bt_tg"):
+                        from utils import send_telegram_msg
+                        _trade_lines = "\n".join(
+                            str(t["trade_id"]) + ". " + t["sector"] +
+                            " (" + t["entry_date"] + " to " + t["exit_date"] + ")" +
+                            " " + str(t["portfolio_return_pct"]) + "%"
+                            for t in trades
+                        )
+                        _tg_msg = ("\U0001f504 *ROTATION BACKTEST RESULT*\n"
+                            + "Period: " + summ["start_date"] + " to " + summ["end_date"] + "\n"
+                            + "Capital: Rs" + f"{summ['starting_capital']:,.0f}"
+                              + " to Rs" + f"{summ['final_capital']:,.0f}\n"
+                            + "Return: " + f"{summ['total_return_pct']:+.1f}%" 
+                              + " | Nifty: " + f"{summ['nifty_return_pct']:+.1f}%\n"
+                            + "Alpha: " + f"{summ['alpha']:+.1f}%"
+                              + " | Win Rate: " + f"{summ['win_rate_pct']:.0f}%\n"
+                            + "Trades: " + str(summ["total_trades"]) + "\n\n"
+                            + _trade_lines)
+                        send_telegram_msg(_tg_msg[:4000])
+                        st.toast("\u2705 Sent to Telegram!")
+
+    # ══ TAB 5: Settings ══════════════════════════════════════
+    with iv5:
+        st.markdown('<div class="section-title">⚙️ RS LegoMaster Settings</div>', unsafe_allow_html=True)
+        _rs_period_cur = int(db.get_param("invest_rs_period","55") or "55")
+        iv_period = st.selectbox("RS Period",
+            [30,55,110],
             index=[30,55,110].index(_rs_period_cur) if _rs_period_cur in [30,55,110] else 1,
             key="iv_period",
-            help="55=Primary (best for medium-term momentum) | 30=Short-term | 110=Long-term"
-        )
-
-        st.markdown("""
-        | Period | Best For | Behaviour |
-        |--------|----------|-----------|
-        | **30 days** | Short-term swing trades | More signals, more noise |
-        | **55 days** ⭐ | Positional (1-3 months) | Balanced — Dr. Saab's primary |
-        | **110 days** | Long-term investing | Smoother, fewer signals |
-        """)
-
+            help="55=Primary | 30=Short | 110=Long")
+        st.markdown("""| Period | Best For |
+|--------|----------|
+| **30d** | Swing trades |
+| **55d** ⭐ | Positional (1-3 months) |
+| **110d** | Long-term |""")
         st.divider()
-        st.markdown("**\U0001f4e1 Telegram Report Schedule**")
-        st.info(
-            "Daily: 8:00 AM IST (Mon-Fri)\n\n"
-            "Weekly: Sunday 7:00 PM IST\n\n"
-            "Run `invest_main.py` on VPS to activate."
-        )
-
-        st.divider()
-        c_run, c_save = st.columns(2)
-        with c_save:
-            if st.button("\U0001f4be Save Settings", key="iv_save"):
-                db.set_param("invest_rs_period", str(iv_period))
-                st.success(f"RS Period set to {iv_period} days. Bot uses on next scan.")
-
-        with c_run:
-            if st.button("\U0001f9ea Send Test Report Now", key="iv_test_report"):
-                with st.spinner("Running full scan + sending to Telegram..."):
-                    try:
-                        ok = invest_report.send_daily_rs_report("DAILY")
-                        if ok:
-                            st.success("\u2705 Report sent to Telegram!")
-                        else:
-                            st.error("Report failed — check Telegram token in secrets.txt")
-                    except Exception as _e:
-                        st.error(f"Error: {_e}")
-
-        st.divider()
-        # Bot controls
-        st.markdown("**\U0001f916 Invest Bot Controls (invest_main.py)**")
-        bc1, bc2 = st.columns(2)
-        with bc1:
-            if st.button("\u25b6\ufe0f START Invest Bot", key="iv_start_bot"):
+        st.info("Daily Report: 8:00 AM IST Mon-Fri | Weekly: Sunday 7:00 PM IST | Run invest_main.py on VPS.")
+        if st.button("💾 Save Settings", key="iv_save"):
+            db.set_param("invest_rs_period", str(iv_period))
+            st.success(f"RS Period set to {iv_period} days.")
+        if st.button("🧪 Send Test Report Now", key="iv_test_report"):
+            with st.spinner("Running scan + sending..."):
                 try:
-                    if os.name == "nt":
-                        subprocess.Popen(["python","invest_main.py"],
-                                         creationflags=subprocess.CREATE_NEW_CONSOLE)
-                    else:
-                        subprocess.Popen("nohup python3 invest_main.py &", shell=True)
-                    db.set_param("invest_algo_running","ON")
-                    st.success("Invest bot started!")
+                    ok = invest_report.send_daily_rs_report("DAILY")
+                    st.success("✅ Sent!" if ok else "Failed — check Telegram token.")
                 except Exception as _e:
-                    st.error(f"Start failed: {_e}")
-        with bc2:
-            if st.button("\u25a0 STOP Invest Bot", key="iv_stop_bot"):
-                db.set_param("invest_algo_running","OFF")
-                st.warning("Bot set to OFF. Will stop on next loop check.")
+                    st.error(f"Error: {_e}")
 
-    
-    # ══ TAB 5: RESEARCH AI CHAT ═══════════════════════
-    with iv5:
-        st.markdown('<div class="section-title">\U0001f916 Research AI — Apne Data Se Poochho</div>', unsafe_allow_html=True)
-        st.markdown("""
-        > **Kuch bhi poochho apni investment research ke baare mein.**
-        > System aapke NSE data se real backtest karke jawab dega.
-        """)
+    # ══ TAB 6: Research AI Chat ═══════════════════════════════
+    with iv6:
+        st.markdown('<div class="section-title">🤖 Research AI — Apne Data Se Poochho</div>', unsafe_allow_html=True)
+        st.markdown("> Kuch bhi poochho. System NSE data se real backtest karke jawab dega.")
 
-        # Quick question buttons
-        st.markdown("**\U0001f50d Quick Questions:**")
-        quick_q_result = None
+        st.markdown("**🔍 Quick Questions:**")
         qcols = st.columns(4)
+        _quick_q = None
         for idx, (label, q_text) in enumerate(invest_query_engine.QUICK_QUESTIONS):
-            col_idx = idx % 4
-            with qcols[col_idx]:
+            with qcols[idx % 4]:
                 if st.button(label, key=f"qq_{idx}"):
-                    quick_q_result = q_text
-
+                    _quick_q = q_text
         st.divider()
 
-        # Chat history in session state
         if "invest_chat_history" not in st.session_state:
             st.session_state["invest_chat_history"] = []
 
-        # Display chat history
         for msg in st.session_state["invest_chat_history"]:
-            with st.chat_message(msg["role"],
-                                 avatar="\U0001f9ba" if msg["role"]=="user" else "\U0001f4b9"):
+            with st.chat_message(msg["role"], avatar="🦺" if msg["role"]=="user" else "💹"):
                 st.markdown(msg["content"])
-
-                # Send to Telegram button for AI responses
                 if msg["role"] == "assistant":
-                    _tg_key = f"tg_{hash(msg['content'][:30])}"
-                    if st.button("\U0001f4e4 Send to Telegram", key=_tg_key):
+                    _k = f"tg_{abs(hash(msg['content'][:20]))}"
+                    if st.button("📤 Send to Telegram", key=_k):
                         from utils import send_telegram_msg
                         send_telegram_msg(msg["content"][:4000])
-                        st.toast("\u2705 Sent to Telegram!")
+                        st.toast("✅ Sent!")
 
-        # Handle quick question click
-        if quick_q_result:
-            st.session_state["invest_chat_history"].append(
-                {"role": "user", "content": quick_q_result}
-            )
-            with st.chat_message("user", avatar="\U0001f9ba"):
-                st.markdown(quick_q_result)
-            with st.chat_message("assistant", avatar="\U0001f4b9"):
-                with st.spinner("\U0001f4ca Data fetch + analysis chal raha hai... (30-60 sec)"):
-                    _ai_resp = invest_query_engine.process_query(quick_q_result)
-                st.markdown(_ai_resp)
-            st.session_state["invest_chat_history"].append(
-                {"role": "assistant", "content": _ai_resp}
-            )
+        if _quick_q:
+            st.session_state["invest_chat_history"].append({"role":"user","content":_quick_q})
+            with st.chat_message("user", avatar="🦺"):
+                st.markdown(_quick_q)
+            with st.chat_message("assistant", avatar="💹"):
+                with st.spinner("📊 Analysing..."):
+                    _r = invest_query_engine.process_query(_quick_q)
+                st.markdown(_r)
+            st.session_state["invest_chat_history"].append({"role":"assistant","content":_r})
             st.rerun()
 
-        # Manual text input
-        user_query = st.chat_input("Kuch bhi poochho... jaise: Pichhle 2 saal mein kaun sa sector best tha?")
-        if user_query:
-            st.session_state["invest_chat_history"].append(
-                {"role": "user", "content": user_query}
-            )
-            with st.chat_message("user", avatar="\U0001f9ba"):
-                st.markdown(user_query)
-
-            with st.chat_message("assistant", avatar="\U0001f4b9"):
-                with st.spinner("\U0001f4ca NSE data fetch + backtest running... (30-90 sec)"):
-                    _resp = invest_query_engine.process_query(user_query)
-                st.markdown(_resp)
-                if st.button("\U0001f4e4 Send to Telegram", key=f"tg_new_{len(st.session_state['invest_chat_history'])}"):
+        _user_q = st.chat_input("Poochho kuch bhi... e.g. Pichhle 2 saal best sector kaun tha?")
+        if _user_q:
+            st.session_state["invest_chat_history"].append({"role":"user","content":_user_q})
+            with st.chat_message("user", avatar="🦺"):
+                st.markdown(_user_q)
+            with st.chat_message("assistant", avatar="💹"):
+                with st.spinner("📊 NSE data + analysis..."):
+                    _r2 = invest_query_engine.process_query(_user_q)
+                st.markdown(_r2)
+                if st.button("📤 Telegram", key="tg_new_msg"):
                     from utils import send_telegram_msg
-                    send_telegram_msg(_resp[:4000])
-                    st.toast("\u2705 Sent to Telegram!")
-
-            st.session_state["invest_chat_history"].append(
-                {"role": "assistant", "content": _resp}
-            )
+                    send_telegram_msg(_r2[:4000])
+                    st.toast("✅ Sent!")
+            st.session_state["invest_chat_history"].append({"role":"assistant","content":_r2})
 
         if st.session_state["invest_chat_history"]:
-            if st.button("\U0001f9f9 Clear Chat History", key="iv_clear_chat"):
+            if st.button("🧹 Clear Chat", key="iv_clear"):
                 st.session_state["invest_chat_history"] = []
                 st.rerun()
 
-    st.caption("BHARAT AlgoVerse v3.0 \u2022 RS LegoMaster \u2022 Built for Dr. Saab \U0001f9ba")
+    st.caption("BHARAT AlgoVerse v3.1 • RS LegoMaster • Built for Dr. Saab 🦺")
+
 
