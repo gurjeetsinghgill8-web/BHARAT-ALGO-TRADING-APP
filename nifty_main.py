@@ -160,19 +160,25 @@ def main():
     print("  ✅ SAR Flip: Auto-exit & re-enter on signal flip")
     print("=" * 60)
 
+    # ── Load secrets (Upstox token + Telegram) ──────────────
+    if not db.load_secrets():
+        print("[NIFTY] WARNING: secrets.txt not found. Running in PAPER mode only.")
+        db.set_param('nifty_trade_mode', 'PAPER')
+
     # Initialize Nifty defaults (only if not already set)
     defaults = {
-        'nifty_symbol':         '^NSEI',
-        'nifty_timeframe':      '15m',
-        'nifty_st_period':      '10',
-        'nifty_st_multiplier':  '1.5',
-        'nifty_lots':           '1',
-        'nifty_lot_size':       '25',
-        'nifty_target_premium': '120',
-        'nifty_sl_percent':     '30',
-        'nifty_tp_percent':     '80',
-        'nifty_trade_mode':     'PAPER',
-        'nifty_algo_running':   'ON',
+        'nifty_symbol':          '^NSEI',
+        'nifty_timeframe':       '15m',
+        'nifty_st_period':       '10',
+        'nifty_st_multiplier':   '1.5',
+        'nifty_lots':            '1',
+        'nifty_lot_size':        '25',
+        'nifty_target_premium':  '120',
+        'nifty_sl_percent':      '30',
+        'nifty_tp_percent':      '80',
+        'nifty_trade_mode':      'LIVE',      # ← LIVE by default
+        'nifty_algo_running':    'ON',
+        'nifty_expiry_weekday':  '1',         # ← 1 = Tuesday (Dr. Saab's expiry)
     }
     for k, v in defaults.items():
         if not db.get_param(k):

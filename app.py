@@ -619,43 +619,53 @@ elif page == "📈 Nifty (NSE)":
         st.markdown('<div class="section-title">⚙️ Nifty Strategy Lab</div>', unsafe_allow_html=True)
 
         # Read current settings
-        _nsym_opts = ["^NSEI", "^NSEBANK", "RELIANCE.NS", "INFY.NS", "TCS.NS"]
-        _nsym_cur  = db.get_param('nifty_symbol', '^NSEI') or '^NSEI'
-        _nsym_idx  = _nsym_opts.index(_nsym_cur) if _nsym_cur in _nsym_opts else 0
-        _ntf_opts  = ["5m", "15m", "30m", "1h", "1d"]
-        _ntf_cur   = db.get_param('nifty_timeframe', '15m') or '15m'
-        _ntf_idx   = _ntf_opts.index(_ntf_cur) if _ntf_cur in _ntf_opts else 1
-        _nper      = int(float(db.get_param('nifty_st_period', '10') or '10'))
-        _nmul      = float(db.get_param('nifty_st_multiplier', '1.5') or '1.5')
-        _nlots     = int(float(db.get_param('nifty_lots', '1') or '1'))
-        _nprem     = int(float(db.get_param('nifty_target_premium', '120') or '120'))
-        _nsl       = int(float(db.get_param('nifty_sl_percent', '30') or '30'))
-        _ntp       = int(float(db.get_param('nifty_tp_percent', '80') or '80'))
-        _nmode_cur = db.get_param('nifty_trade_mode', 'PAPER') or 'PAPER'
+        _nsym_opts  = ["^NSEI", "^NSEBANK", "RELIANCE.NS", "INFY.NS", "TCS.NS"]
+        _nsym_cur   = db.get_param('nifty_symbol', '^NSEI') or '^NSEI'
+        _nsym_idx   = _nsym_opts.index(_nsym_cur) if _nsym_cur in _nsym_opts else 0
+        _ntf_opts   = ["5m", "15m", "30m", "1h", "1d"]
+        _ntf_cur    = db.get_param('nifty_timeframe', '15m') or '15m'
+        _ntf_idx    = _ntf_opts.index(_ntf_cur) if _ntf_cur in _ntf_opts else 1
+        _nper       = int(float(db.get_param('nifty_st_period', '10') or '10'))
+        _nmul       = float(db.get_param('nifty_st_multiplier', '1.5') or '1.5')
+        _nlots      = int(float(db.get_param('nifty_lots', '1') or '1'))
+        _nprem      = int(float(db.get_param('nifty_target_premium', '120') or '120'))
+        _nsl        = int(float(db.get_param('nifty_sl_percent', '30') or '30'))
+        _ntp        = int(float(db.get_param('nifty_tp_percent', '80') or '80'))
+        _nmode_cur  = db.get_param('nifty_trade_mode', 'LIVE') or 'LIVE'
+        _nexp_wd    = int(db.get_param('nifty_expiry_weekday', '1') or '1')
 
-        ns_mode  = st.selectbox("Trade Mode",   ["PAPER", "LIVE"],
+        # Expiry day picker (SEBI 2024: Nifty=Thu, BankNifty=Wed, FinNifty=Tue, Midcap=Mon)
+        _expiry_day_opts = ["Monday (0)", "Tuesday (1)", "Wednesday (2)", "Thursday (3)", "Friday (4)"]
+        _expiry_help = "Nifty 50=Thursday | Bank Nifty=Wednesday | FinNifty=Tuesday | Midcap=Monday"
+
+        ns_mode  = st.selectbox("Trade Mode", ["PAPER", "LIVE"],
                                  index=1 if _nmode_cur == "LIVE" else 0, key="ns_mode")
-        ns_sym   = st.selectbox("Instrument",   _nsym_opts, index=_nsym_idx, key="ns_sym")
-        ns_tf    = st.selectbox("Timeframe",     _ntf_opts,  index=_ntf_idx,  key="ns_tf")
-        ns_per   = st.number_input("ST Period",  5, 30, max(5, min(30, _nper)), key="ns_per")
+        ns_sym   = st.selectbox("Instrument", _nsym_opts, index=_nsym_idx, key="ns_sym")
+        ns_tf    = st.selectbox("Timeframe",  _ntf_opts,  index=_ntf_idx,  key="ns_tf")
+        ns_expwd = st.selectbox("Expiry Day", _expiry_day_opts,
+                                 index=min(_nexp_wd, 4), key="ns_expwd",
+                                 help=_expiry_help)
+        ns_per   = st.number_input("ST Period", 5, 30, max(5, min(30, _nper)), key="ns_per")
         ns_mul   = st.number_input("ST Multiplier", 0.5, 5.0,
                                     max(0.5, min(5.0, _nmul)), step=0.1, key="ns_mul",
                                     help="Common: 10/1.0, 10/1.5, 10/2.5")
-        ns_lots  = st.slider("Lots",             1, 20, max(1, _nlots), key="ns_lots")
-        ns_prem  = st.number_input("Target Premium (₹)", 50, 500,
+        ns_lots  = st.slider("Lots", 1, 20, max(1, _nlots), key="ns_lots")
+        ns_prem  = st.number_input("Target Premium (Rs.)", 50, 500,
                                     max(50, min(500, _nprem)), step=5, key="ns_prem",
                                     help="Option whose LTP is nearest to this value will be selected")
         c_sl2, c_tp2 = st.columns(2)
         with c_sl2:
-            ns_sl = st.number_input("SL %",  10, 90, max(10, min(90, _nsl)), step=5, key="ns_sl")
+            ns_sl = st.number_input("SL %", 10, 90, max(10, min(90, _nsl)), step=5, key="ns_sl")
         with c_tp2:
-            ns_tp = st.number_input("TP %",  20, 300, max(20, min(300, _ntp)), step=10, key="ns_tp")
+            ns_tp = st.number_input("TP %", 20, 300, max(20, min(300, _ntp)), step=10, key="ns_tp")
 
         if st.button("💾 SAVE NIFTY SETTINGS", key="save_nifty"):
             try:
+                _wd_val = str(_expiry_day_opts.index(ns_expwd))
                 db.set_param('nifty_trade_mode',      ns_mode)
                 db.set_param('nifty_symbol',          ns_sym)
                 db.set_param('nifty_timeframe',       ns_tf)
+                db.set_param('nifty_expiry_weekday',  _wd_val)
                 db.set_param('nifty_st_period',       str(ns_per))
                 db.set_param('nifty_st_multiplier',   str(ns_mul))
                 db.set_param('nifty_lots',            str(ns_lots))
