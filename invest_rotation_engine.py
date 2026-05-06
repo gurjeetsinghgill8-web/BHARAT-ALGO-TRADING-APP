@@ -35,20 +35,22 @@ import invest_rs_engine as rs_engine
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ── Config V2 "FORTRESS" (upgraded 2026-05-06) ─────────────
+# ── Config V3 "BALANCED" (2026-05-06) ─────────────────
+# KEY LESSON: Too strict entry = miss bull runs = Nifty beats us badly
+# Rule: Stay IN the market. Cut losers. Ride winners long.
 RS_PERIOD         = 55      # Primary RS period (days)
-RS_ENTRY_MIN      = 1.15    # V2: Raised from 1.05 → stronger conviction needed
+RS_ENTRY_MIN      = 1.05    # V3: Back to original — more market time is key
 RS_EXIT_BUFFER    = 0.95    # Exit when RS drops below this
-HARD_STOP_LOSS    = -0.07   # V2: NEW — -7% max loss per trade, then force exit
-TRAIL_TRIGGER_1   = 0.15    # V2: Once +15% profit → lock floor
-TRAIL_FLOOR_1     = 0.08    # V2: Floor at +8% once triggered
-TRAIL_TRIGGER_2   = 0.25    # V2: Once +25% profit → higher lock
-TRAIL_FLOOR_2     = 0.18    # V2: Floor at +18% once triggered
-NIFTY_RSI_AGGR    = 55      # V2: Raised from 50 → stricter market gate
-CONSISTENCY_WEEKS = 8       # V2: Sector RS must be > 1.0 for 8 weeks before entry
-MAX_SECTORS       = 2       # Max parallel sectors
+HARD_STOP_LOSS    = -0.10   # V3: -10% (wider; Indian market needs room to breathe)
+TRAIL_TRIGGER_1   = 0.20    # V3: Lock gains after +20%
+TRAIL_FLOOR_1     = 0.12    # V3: Floor at +12% once triggered
+TRAIL_TRIGGER_2   = 0.35    # V3: Raise floor after +35%
+TRAIL_FLOOR_2     = 0.22    # V3: Floor at +22%
+NIFTY_RSI_AGGR    = 50      # V3: Back to original — RSI > 50 = enter
+CONSISTENCY_WEEKS = 3       # V3: Light check only — 3 weeks (not 8!)
+MAX_SECTORS       = 3       # V3: Allow 3 sectors — more market coverage
 REENTRY_WIN_DAYS  = 28      # Re-entry wait after WINNING trade
-REENTRY_LOSS_DAYS = 56      # V2: Stricter re-entry after LOSING trade (8 weeks)
+REENTRY_LOSS_DAYS = 42      # V3: 6 weeks after LOSING trade (moderate)
 STOCK_GRACE_DAYS  = 14      # Grace period for strong stocks on sector exit
 STEP_DAYS         = 7       # Backtest step size (weekly)
 STOCKS_PER_CAP    = 2       # Top N stocks per cap category
