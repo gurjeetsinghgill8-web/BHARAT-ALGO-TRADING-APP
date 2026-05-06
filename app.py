@@ -16,6 +16,13 @@ try:
 except Exception:
     _has_nifty = False
 
+try:
+    import invest_rs_engine
+    import invest_report
+    _has_invest = True
+except Exception:
+    _has_invest = False
+
 st.set_page_config(
     page_title="BHARAT ALGOVERSE v3.0",
     page_icon="🚀",
@@ -277,7 +284,7 @@ with st.sidebar:
     st.markdown('<div class="section-title">📂 Switch Module</div>', unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)"],
+        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)", "💹 Investment (RS)"],
         key="page_selector",
         label_visibility="collapsed"
     )
@@ -763,3 +770,272 @@ elif page == "📈 Nifty (NSE)":
         )
 
     st.caption("BHARAT AlgoVerse v3.0 • Nifty Module • Built for Dr. Saab 🩺")
+
+# ════════════════════════════════════════════════════════════
+# PAGE 3 — INVESTMENT (RS LEGOMASTER)
+# ════════════════════════════════════════════════════════════
+elif page == "\U0001f4b9 Investment (RS)":
+    st.markdown("# \U0001f4b9 RS LEGOMASTER — Investment Intelligence")
+    st.markdown("##### Momentum-based sector & stock ranking | Relative Strength 55-day")
+
+    if not _has_invest:
+        st.error("invest_rs_engine not loaded. Run: pip install yfinance pandas-ta")
+        st.stop()
+
+    # ── Tabs ────────────────────────────────────────────────
+    iv1, iv2, iv3, iv4 = st.tabs([
+        "\U0001f4ca Market Pulse",
+        "\U0001f3c6 Sector Ranking",
+        "\U0001f3af Top Stocks",
+        "\u2699\ufe0f Settings"
+    ])
+
+    # ── Pull cached scan from DB ─────────────────────────────
+    _last_scan_dt = db.get_param("invest_last_scan_dt", "Never") or "Never"
+    _market_mode  = db.get_param("invest_market_mode", "UNKNOWN") or "UNKNOWN"
+    _nifty_rsi    = db.get_param("invest_nifty_rsi", "—") or "—"
+    _top_sectors_raw = db.get_param("invest_top_sectors", "[]") or "[]"
+
+    mode_color = "#10b981" if _market_mode == "AGGRESSIVE" else "#f43f5e"
+    mode_label = "AGGRESSIVE \U0001f7e2 (RSI > 50 — Be Invested)" if _market_mode == "AGGRESSIVE" else "DEFENSIVE \U0001f534 (RSI \u2264 50 — Stay Selective)"
+
+    # ── TAB 1: Market Pulse ──────────────────────────────────
+    with iv1:
+        st.markdown(f"""
+        <div class="kpi-card" style="text-align:center; padding: 24px;">
+          <div class="kpi-label">NIFTY 50 RSI(14)</div>
+          <div class="kpi-value blue" style="font-size:3rem;">{_nifty_rsi}</div>
+          <div style="color:{mode_color}; font-weight:700; font-size:1.1rem; margin-top:8px;">{mode_label}</div>
+          <div class="kpi-sub">Last scan: {_last_scan_dt}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            <div class="kpi-card">
+              <div class="kpi-label">\U0001f7e2 RSI > 50 (Aggressive Mode)</div>
+              <div class="kpi-sub">\u2022 Be fully invested in strong sectors</div>
+              <div class="kpi-sub">\u2022 Buy momentum stocks with RS > 1.0</div>
+              <div class="kpi-sub">\u2022 Max position size allowed</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown("""
+            <div class="kpi-card">
+              <div class="kpi-label">\U0001f534 RSI \u2264 50 (Defensive Mode)</div>
+              <div class="kpi-sub">\u2022 Reduce position sizes</div>
+              <div class="kpi-sub">\u2022 Hold cash / Gold / bonds</div>
+              <div class="kpi-sub">\u2022 Avoid new entries until recovery</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("\U0001f504 Run Live Market Pulse Scan", key="iv_pulse_btn"):
+            with st.spinner("Fetching Nifty RSI from NSE..."):
+                try:
+                    pulse = invest_rs_engine.get_market_pulse()
+                    if pulse.get("error"):
+                        st.error(f"Error: {pulse['error']}")
+                    else:
+                        st.success(
+                            f"Nifty RSI: **{pulse['rsi']}** | "
+                            f"Close: **\u20b9{pulse['close']:,.0f}** | "
+                            f"Mode: **{pulse['mode']}**"
+                        )
+                        st.rerun()
+                except Exception as _e:
+                    st.error(f"Scan failed: {_e}")
+
+    # ── TAB 2: Sector Ranking ────────────────────────────────
+    with iv2:
+        st.markdown('<div class="section-title">\U0001f3c6 Sector RS-55 Ranking vs Nifty 50</div>', unsafe_allow_html=True)
+
+        if st.button("\U0001f504 Scan All Sectors Now", key="iv_sector_btn"):
+            with st.spinner("Scanning all NSE sectors (may take 60-90 sec)..."):
+                try:
+                    _period = int(db.get_param("invest_rs_period", "55") or "55")
+                    sectors = invest_rs_engine.scan_sectors(_period)
+                    if sectors:
+                        import pandas as pd
+                        df_sec = pd.DataFrame(sectors)
+                        df_sec["Status"] = df_sec["outperforming"].map(
+                            {True: "\U0001f7e2 Above Nifty", False: "\U0001f534 Below Nifty"}
+                        )
+                        df_sec["RS-55"] = df_sec["rs"].map(lambda x: f"{x:.3f}")
+                        df_sec["vs Nifty %"] = df_sec["vs_nifty_pct"].map(lambda x: f"{x:+.1f}%")
+                        st.dataframe(
+                            df_sec[["rank","sector","RS-55","vs Nifty %","Status"]],
+                            use_container_width=True, hide_index=True
+                        )
+                        # Bar chart
+                        import plotly.express as px
+                        fig = px.bar(
+                            df_sec.head(12), x="sector", y="vs_nifty_pct",
+                            color="outperforming",
+                            color_discrete_map={True: "#10b981", False: "#f43f5e"},
+                            labels={"vs_nifty_pct": "% vs Nifty", "sector": "Sector"},
+                            title=f"Sector RS-{_period} Relative to Nifty 50",
+                            template="plotly_dark",
+                        )
+                        fig.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            showlegend=False, height=360,
+                        )
+                        st.plotly_chart(fig, use_container_width=True, key="iv_sector_chart")
+                    else:
+                        st.warning("No sector data returned. Check network.")
+                except Exception as _e:
+                    st.error(f"Sector scan failed: {_e}")
+        else:
+            st.info("\U0001f449 Click **Scan All Sectors Now** to fetch live RS-55 rankings.")
+            st.markdown("""
+            **How RS-55 works:**
+            - `RS = (Sector_Today / Sector_55d_ago) / (Nifty_Today / Nifty_55d_ago)`
+            - RS > 1.0 = Outperforming Nifty \U0001f7e2
+            - RS < 1.0 = Underperforming Nifty \U0001f534
+            - Higher RS = Stronger momentum = Better to invest
+            """)
+
+    # ── TAB 3: Top Stocks ────────────────────────────────────
+    with iv3:
+        st.markdown('<div class="section-title">\U0001f3af Top Stocks by RS-55 (Within Sectors)</div>', unsafe_allow_html=True)
+
+        _sector_list = list(invest_rs_engine.SECTOR_STOCKS.keys())
+        _sel_sector  = st.selectbox("Pick a Sector to Scan Stocks", _sector_list, key="iv_sector_sel")
+
+        if st.button("\U0001f504 Scan Stocks in This Sector", key="iv_stock_btn"):
+            with st.spinner(f"Scanning {_sel_sector} stocks..."):
+                try:
+                    _period = int(db.get_param("invest_rs_period", "55") or "55")
+                    stocks  = invest_rs_engine.scan_stocks_in_sector(_sel_sector, _period)
+                    if stocks:
+                        import pandas as pd, plotly.express as px
+                        df_st = pd.DataFrame(stocks)
+                        df_st["RS-55"]     = df_st["rs"].map(lambda x: f"{x:.3f}")
+                        df_st["vs Nifty"]  = df_st["vs_nifty_pct"].map(lambda x: f"{x:+.1f}%")
+                        df_st["Status"]    = df_st["outperforming"].map(
+                            {True: "\U0001f7e2 Strong", False: "\U0001f534 Weak"}
+                        )
+                        st.dataframe(
+                            df_st[["rank","symbol","cap","RS-55","vs Nifty","Status"]],
+                            use_container_width=True, hide_index=True
+                        )
+                        colors = {"Large":"#10b981","Mid":"#6366f1","Small":"#f59e0b"}
+                        df_st["color"] = df_st["cap"].map(colors)
+                        fig2 = px.bar(
+                            df_st, x="symbol", y="vs_nifty_pct",
+                            color="cap",
+                            color_discrete_map=colors,
+                            labels={"vs_nifty_pct":"% vs Nifty","symbol":"Stock"},
+                            title=f"{_sel_sector} — Stock RS-{_period}",
+                            template="plotly_dark",
+                        )
+                        fig2.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            height=340,
+                        )
+                        st.plotly_chart(fig2, use_container_width=True, key="iv_stock_chart")
+
+                        # Allocation hint
+                        top3 = stocks[:3]
+                        if top3:
+                            st.markdown("**\U0001f4b0 Suggested Allocation (Top 3):**")
+                            ac1, ac2, ac3 = st.columns(3)
+                            cols = [ac1, ac2, ac3]
+                            pcts = [50, 30, 20]
+                            for idx, (col, st_data, pct) in enumerate(zip(cols, top3, pcts)):
+                                with col:
+                                    cap_icon = {"Large":"\U0001f3e6","Mid":"\U0001f3e2","Small":"\U0001f3ea"}.get(st_data["cap"],"\U0001f4e6")
+                                    st.markdown(f"""
+                                    <div class="kpi-card">
+                                      <div class="kpi-label">{cap_icon} {st_data["symbol"]}</div>
+                                      <div class="kpi-value blue">{pct}%</div>
+                                      <div class="kpi-sub">{st_data["cap"]} Cap | RS: {st_data["rs"]:.3f}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                    else:
+                        st.warning("No stocks found for this sector.")
+                except Exception as _e:
+                    st.error(f"Stock scan error: {_e}")
+        else:
+            st.info("\U0001f449 Select a sector above and click **Scan Stocks**.")
+            st.markdown("**Cap Priority:** \U0001f3e6 Large Cap first | \U0001f3e2 Mid | \U0001f3ea Small (highest risk/reward)")
+
+    # ── TAB 4: Settings ──────────────────────────────────────
+    with iv4:
+        st.markdown('<div class="section-title">\u2699\ufe0f RS LegoMaster Settings</div>', unsafe_allow_html=True)
+
+        _rs_period_cur = int(db.get_param("invest_rs_period", "55") or "55")
+        _iv_running    = db.get_param("invest_algo_running", "ON") or "ON"
+
+        iv_period = st.selectbox(
+            "RS Period (days)",
+            [30, 55, 110],
+            index=[30,55,110].index(_rs_period_cur) if _rs_period_cur in [30,55,110] else 1,
+            key="iv_period",
+            help="55=Primary (best for medium-term momentum) | 30=Short-term | 110=Long-term"
+        )
+
+        st.markdown("""
+        | Period | Best For | Behaviour |
+        |--------|----------|-----------|
+        | **30 days** | Short-term swing trades | More signals, more noise |
+        | **55 days** ⭐ | Positional (1-3 months) | Balanced — Dr. Saab's primary |
+        | **110 days** | Long-term investing | Smoother, fewer signals |
+        """)
+
+        st.divider()
+        st.markdown("**\U0001f4e1 Telegram Report Schedule**")
+        st.info(
+            "Daily: 8:00 AM IST (Mon-Fri)\n\n"
+            "Weekly: Sunday 7:00 PM IST\n\n"
+            "Run `invest_main.py` on VPS to activate."
+        )
+
+        st.divider()
+        c_run, c_save = st.columns(2)
+        with c_save:
+            if st.button("\U0001f4be Save Settings", key="iv_save"):
+                db.set_param("invest_rs_period", str(iv_period))
+                st.success(f"RS Period set to {iv_period} days. Bot uses on next scan.")
+
+        with c_run:
+            if st.button("\U0001f9ea Send Test Report Now", key="iv_test_report"):
+                with st.spinner("Running full scan + sending to Telegram..."):
+                    try:
+                        ok = invest_report.send_daily_rs_report("DAILY")
+                        if ok:
+                            st.success("\u2705 Report sent to Telegram!")
+                        else:
+                            st.error("Report failed — check Telegram token in secrets.txt")
+                    except Exception as _e:
+                        st.error(f"Error: {_e}")
+
+        st.divider()
+        # Bot controls
+        st.markdown("**\U0001f916 Invest Bot Controls (invest_main.py)**")
+        bc1, bc2 = st.columns(2)
+        with bc1:
+            if st.button("\u25b6\ufe0f START Invest Bot", key="iv_start_bot"):
+                try:
+                    if os.name == "nt":
+                        subprocess.Popen(["python","invest_main.py"],
+                                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        subprocess.Popen("nohup python3 invest_main.py &", shell=True)
+                    db.set_param("invest_algo_running","ON")
+                    st.success("Invest bot started!")
+                except Exception as _e:
+                    st.error(f"Start failed: {_e}")
+        with bc2:
+            if st.button("\u25a0 STOP Invest Bot", key="iv_stop_bot"):
+                db.set_param("invest_algo_running","OFF")
+                st.warning("Bot set to OFF. Will stop on next loop check.")
+
+    st.caption("BHARAT AlgoVerse v3.0 \u2022 RS LegoMaster \u2022 Built for Dr. Saab \U0001f9ba")
+

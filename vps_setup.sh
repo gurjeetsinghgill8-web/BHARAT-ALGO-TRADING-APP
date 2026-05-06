@@ -88,17 +88,35 @@ RestartSec=15
 WantedBy=multi-user.target
 EOF
 
-# ── 8. Reload + Enable + Start all services ─────────────
+# ── 8. Create systemd service: Invest Bot (RS LegoMaster) ──
+cat > /etc/systemd/system/bharat_invest.service << 'EOF'
+[Unit]
+Description=Bharat AlgoVerse RS Investment Bot v3.0
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
+ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 invest_main.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# ── 9. Reload + Enable + Start all services ─────────────
 sudo systemctl daemon-reload
 
 sudo systemctl enable  bharat_dashboard
 sudo systemctl enable  bharat_engine
 sudo systemctl enable  bharat_nifty
+sudo systemctl enable  bharat_invest
 
 sudo systemctl restart bharat_dashboard
 sudo systemctl restart bharat_engine
-# NOTE: Nifty engine started but will auto-sleep outside 9:25AM-3:10PM IST
 sudo systemctl restart bharat_nifty
+sudo systemctl restart bharat_invest
 
 echo "===================================================="
 echo "  AUTO-HEAL COMPLETE! System is now LIVE."
@@ -106,6 +124,7 @@ echo ""
 echo "  Dashboard : http://46.224.133.16:8501"
 echo "  Crypto Bot: systemctl status bharat_engine"
 echo "  Nifty Bot : systemctl status bharat_nifty"
+echo "  Invest Bot: systemctl status bharat_invest"
 echo ""
 echo "  IMPORTANT: If secrets.txt is missing on VPS,"
 echo "  create it manually:"
