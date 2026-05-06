@@ -547,7 +547,7 @@ def square_off_crypto(target_pid=None):
     
     # 2. Execute Market Exits
     for pid in pids_to_close:
-        log_terminal(f"🧨 BRUTE FORCE EXIT: PID {pid}", "ALERT")
+        log_terminal(f"🧨 BRUTE FORCE EXIT: PRODUCT_ID {pid}", "ALERT")
         if mode == "LIVE":
             try:
                 # Get current size for this specific PID
