@@ -123,16 +123,16 @@ SECTOR_STOCKS = {
     "Nifty Infra":   [
         ("LT.NS","Large"), ("ADANIPORTS.NS","Large"), ("IRFC.NS","Large"),
         ("RVNL.NS","Mid"), ("IRCON.NS","Mid"), ("NBCC.NS","Mid"),
-        ("KEC.NS","Mid"), ("KALPATPOWR.NS","Small"),
+        ("KEC.NS","Mid"), ("KPIL.NS","Small"),
     ],
     "Nifty Finance": [
         ("BAJFINANCE.NS","Large"), ("BAJAJFINSV.NS","Large"), ("HDFCAMC.NS","Large"),
-        ("LICIHSGFIN.NS","Large"), ("MUTHOOTFIN.NS","Mid"), ("CHOLAFIN.NS","Mid"),
+        ("LICHSGFIN.NS","Large"), ("MUTHOOTFIN.NS","Mid"), ("CHOLAFIN.NS","Mid"),
         ("M&MFIN.NS","Mid"),
     ],
     "Nifty Media":   [
         ("ZEEL.NS","Mid"), ("SUNTV.NS","Mid"), ("NETWORK18.NS","Mid"),
-        ("PVR.NS","Small"), ("INOXLEISUR.NS","Small"),
+        ("PVRINOX.NS","Small"),
     ],
     "Nifty Midcap 100":  [
         ("CAMS.NS","Mid"), ("ANGELONE.NS","Mid"), ("POLICYBZR.NS","Mid"),
