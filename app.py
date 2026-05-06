@@ -39,9 +39,37 @@ st.markdown("""
 html, body, .main { background: #0a0e1a !important; }
 
 section[data-testid="stSidebar"] {
-    background: #0d1117 !important;
-    border-right: 1px solid #1e293b;
+    background: linear-gradient(180deg,#0d1117 0%,#0f1a2e 100%) !important;
+    border-right: 1px solid #1e3a5f !important;
 }
+section[data-testid="stSidebar"] * {
+    color: #e2e8f0 !important;
+}
+section[data-testid="stSidebar"] .stRadio label {
+    color: #cbd5e1 !important;
+    font-size: 0.92rem !important;
+}
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stSlider label {
+    color: #94a3b8 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    color: #94a3b8 !important;
+}
+/* Sector cards for ranking */
+.sector-card {
+    background: linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 6px 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.sector-card:hover { border-color: rgba(99,102,241,0.5); transform: translateX(3px); }
+.sector-card-green { border-left: 3px solid #10b981; }
+.sector-card-red   { border-left: 3px solid #f43f5e; }
+.sector-card-amber { border-left: 3px solid #f59e0b; }
 
 /* KPI Cards */
 .kpi-card {

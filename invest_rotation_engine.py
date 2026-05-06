@@ -301,8 +301,8 @@ def run_rotation_backtest(
                             st["days_held"]  = (step_dt.date() - date.fromisoformat(st["entry_date"])).days
                         stocks_out.append(st)
 
-                # If some stocks staying in grace, keep position partially
-                if stocks_grace and not stocks_to_exit:
+                # If grace stocks exist AND no stocks forced-exited yet → partial hold
+                if stocks_grace and not stocks_out:
                     active_positions[sec_name]["stocks"] = stocks_grace
                     active_positions[sec_name]["grace"] = True
                     continue
