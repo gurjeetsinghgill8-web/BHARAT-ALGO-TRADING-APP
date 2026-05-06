@@ -21,6 +21,7 @@ try:
     import invest_rs_engine
     import invest_report
     import invest_query_engine
+    import invest_newsletter
     _has_invest = True
 except Exception:
     _has_invest = False
@@ -822,8 +823,8 @@ elif page == "💹 Investment (RS)":
         _has_rot = False
         st.warning(f"Rotation engine not available: {_re}")
 
-    # ── 7 Tabs ───────────────────────────────────────────────
-    iv1, iv2, iv3, iv4, iv5, iv6, iv7 = st.tabs([
+    # ── 8 Tabs ───────────────────────────────────────────────
+    iv1, iv2, iv3, iv4, iv5, iv6, iv7, iv8 = st.tabs([
         "📊 Market Pulse",
         "🏆 Sector Ranking",
         "🎯 Stock Picks (2L+2M+2S)",
@@ -831,6 +832,7 @@ elif page == "💹 Investment (RS)":
         "🔄 Rotation Backtest",
         "⚙️ Settings",
         "🤖 Research AI",
+        "📰 Newsletter",
     ])
 
     _last_scan_dt  = db.get_param("invest_last_scan_dt",  "Never") or "Never"
@@ -1280,6 +1282,62 @@ elif page == "💹 Investment (RS)":
             if st.button("🧹 Clear Chat", key="iv_clear"):
                 st.session_state["invest_chat_history"] = []
                 st.rerun()
+
+    # ══ TAB 8: Newsletter ════════════════════════════════════
+    with iv8:
+        st.markdown('<div class="section-title">📰 BHARAT MARKET COMPASS — Newsletter Studio</div>', unsafe_allow_html=True)
+        st.markdown("> Generate professional market intelligence reports for Telegram, Twitter, and Email.")
+        
+        col_n1, col_n2, col_n3 = st.columns(3)
+        with col_n1:
+            if st.button("☀️ DAILY REPORT", key="btn_n_daily", use_container_width=True):
+                with st.spinner("Generating Daily Intelligence..."):
+                    st.session_state["active_newsletter"] = invest_newsletter.generate_newsletter_content("DAILY")
+        with col_n2:
+            if st.button("📅 WEEKLY REVIEW", key="btn_n_weekly", use_container_width=True):
+                with st.spinner("Compiling Weekly Review..."):
+                    st.session_state["active_newsletter"] = invest_newsletter.generate_newsletter_content("WEEKLY")
+        with col_n3:
+            if st.button("🏆 MONTHLY OUTLOOK", key="btn_n_monthly", use_container_width=True):
+                with st.spinner("Architecting Monthly Outlook..."):
+                    st.session_state["active_newsletter"] = invest_newsletter.generate_newsletter_content("MONTHLY")
+                    
+        if "active_newsletter" in st.session_state:
+            news = st.session_state["active_newsletter"]
+            
+            st.divider()
+            st.markdown(f"### 📄 {news['type']} REPORT — {news['date']}")
+            
+            t_prev, t_code = st.tabs(["👁️ Preview (Premium)", "📜 Raw Text (Telegram)"])
+            
+            with t_prev:
+                st.markdown(news["html"], unsafe_allow_html=True)
+                
+            with t_code:
+                st.code(news["text"], language="markdown")
+                
+            st.divider()
+            c_d1, c_d2, c_d3 = st.columns(3)
+            with c_d1:
+                if st.button("📤 Send to Telegram", key="btn_n_tg"):
+                    from utils import send_telegram_msg
+                    # Split into chunks if needed
+                    chunk_size = 4000
+                    for i in range(0, len(news["text"]), chunk_size):
+                        send_telegram_msg(news["text"][i:i+chunk_size])
+                    st.toast("✅ Sent to Telegram!")
+            with c_d2:
+                # Create HTML download link
+                import base64
+                b64 = base64.b64encode(news["html"].encode()).decode()
+                href = f'<a href="data:text/html;base64,{b64}" download="BHARAT_REPORT_{news["type"]}.html" style="text-decoration:none;"><button style="width:100%; height:40px; border-radius:10px; background:#6366f1; color:white; border:none; cursor:pointer; font-weight:600;">📥 Download HTML</button></a>'
+                st.markdown(href, unsafe_allow_html=True)
+            with c_d3:
+                if st.button("🐦 Format for Twitter/X", key="btn_n_tw"):
+                    tw_text = news["text"].split("\n\n")[0] # Just first part
+                    st.info("Copy this for Twitter:")
+                    st.code(tw_text)
+                    st.toast("Snippet ready!")
 
     st.caption("BHARAT AlgoVerse v3.1 • RS LegoMaster • Built for Dr. Saab 🦺")
 
