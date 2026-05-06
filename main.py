@@ -127,7 +127,10 @@ def main():
     db.set_param('st_multiplier', '1.5')
     db.set_param('crypto_trade_size', '1')
     
-    log_terminal("Stable System 2.0 Started.", "START")
+    log_terminal("Stable System 2.1 - AUTO-HEAL ENABLED.", "START")
+    print("\n🚀 BHARAT ALGOVERSE v2.1 - AUTO-HEAL ENABLED 🚀")
+    print("🛡️ SCANNING FOR ORPHANED TRADES...")
+    delta_executor.reconcile_bracket_orders()
 
     last_pulse = 0
     
