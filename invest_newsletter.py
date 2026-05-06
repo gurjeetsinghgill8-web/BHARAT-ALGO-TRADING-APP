@@ -22,6 +22,7 @@ IST = pytz.timezone("Asia/Kolkata")
 SYSTEM_NAME = "BHARAT MARKET COMPASS"
 SYSTEM_ICON = "🧭"
 SYSTEM_TAGLINE = "India's Institutional-Grade Market Intelligence"
+SYSTEM_VERSION = "v3.1"
 
 def generate_newsletter_content(newsletter_type="DAILY"):
     """
