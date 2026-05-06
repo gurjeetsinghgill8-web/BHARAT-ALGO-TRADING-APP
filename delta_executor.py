@@ -517,25 +517,31 @@ def square_off_crypto(target_pid=None):
     if target_pid:
         pids_to_close = [str(target_pid)]
     else:
-        # AGGRESSIVE SEARCH: Fetch directly from Exchange to avoid DB Sync blindness
-        try:
-            path = "/v2/positions"
-            query = "?underlying_asset_symbol=BTC"
-            url = f"https://api.india.delta.exchange{path}{query}"
-            headers = get_delta_auth_headers("GET", path, query_string=query)
-            resp = requests.get(url, headers=headers, timeout=10)
-            
-            if resp.status_code == 200:
-                raw_data = resp.json().get('result', [])
-                for p in raw_data:
-                    size = abs(float(p.get('size', 0)))
-                    if size > 0:
-                        # FALLBACK MATRIX for IDs
-                        pid = str(p.get('product_id') or p.get('id') or p.get('pid') or "")
-                        if pid and pid not in pids_to_close:
-                            pids_to_close.append(pid)
-        except Exception as e:
-            log_crypto(f"Nuclear Search Error: {e}")
+        # AGGRESSIVE SEARCH: Fetch ALL positions directly from Exchange
+        # BUG FIX: query_string must be passed to signature AND to URL
+        for asset in ["BTC", "ETH"]:
+            try:
+                path = "/v2/positions"
+                query = f"?underlying_asset_symbol={asset}"
+                url = f"https://api.india.delta.exchange{path}{query}"
+                # CRITICAL FIX: pass query_string so signature is correct
+                headers = get_delta_auth_headers("GET", path, query_string=query)
+                resp = requests.get(url, headers=headers, timeout=10)
+                
+                if resp.status_code == 200:
+                    raw_data = resp.json().get('result', [])
+                    for p in raw_data:
+                        size = abs(float(p.get('size', 0)))
+                        if size > 0:
+                            pid = str(p.get('product_id') or p.get('id') or p.get('pid') or "")
+                            sym = p.get('symbol', '')
+                            if pid and pid not in pids_to_close:
+                                pids_to_close.append(pid)
+                                log_crypto(f"🔍 Found open position: {sym} | PID={pid} | Size={size}")
+                else:
+                    log_crypto(f"Position fetch failed for {asset}: HTTP {resp.status_code} - {resp.text[:100]}")
+            except Exception as e:
+                log_crypto(f"Nuclear Search Error ({asset}): {e}")
 
     if not pids_to_close:
         # Confirm Clean Slate in DB
@@ -550,9 +556,14 @@ def square_off_crypto(target_pid=None):
         log_terminal(f"🧨 BRUTE FORCE EXIT: PRODUCT_ID {pid}", "ALERT")
         if mode == "LIVE":
             try:
-                # Get current size for this specific PID
+                # Re-fetch exact current size for this PID
                 size = 0
-                r_pos = requests.get("https://api.india.delta.exchange/v2/positions", headers=get_delta_auth_headers("GET", "/v2/positions"), timeout=10)
+                query = "?underlying_asset_symbol=BTC"
+                r_pos = requests.get(
+                    f"https://api.india.delta.exchange/v2/positions{query}",
+                    headers=get_delta_auth_headers("GET", "/v2/positions", query_string=query),
+                    timeout=10
+                )
                 if r_pos.status_code == 200:
                     for p in r_pos.json().get('result', []):
                         this_pid = str(p.get('product_id') or p.get('id') or "")
@@ -560,39 +571,54 @@ def square_off_crypto(target_pid=None):
                             size = abs(float(p.get('size', 0)))
                             break
                 
-                if size == 0: continue 
-
-                # Fetch Mark Price for precise limit order
-                mark_price = 1.0 # Default fallback
-                try:
-                    r_pos = requests.get("https://api.india.delta.exchange/v2/positions", headers=get_delta_auth_headers("GET", "/v2/positions"), timeout=10)
-                    if r_pos.status_code == 200:
-                        for p in r_pos.json().get('result', []):
-                            if str(p.get('product_id') or p.get('id') or "") == pid:
-                                mark_price = float(p.get('mark_price') or p.get('avg_entry_price') or 1.0)
+                # Also try ETH if not found
+                if size == 0:
+                    query2 = "?underlying_asset_symbol=ETH"
+                    r_pos2 = requests.get(
+                        f"https://api.india.delta.exchange/v2/positions{query2}",
+                        headers=get_delta_auth_headers("GET", "/v2/positions", query_string=query2),
+                        timeout=10
+                    )
+                    if r_pos2.status_code == 200:
+                        for p in r_pos2.json().get('result', []):
+                            this_pid = str(p.get('product_id') or p.get('id') or "")
+                            if this_pid == pid:
+                                size = abs(float(p.get('size', 0)))
                                 break
-                except: pass
 
-                # Send Market Close Order (Simplified for Dr. Saab)
+                if size == 0:
+                    log_terminal(f"⚠️ Size=0 for {pid}, skipping.", "WARN")
+                    continue
+
+                # CRITICAL FIX: size must be INTEGER for Delta Exchange
                 payload_dict = {
                     "product_id": int(pid),
-                    "size": float(size),
+                    "size": int(size),  # Must be int, not float!
                     "side": "sell",
                     "order_type": "market_order",
                     "reduce_only": True
                 }
                 payload = json.dumps(payload_dict)
-                resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload), data=payload, timeout=10)
+                log_terminal(f"📤 Sending exit order: {payload_dict}", "INFO")
+                resp = requests.post(
+                    "https://api.india.delta.exchange/v2/orders",
+                    headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload),
+                    data=payload,
+                    timeout=10
+                )
                 
                 if resp.status_code in [200, 201]:
-                    log_terminal(f"✅ MARKET EXIT SUCCESS: {pid}", "TRADE")
+                    log_terminal(f"✅ MARKET EXIT SUCCESS: PRODUCT_ID {pid}", "TRADE")
+                    send_telegram_msg(f"✅ Position CLOSED successfully: PID {pid}")
                     db.set_param("local_trade_active", "NO")
+                    db.set_param("crypto_active_symbol", "NONE")
                 else:
-                    err_msg = resp.json().get('error', {}).get('message', 'Unknown Error')
-                    log_terminal(f"❌ EXIT FAILED: {err_msg}", "ERROR")
-                    send_telegram_msg(f"🚨 CRITICAL: Could not close {pid}! {err_msg}. Settle manually!")
+                    full_err = resp.text
+                    log_terminal(f"❌ EXIT FAILED ({resp.status_code}): {full_err}", "ERROR")
+                    send_telegram_msg(f"🚨 CRITICAL: Exit FAILED for {pid}! Error: {full_err[:200]}. Close manually on Delta app!")
             except Exception as e:
                 log_terminal(f"⚠️ EXIT EXCEPTION: {e}", "ERROR")
+                send_telegram_msg(f"🚨 EXIT EXCEPTION: {e}")
     
     return True
 
