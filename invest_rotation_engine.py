@@ -35,27 +35,31 @@ import invest_rs_engine as rs_engine
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ── Config V3 "BALANCED" (2026-05-06) ─────────────────
-# KEY LESSON: Too strict entry = miss bull runs = Nifty beats us badly
-# Rule: Stay IN the market. Cut losers. Ride winners long.
+# ── Config V3.4 (Dr. Saab's Rules — 2026-05-06) ────────────
+# RULE 1: Nifty gate = 40 only (sirf crash mein ruko, warna ALWAYS invest)
+# RULE 2: Sector RSI < 50 = instant exit (no mercy)
+# RULE 3: If no RS>1.05, enter best RS>1.0 (never stay cash long)
 RS_PERIOD         = 55      # Primary RS period (days)
-RS_ENTRY_MIN      = 1.05    # V3: Back to original — more market time is key
+RS_ENTRY_MIN      = 1.05    # Primary entry bar
+RS_ENTRY_FALLBACK = 1.00    # Fallback: if nothing > 1.05, enter best > 1.0
 RS_EXIT_BUFFER    = 0.95    # Exit when RS drops below this
-HARD_STOP_LOSS    = -0.10   # V3: -10% (wider; Indian market needs room to breathe)
-TRAIL_TRIGGER_1   = 0.20    # V3: Lock gains after +20%
-TRAIL_FLOOR_1     = 0.12    # V3: Floor at +12% once triggered
-TRAIL_TRIGGER_2   = 0.35    # V3: Raise floor after +35%
-TRAIL_FLOOR_2     = 0.22    # V3: Floor at +22%
-NIFTY_RSI_AGGR    = 50      # V3: Back to original — RSI > 50 = enter
-CONSISTENCY_WEEKS = 3       # V3: Light check only — 3 weeks (not 8!)
-MAX_SECTORS       = 3       # V3: Allow 3 sectors — more market coverage
-REENTRY_WIN_DAYS  = 28      # Re-entry wait after WINNING trade
-REENTRY_LOSS_DAYS = 42      # V3: 6 weeks after LOSING trade (moderate)
+SECTOR_RSI_EXIT   = 50      # NEW: Exit immediately if sector's own RSI < 50
+HARD_STOP_LOSS    = -0.10   # -10% max loss per trade
+TRAIL_TRIGGER_1   = 0.20    # Lock gains after +20%
+TRAIL_FLOOR_1     = 0.12    # Floor at +12%
+TRAIL_TRIGGER_2   = 0.35    # Raise floor after +35%
+TRAIL_FLOOR_2     = 0.22    # Floor at +22%
+NIFTY_RSI_AGGR    = 40      # V3.4: LOWERED to 40 — only crash = stay out
+CONSISTENCY_WEEKS = 0       # DISABLED — minimize cash time
+MAX_SECTORS       = 3       # 3 sectors max — more market coverage
+REENTRY_WIN_DAYS  = 21      # Faster re-entry after wins
+REENTRY_LOSS_DAYS = 35      # 5 weeks after losses
 STOCK_GRACE_DAYS  = 14      # Grace period for strong stocks on sector exit
 STEP_DAYS         = 7       # Backtest step size (weekly)
 STOCKS_PER_CAP    = 2       # Top N stocks per cap category
 # Backward compat
 REENTRY_DAYS      = REENTRY_WIN_DAYS
+
 
 
 # ════════════════════════════════════════════════════════════
@@ -147,31 +151,29 @@ def _calc_rsi_on(df: pd.DataFrame, ticker: str,
 # ════════════════════════════════════════════════════════════
 
 def get_market_mode_on(df: pd.DataFrame, target_date: pd.Timestamp) -> str:
-    """V2: AGGRESSIVE only if Nifty RSI > 55 (raised from 50)."""
+    """
+    V3.4: AGGRESSIVE unless Nifty RSI < 40 (severe crash only).
+    Dr. Saab rule: minimize cash time. Only crash = stay out.
+    """
     rsi = _calc_rsi_on(df, "^NSEI", target_date)
     if rsi is None:
-        return "AGGRESSIVE"
-    if rsi > NIFTY_RSI_AGGR:       # V2: 55 (was 50)
-        return "AGGRESSIVE"
-    elif rsi > 50:
-        return "CAUTIOUS"           # V2: new mode — hold but don't enter
-    else:
+        return "AGGRESSIVE"    # Unknown = stay in
+    if rsi < NIFTY_RSI_AGGR:   # RSI < 40 = true crash, protect capital
         return "DEFENSIVE"
+    return "AGGRESSIVE"        # 40-100 = always invest
 
 
-def check_rs_consistency(df: pd.DataFrame, ticker: str,
-                          target_date: pd.Timestamp,
-                          weeks: int = CONSISTENCY_WEEKS) -> bool:
+def _get_sector_rsi(df: pd.DataFrame, sector_name: str,
+                    target_date: pd.Timestamp) -> float | None:
     """
-    V2: Sector RS must be > 1.0 for N consecutive weeks before entry.
-    Prevents false breakouts from sectors that briefly cross RS 1.05.
+    Get the sector index's own RSI(14).
+    Dr. Saab rule: if sector RSI < 50 → EXIT immediately.
     """
-    for w in range(1, weeks + 1):
-        check_dt = target_date - timedelta(days=w * 7)
-        rs = _calc_rs_on(df, ticker, "^NSEI", check_dt)
-        if rs is None or rs < 1.0:
-            return False
-    return True
+    import invest_rs_engine as _rs
+    sec_ticker = _rs.SECTOR_INDICES.get(sector_name, "")
+    if not sec_ticker:
+        return None
+    return _calc_rsi_on(df, sec_ticker, target_date)
 
 
 
@@ -336,16 +338,25 @@ def run_rotation_backtest(
             elif avg_cur_return >= TRAIL_TRIGGER_1 and pos.get("trail_floor") is None:
                 active_positions[sec_name]["trail_floor"] = TRAIL_FLOOR_1
 
+            # ── Dr. Saab Rule: SECTOR's OWN RSI < 50 = INSTANT EXIT ──
+            sec_rsi = _get_sector_rsi(df, sec_name, step_dt)
+            sector_rsi_exit = (sec_rsi is not None and sec_rsi < SECTOR_RSI_EXIT)
+
             exit_triggered = (
                 hard_stop_triggered or
                 trail_stop_triggered or
+                sector_rsi_exit or
                 should_exit_sector(sec_info["rs"], sec_info["rank"])
             )
 
             if exit_triggered:
+                _hard = hard_stop_triggered
+                _trail = trail_stop_triggered
+                _srsi = sector_rsi_exit
                 exit_reason = (
-                    f"HARD STOP: {avg_cur_return*100:.1f}% <= {HARD_STOP_LOSS*100:.0f}%" if hard_stop_triggered else
-                    f"TRAIL STOP: locked {trail_floor*100:.0f}%, fell to {avg_cur_return*100:.1f}%" if trail_stop_triggered else
+                    f"HARD STOP: {avg_cur_return*100:.1f}% <= {HARD_STOP_LOSS*100:.0f}%" if _hard else
+                    f"SECTOR RSI {sec_rsi:.0f} < {SECTOR_RSI_EXIT} — momentum dying" if _srsi else
+                    f"TRAIL STOP: locked {trail_floor*100:.0f}%, now {avg_cur_return*100:.1f}%" if _trail else
                     f"RS exit: {sec_info['rs']:.3f} < {RS_EXIT_BUFFER}"
                 )
 
@@ -435,29 +446,41 @@ def run_rotation_backtest(
         for sec_name in sectors_to_exit:
             active_positions.pop(sec_name, None)
 
-        # ── 4. Enter new sectors if capacity available ───────
-        # V2: Only in AGGRESSIVE mode (not CAUTIOUS)
+        # ── 4. Enter new sectors (Dr. Saab: ALWAYS be in market!) ──
+        # Priority 1: RS > 1.05 (strong leaders)
+        # Priority 2: RS > 1.0 (fallback — never sit in cash unnecessarily)
         if market_mode == "AGGRESSIVE" and len(active_positions) < max_sectors:
-            free_slots        = max_sectors - len(active_positions)
-            capital_per_slot  = current_capital / max(max_sectors, 1)
-            active_names      = set(active_positions.keys())
+            free_slots       = max_sectors - len(active_positions)
+            capital_per_slot = current_capital / max(max_sectors, 1)
+            active_names     = set(active_positions.keys())
 
-            candidates = []
-            for s in sector_rankings:
+            def _eligible(s, min_rs):
                 if s["sector"] in active_names:
-                    continue
+                    return False
                 gap_needed = _gap_overrides.get(s["sector"], REENTRY_WIN_DAYS)
-                days_since_exit = (step_dt.date() - last_exit_dates.get(s["sector"], date(2000, 1, 1))).days
-                if days_since_exit < gap_needed:
-                    continue
-                # V2: Consistency check — RS must be > 1.0 for 8 consecutive weeks
-                sec_ticker   = rs_engine.SECTOR_INDICES.get(s["sector"], "")
-                consistent   = check_rs_consistency(df, sec_ticker, step_dt) if sec_ticker else True
-                if not should_enter_sector(s["rs"], s["rank"], market_mode, consistent):
-                    continue
-                candidates.append(s)
+                days_since = (step_dt.date() - last_exit_dates.get(s["sector"], date(2000, 1, 1))).days
+                if days_since < gap_needed:
+                    return False
+                if s["rs"] < min_rs or s["rank"] > 7:
+                    return False
+                # Quick sector RSI check — don't enter a sector already weakening
+                _srsi = _get_sector_rsi(df, s["sector"], step_dt)
+                if _srsi is not None and _srsi < SECTOR_RSI_EXIT:
+                    return False
+                return True
 
-            for candidate in candidates[:free_slots]:
+            # Priority 1: strong RS > 1.05
+            candidates = [s for s in sector_rankings if _eligible(s, RS_ENTRY_MIN)]
+
+            # Fallback: if still have free slots, take best RS > 1.0
+            # (Dr. Saab: never stay in cash — find something running)
+            if len(candidates) < free_slots:
+                fallback = [s for s in sector_rankings
+                            if _eligible(s, RS_ENTRY_FALLBACK)
+                            and s not in candidates]
+                candidates += fallback
+
+            for candidate in (candidates[:free_slots]):
                 stocks = pick_stocks_for_sector(df, candidate["sector"], step_dt)
                 if not stocks:
                     continue
@@ -467,11 +490,11 @@ def run_rotation_backtest(
                     "stocks":            stocks,
                     "capital_allocated": capital_per_slot,
                     "grace":             False,
-                    "trail_floor":       None,   # V2: trailing stop init
+                    "trail_floor":       None,
                 }
+                tag = "STRONG" if candidate["rs"] >= RS_ENTRY_MIN else "FALLBACK"
                 log_terminal(
-                    f"[ROTATION-V2] ENTER: {candidate['sector']} RS:{candidate['rs']:.3f} "
-                    f"| {len(stocks)} stocks | {market_mode} | consistent:yes",
+                    f"[V3.4 {tag}] ENTER: {candidate['sector']} RS:{candidate['rs']:.3f}",
                     "INFO"
                 )
 
