@@ -1,12 +1,10 @@
 """
-invest_fundamentals.py — BHARAT ALGOVERSE v3.1 | Fundamental Reason Engine
-============================================================================
-LEGO 6: Why is this sector running right now?
+invest_fundamentals.py — BHARAT ALGOVERSE v3.1 | Sector Intelligence Engine
+=============================================================================
+Internal module: sector thesis, catalysts, risks.
+Public name: used by BHARAT MARKET COMPASS reports.
 
-Rule-based mapping — no external API needed.
-Covers government policy, macro factors, sector tailwinds.
-Returns 4-5 bullet points per sector explaining the rally.
-
+Coverage: NSE + Defence + BSE (future)
 Updated: 2026 India context
 """
 
@@ -186,18 +184,42 @@ SECTOR_FUNDAMENTALS = {
         ],
         "risk": "China slowdown, US recession, or commodity supply surge from new projects.",
     },
+    "Nifty PSE": {
+        "short": "Public Sector Enterprises — government ownership premium",
+        "reasons": [
+            "\U0001f3db\ufe0f Government capex push — PSE companies winning large public orders",
+            "\U0001f4c8 Re-rating cycle — govt cos trading at historical discounts now closing",
+            "\U0001f4b0 Dividend yield > FD rates — making them attractive for income investors",
+            "\u2694\ufe0f Defence + infra + energy — PSEs at the heart of 3 mega government themes",
+            "\U0001f3c6 Institutional re-discovery — FIIs + DIIs both accumulating PSE basket",
+        ],
+        "risk": "Government policy shift, disinvestment uncertainty, or election-year subsidies.",
+    },
+    # ── DEFENCE (New 2026) ────────────────────────────────────
+    "Nifty Defence": {
+        "short": "India's defence sector in a multi-decade structural growth cycle",
+        "reasons": [
+            "\U0001f6e1\ufe0f Defence budget \u20b96.2 lakh crore FY26 — 74% reserved for domestic procurement (Make in India)",
+            "\u2708\ufe0f HAL order book \u20b91.35 lakh crore — 8 years revenue visibility: Tejas jets, helicopters, engines",
+            "\U0001f6f3\ufe0f Mazagon Dock + Cochin Shipyard — 6 submarines + 3 frigates under construction — naval boom",
+            "\U0001f30d Defence exports \u20b921,000 Cr (2024) — target \u20b950,000 Cr by 2029 — global suppliers notice India",
+            "\U0001f5fa\ufe0f Border security spending — LAC + LOC tensions = sustained multi-year equipment procurement",
+        ],
+        "risk": "Order delays, government budget cuts, or import substitution pace slower than expected.",
+    },
 }
 
 DEFAULT_FUNDAMENTALS = {
-    "short": "Sector showing momentum vs Nifty",
+    "short": "Sector outperforming broader market — institutional interest growing",
     "reasons": [
-        "📊 RS-55 above 1.0 — sector outperforming Nifty benchmark",
-        "📈 Price action strong — sector making higher highs vs Nifty",
-        "💹 Institutional interest — volume and participation rising",
-        "🔄 Earnings momentum — sector companies reporting better results",
+        "\U0001f4c8 Price action strong — sector making higher highs vs broader market",
+        "\U0001f4b9 Institutional interest rising — volume and participation increasing",
+        "\U0001f504 Earnings momentum — sector companies reporting better-than-expected results",
+        "\U0001f30d Global + domestic tailwinds both supporting this sector",
     ],
-    "risk": "Monitor RS weekly — exit when RS drops below 0.95.",
+    "risk": "Monitor weekly — exit if sector starts lagging the broader market.",
 }
+
 
 
 # ════════════════════════════════════════════════════════════
