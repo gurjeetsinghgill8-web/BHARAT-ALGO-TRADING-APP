@@ -105,9 +105,38 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
                         })
             return flat
         elif resp.status_code == 401:
-            log_terminal("[NIFTY] UPSTOX TOKEN EXPIRED. Please regenerate.", "ERROR")
-            send_telegram_msg("🔴 [NIFTY ERROR] UPSTOX TOKEN EXPIRED! Please generate a new access token and update it in the settings.")
-            return None
+            log_terminal("[NIFTY] UPSTOX TOKEN EXPIRED. Auto-Healing Started...", "ALERT")
+            send_telegram_msg("⚠️ [NIFTY AUTO-HEAL] Token expired! Triggering automated background login...")
+            try:
+                import auto_login_upstox
+                auto_login_upstox.run_auto_login()
+                
+                # Retry fetch with fresh token
+                resp = requests.get(url, headers=_headers(), params=params, timeout=10)
+                if resp.status_code == 200:
+                    send_telegram_msg("✅ [NIFTY AUTO-HEAL] Success! Token regenerated autonomously. Resuming trades.")
+                    data = resp.json().get('data', [])
+                    flat = []
+                    for strike in data:
+                        sp = float(strike.get('strike_price', 0))
+                        for opt_type, key in [('CE', 'call_options'), ('PE', 'put_options')]:
+                            opt = strike.get(key)
+                            if opt:
+                                flat.append({
+                                    'strike':       sp,
+                                    'type':         opt_type,
+                                    'ltp':          float(opt.get('market_data', {}).get('ltp', 0)),
+                                    'instrument':   opt.get('instrument_key', ''),
+                                    'expiry':       expiry,
+                                })
+                    return flat
+                else:
+                    send_telegram_msg(f"🔴 [NIFTY ERROR] Auto-Heal Failed! Upstox still returned {resp.status_code}. Check credentials.")
+                    return None
+            except Exception as auto_e:
+                log_terminal(f"[NIFTY] Auto-Heal Exception: {auto_e}", "ERROR")
+                send_telegram_msg(f"🔴 [NIFTY ERROR] Auto-Heal script crashed: {auto_e}")
+                return None
         else:
             log_terminal(f"[NIFTY] Option chain fetch failed: {resp.status_code} - {resp.text[:150]}", "ERROR")
             return None
