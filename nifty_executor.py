@@ -149,6 +149,7 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
                                     'type':         opt_type,
                                     'ltp':          float(opt.get('market_data', {}).get('ltp', 0)),
                                     'instrument':   opt.get('instrument_key', ''),
+                                    'symbol':       opt.get('trading_symbol', ''),
                                     'expiry':       expiry,
                                 })
                     return flat
@@ -168,8 +169,23 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
         return None
 
 
+def get_nifty_ltp(instrument_key: str) -> float:
+    """Fetches LTP for a specific instrument from Upstox."""
+    try:
+        url = f"{BASE_URL}/market-quote/quotes"
+        params = {"instrument_key": instrument_key}
+        resp = requests.get(url, headers=_headers(), params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json().get('data', {})
+            quote = data.get(instrument_key, {})
+            return float(quote.get('last_price', 0))
+        return 0.0
+    except Exception:
+        return 0.0
+
+
 # ============================================================
-# LEGO 7: Premium-Based Strike Picker (₹120 rule)
+# LEGO 7: Premium-Based Strike Picker (Rs.120 rule)
 # ============================================================
 def find_target_premium_option(direction: str, chain: list,
                                 target_premium: float = None) -> dict | None:
@@ -333,9 +349,12 @@ def execute_nifty_trade(direction: str) -> bool:
 
     success = place_nifty_order(best['instrument'], qty, side='BUY')
     if success:
+        readable_sym = f"NIFTY {best['strike']} {best['type']}"
         db.set_param('nifty_trade_active',  'YES')
-        db.set_param('nifty_active_symbol', best['instrument'])
+        db.set_param('nifty_active_symbol', readable_sym)
+        db.set_param('nifty_active_key',    best['instrument'])
         db.set_param('nifty_last_direction', direction)
         db.set_param('nifty_entry_premium', str(best['ltp']))
         db.set_param('nifty_expiry', expiry)
+        db.set_param('nifty_unrealized_pnl', '0.0')
     return success

@@ -47,44 +47,52 @@ def check_nifty_sl_tp():
     """
     if db.get_param('nifty_trade_active', 'NO') != 'YES':
         return
-    if db.get_param('nifty_trade_mode', 'PAPER') != 'LIVE':
-        return
-
+    is_live = db.get_param('nifty_trade_mode', 'PAPER') == 'LIVE'
     entry_prem = float(db.get_param('nifty_entry_premium', '0') or '0')
-    if entry_prem <= 0:
-        return
+    if entry_prem <= 0: return
 
     sl_pct = float(db.get_param('nifty_sl_percent', '30') or '30')
     tp_pct = float(db.get_param('nifty_tp_percent', '80') or '80')
 
-    positions = nifty_executor.get_nifty_positions()
-    if not positions:
-        # Position gone (expired or already closed)
-        db.set_param('nifty_trade_active', 'NO')
-        db.set_param('nifty_active_symbol', 'NONE')
-        return
-
-    for p in positions:
-        ltp = float(p.get('last_price', 0) or p.get('ltp', 0))
-        if ltp <= 0 or entry_prem <= 0:
-            continue
-
+    if is_live:
+        positions = nifty_executor.get_nifty_positions()
+        if not positions:
+            db.set_param('nifty_trade_active', 'NO')
+            db.set_param('nifty_active_symbol', 'NONE')
+            return
+        
+        # In LIVE mode, we trust the exchange LTP
+        for p in positions:
+            ltp = float(p.get('last_price', 0) or p.get('ltp', 0))
+            if ltp <= 0: continue
+            pnl_pct = ((ltp - entry_prem) / entry_prem) * 100
+            db.set_param('nifty_unrealized_pnl', str(pnl_pct))
+            
+            if pnl_pct <= -sl_pct:
+                log_terminal(f"🚨 NIFTY STOP LOSS HIT: {pnl_pct:.1f}% | Exiting...", "ALERT")
+                send_telegram_msg(f"🔴 NIFTY SL TRIGGERED | Loss: {pnl_pct:.1f}%")
+                nifty_executor.square_off_nifty_all()
+            elif pnl_pct >= tp_pct:
+                log_terminal(f"💰 NIFTY TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking...", "TRADE")
+                send_telegram_msg(f"✅ NIFTY TP HIT | Profit: {pnl_pct:.1f}% 🎯")
+                nifty_executor.square_off_nifty_all()
+    else:
+        # PAPER MODE: Fetch LTP for the tracked virtual key
+        v_key = db.get_param('nifty_active_key', '')
+        if not v_key: return
+        
+        ltp = nifty_executor.get_nifty_ltp(v_key)
+        if ltp <= 0: return
+        
         pnl_pct = ((ltp - entry_prem) / entry_prem) * 100
-
-        if pnl_pct <= -sl_pct:
-            log_terminal(f"🚨 NIFTY STOP LOSS HIT: {pnl_pct:.1f}% | Exiting...", "ALERT")
-            send_telegram_msg(f"🔴 NIFTY SL TRIGGERED | Loss: {pnl_pct:.1f}%")
-            nifty_executor.square_off_nifty_all()
-            return
-
-        if pnl_pct >= tp_pct:
-            log_terminal(f"💰 NIFTY TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking...", "TRADE")
-            send_telegram_msg(f"✅ NIFTY TP HIT | Profit: {pnl_pct:.1f}% 🎯")
-            nifty_executor.square_off_nifty_all()
-            return
-
-        # Update live PnL to DB for dashboard
         db.set_param('nifty_unrealized_pnl', str(pnl_pct))
+        
+        # In paper mode, we still check for SL/TP to auto-exit
+        if pnl_pct <= -sl_pct or pnl_pct >= tp_pct:
+            log_terminal(f"[NIFTY] PAPER {'SL' if pnl_pct < 0 else 'TP'} HIT: {pnl_pct:.1f}%", "TRADE")
+            db.set_param('nifty_trade_active', 'NO')
+            db.set_param('nifty_active_symbol', 'NONE')
+            send_telegram_msg(f"📝 NIFTY PAPER TRADE CLOSED | PnL: {pnl_pct:.1f}%")
 
 
 # ============================================================
