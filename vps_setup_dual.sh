@@ -9,6 +9,7 @@
 REPO_URL="https://github.com/gurjeetsinghgill8-web/BHARAT-ALGO-TRADING-APP.git"
 
 echo "💉 Starting Surgical Separation of Engines..."
+sudo apt-get update -q && sudo apt-get install -y -q python3-venv
 
 setup_instance() {
     FOLDER=$1
@@ -38,6 +39,7 @@ setup_instance() {
     fi
     source venv/bin/activate
     pip install -q --upgrade pip
+    pip install -q requests pandas  # Ensure core libs are first
     pip install -q -r requirements.txt
 
     # 2. Create Surgical config.py for this instance
