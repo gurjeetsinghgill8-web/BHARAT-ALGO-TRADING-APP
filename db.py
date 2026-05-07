@@ -38,9 +38,15 @@ def load_secrets():
     # secrets.txt key → DB key
     _key_map = {
         'telegram_token':      'telegram_bot_token',
-        'upstox_access_token': 'upstox_access_token',  # Nifty / Upstox
-        'upstox_token':        'upstox_access_token',  # alias
-        'upstox_api_token':    'upstox_access_token',  # alias
+        'upstox_access_token': 'upstox_access_token',  
+        'upstox_token':        'upstox_access_token',  
+        'upstox_api_token':    'upstox_access_token',
+        'upstox_phone':        'upstox_phone',
+        'upstox_pin':          'upstox_pin',
+        'upstox_totp_secret':  'upstox_totp_secret',
+        'upstox_api_key':      'upstox_api_key',
+        'upstox_api_secret':   'upstox_api_secret',
+        'upstox_redirect_uri': 'upstox_redirect_uri',
     }
 
     loaded = []

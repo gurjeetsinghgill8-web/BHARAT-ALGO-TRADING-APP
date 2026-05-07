@@ -104,13 +104,17 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
                             'expiry':       expiry,
                         })
             return flat
+        elif resp.status_code == 401:
+            log_terminal("[NIFTY] UPSTOX TOKEN EXPIRED. Please regenerate.", "ERROR")
+            send_telegram_msg("🔴 [NIFTY ERROR] UPSTOX TOKEN EXPIRED! Please generate a new access token and update it in the settings.")
+            return None
         else:
             log_terminal(f"[NIFTY] Option chain fetch failed: {resp.status_code} - {resp.text[:150]}", "ERROR")
-            return []
+            return None
 
     except Exception as e:
         log_terminal(f"[NIFTY] Option chain exception: {e}", "ERROR")
-        return []
+        return None
 
 
 # ============================================================
@@ -247,9 +251,13 @@ def execute_nifty_trade(direction: str) -> bool:
     symbol, _ = get_nifty_symbol()
     expiry = get_next_expiry(skip_current_week=True)
     chain  = fetch_nifty_option_chain(symbol=symbol, expiry=expiry)
+    
+    if chain is None:
+        return False # Error was already logged by fetch_nifty_option_chain
 
-    if not chain:
-        log_terminal(f"[NIFTY] Empty option chain for {expiry}.", "ERROR")
+    if len(chain) == 0:
+        log_terminal(f"[NIFTY] Empty option chain for {expiry}. Data might not be populated by Upstox yet.", "ERROR")
+        send_telegram_msg(f"⚠️ [NIFTY WARNING] Empty option chain for {expiry}. Market data unavailable right now.")
         return False
 
     best = find_target_premium_option(direction, chain)
