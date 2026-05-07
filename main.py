@@ -35,27 +35,35 @@ def run_janitor():
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
-    strategy_type = db.get_param("crypto_strategy", "OPTION_SELLING")
+    strategy_type = db.get_param("crypto_strategy", "OPTION_BUYING")
 
     if strategy_type == "OPTION_SELLING":
         if signal == "SELL" and put_active:
-            log_terminal("JANITOR FLIP: Closing PUT to prepare for SELL entry (Selling Strategy).", "ALERT")
+            msg = f"🔄 JANITOR FLIP (SELLING): Signal is {signal} but I was Selling PUT. Closing PUT to Sell CALL!"
+            log_terminal(msg, "ALERT")
             delta_executor.square_off_crypto()
         elif signal == "BUY" and call_active:
-            log_terminal("JANITOR FLIP: Closing CALL to prepare for BUY entry (Selling Strategy).", "ALERT")
+            msg = f"🔄 JANITOR FLIP (SELLING): Signal is {signal} but I was Selling CALL. Closing CALL to Sell PUT!"
+            log_terminal(msg, "ALERT")
             delta_executor.square_off_crypto()
     else:
         if signal == "SELL" and call_active:
-            log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry (Buying Strategy).", "ALERT")
+            msg = f"🔄 JANITOR FLIP: Market Signal is {signal} but I have a CALL. Closing CALL to flip to PUT!"
+            log_terminal(msg, "ALERT")
             delta_executor.square_off_crypto()
         elif signal == "BUY" and put_active:
-            log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry (Buying Strategy).", "ALERT")
+            msg = f"🔄 JANITOR FLIP: Market Signal is {signal} but I have a PUT. Closing PUT to flip to CALL!"
+            log_terminal(msg, "ALERT")
             delta_executor.square_off_crypto()
 
     # CASE: SIGNAL WAIT BUT ANYTHING OPEN
     if signal == "WAIT" and (call_active or put_active):
         log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
         delta_executor.square_off_crypto()
+
+    # --- AGGRESSIVE LOGGING (As requested by Dr. Saab) ---
+    active_side = "CALL" if call_active else ("PUT" if put_active else "NONE")
+    print(f"[JANITOR] Instance: {os.environ.get('BOT_INSTANCE')} | Strategy: {strategy_type} | Signal: {signal} | Active: {active_side}")
 
     # QUANTITY GUARD: Prevent over-trading
     try:

@@ -145,8 +145,8 @@ def get_supertrend_signal(asset="BTC", timeframe="5m"):
     if 'sar' not in df.columns:
         return "WAIT"
         
-    # 3. Check Signal on Closed Candle (iloc[-2])
-    latest = df.iloc[-2]
+    # 3. Check Signal on Live Candle (iloc[-1]) for immediate reaction
+    latest = df.iloc[-1]
     
     if latest['close'] > latest['sar']:
         return "BUY"
