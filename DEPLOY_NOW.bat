@@ -17,7 +17,7 @@ echo.
 echo [2/3] Connecting to VPS and deploying...
 echo (Password NOT needed if SETUP_PASSWORDLESS_LOGIN.bat was run once)
 echo.
-ssh -o StrictHostKeyChecking=no root@46.224.133.16 "cd ~ && [ -d BHARAT-ALGO-TRADING-APP ] && cd BHARAT-ALGO-TRADING-APP || mkdir -p BHARAT-ALGO-TRADING-APP && cd BHARAT-ALGO-TRADING-APP && git fetch --all && git reset --hard origin/main && git pull origin main && chmod +x vps_setup_dual.sh && bash vps_setup_dual.sh"
+ssh -o StrictHostKeyChecking=no root@46.224.133.16 "if [ ! -d BHARAT-ALGO-TRADING-APP ]; then git clone https://github.com/gurjeetsinghgill8-web/BHARAT-ALGO-TRADING-APP.git; fi; cd BHARAT-ALGO-TRADING-APP && git fetch --all && git reset --hard origin/main && git pull origin main && chmod +x vps_setup_dual.sh && bash vps_setup_dual.sh"
 
 echo.
 echo [3/3] Deployment Complete!
