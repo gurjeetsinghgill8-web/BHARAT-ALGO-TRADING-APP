@@ -23,21 +23,6 @@ BASE_URL = "https://api.upstox.com/v2"
 
 # ── Auth Header ────────────────────────────────────────────
 def _headers() -> dict:
-    token = ""
-    # 1. Surgical Bypass: Check manual token file first
-    try:
-        import os
-        if os.path.exists("access_token.txt"):
-            with open("access_token.txt", "r") as f:
-                token = f.read().strip()
-                if token: return {
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type":  "application/json",
-                    "Accept":        "application/json",
-                }
-    except: pass
-
-    # 2. Fallback to DB
     token = db.get_param('upstox_access_token', '')
     return {
         "Authorization": f"Bearer {token}",
@@ -58,67 +43,52 @@ def _headers() -> dict:
 # DB key: nifty_expiry_weekday  (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri)
 # Default: 1 (Tuesday) — per Dr. Saab config
 # ============================================================
-def get_nifty_symbol():
-    inst = db.get_param('nifty_instrument', '^NSEI')
-    if inst == '^NSEI': return "NSE_INDEX|Nifty 50", 3       # Thursday
-    if inst == '^NSEBANK': return "NSE_INDEX|Nifty Bank", 2    # Wednesday
-    if inst == '^CNXFIN': return "NSE_INDEX|Nifty Fin Service", 1 # Tuesday
-    if inst == 'NIFTY_MID_SELECT': return "NSE_INDEX|Nifty Midcap Select", 0 # Monday
-    return "NSE_INDEX|Nifty 50", 3
+_WEEKDAY_NAMES = {
+    '0': 'Monday', '1': 'Tuesday', '2': 'Wednesday',
+    '3': 'Thursday', '4': 'Friday'
+}
 
-def get_next_expiry(skip_current_week=True):
+def get_next_expiry(skip_current_week: bool = True) -> str:
     """
-    Dynamically fetches the exact available expiry dates from Upstox API 
-    instead of relying on hardcoded weekdays (since NSE often changes them).
+    Returns the next expiry date as YYYY-MM-DD.
+    Expiry weekday is read from DB key 'nifty_expiry_weekday' (0-4).
+    Default = 1 (Tuesday) for FinNifty/custom setup.
+    skip_current_week=True: Always goes to NEXT week (safer, avoids theta)
     """
-    symbol, _ = get_nifty_symbol()
-    url = f"{BASE_URL}/option/contract"
-    params = {'instrument_key': symbol}
-    
-    try:
-        resp = requests.get(url, headers=_headers(), params=params, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json().get('data', [])
-            # Extract all unique expiry dates
-            expiries = sorted(list(set(d.get('expiry') for d in data if d.get('expiry'))))
-            
-            if not expiries:
-                log_terminal(f"[NIFTY] No expiry dates found for {symbol}", "ERROR")
-                return "2026-05-14" # Fallback
-                
-            today = datetime.now().strftime('%Y-%m-%d')
-            
-            # Filter out past dates
-            future_expiries = [e for e in expiries if e >= today]
-            
-            if not future_expiries:
-                return expiries[-1]
-                
-            if skip_current_week and len(future_expiries) > 1:
-                return future_expiries[1]
-            return future_expiries[0]
-            
-    except Exception as e:
-        log_terminal(f"[NIFTY] Expiry fetch exception: {e}", "ERROR")
-        
-    return "2026-05-14" # Fallback
+    expiry_wd = int(db.get_param('nifty_expiry_weekday', '1') or '1')  # 1 = Tuesday
+    today     = date.today()
 
+    # Find this week's expiry day
+    days_ahead = (expiry_wd - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7   # same day = go to next week's same day
+    this_expiry = today + timedelta(days=days_ahead)
+
+    if skip_current_week:
+        # Always use NEXT week's expiry
+        next_expiry = this_expiry + timedelta(weeks=1)
+        return next_expiry.strftime('%Y-%m-%d')
+    else:
+        return this_expiry.strftime('%Y-%m-%d')
+
+
+# Keep backward-compatible alias
 def get_next_week_thursday() -> str:
+    """Legacy alias — now reads from DB expiry_weekday setting."""
     return get_next_expiry(skip_current_week=True)
 
 
 # ============================================================
 # LEGO 6: Fetch Nifty Option Chain (Upstox)
 # ============================================================
-def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
+def fetch_nifty_option_chain(symbol: str = "NSE_INDEX|Nifty 50",
+                              expiry: str = None) -> list:
     """
     Fetches Nifty option chain from Upstox v2 API.
     Returns flat list of option contracts.
     """
-    if symbol is None:
-        symbol, _ = get_nifty_symbol()
     if expiry is None:
-        expiry = get_next_expiry(skip_current_week=True)
+        expiry = get_next_week_thursday()
 
     try:
         url    = f"{BASE_URL}/option/chain"
@@ -141,36 +111,17 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
                             'expiry':       expiry,
                         })
             return flat
-        elif resp.status_code in [401, 403]:
-            log_terminal(f"[NIFTY] UPSTOX AUTH FAILURE ({resp.status_code}). Manual Token Required.", "ALERT")
-            send_telegram_msg("🔴 [NIFTY AUTH ERROR] Token expired or invalid. Please visit the Dashboard to generate a new token manually.")
-            return None
         else:
             log_terminal(f"[NIFTY] Option chain fetch failed: {resp.status_code} - {resp.text[:150]}", "ERROR")
-            return None
+            return []
 
     except Exception as e:
         log_terminal(f"[NIFTY] Option chain exception: {e}", "ERROR")
-        return None
-
-
-def get_nifty_ltp(instrument_key: str) -> float:
-    """Fetches LTP for a specific instrument from Upstox."""
-    try:
-        url = f"{BASE_URL}/market-quote/quotes"
-        params = {"instrument_key": instrument_key}
-        resp = requests.get(url, headers=_headers(), params=params, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json().get('data', {})
-            quote = data.get(instrument_key, {})
-            return float(quote.get('last_price', 0))
-        return 0.0
-    except Exception:
-        return 0.0
+        return []
 
 
 # ============================================================
-# LEGO 7: Premium-Based Strike Picker (Rs.120 rule)
+# LEGO 7: Premium-Based Strike Picker (₹120 rule)
 # ============================================================
 def find_target_premium_option(direction: str, chain: list,
                                 target_premium: float = None) -> dict | None:
@@ -199,7 +150,7 @@ def place_nifty_order(instrument_key: str, qty: int, side: str = 'BUY') -> bool:
     """
     Places market order on Upstox.
     side: 'BUY' or 'SELL'
-    qty: number of lots × lot size (default Nifty lot = 65)
+    qty: number of lots × lot size (default Nifty lot = 25)
     """
     mode = db.get_param('nifty_trade_mode', 'PAPER') or 'PAPER'
     if mode != 'LIVE':
@@ -226,12 +177,12 @@ def place_nifty_order(instrument_key: str, qty: int, side: str = 'BUY') -> bool:
 
         if resp.status_code in [200, 201]:
             order_id = resp.json().get('data', {}).get('order_id', 'N/A')
-            log_terminal(f"[NIFTY] Order placed: {side} {qty}x{instrument_key} | OrderID={order_id}", "TRADE")
-            send_telegram_msg(f"NIFTY ORDER PLACED\n{side} {qty} x {instrument_key}\nOrderID: {order_id}")
+            log_terminal(f"[NIFTY] ✅ Order placed: {side} {qty}×{instrument_key} | OrderID={order_id}", "TRADE")
+            send_telegram_msg(f"🟢 NIFTY ORDER PLACED\n{side} {qty} × {instrument_key}\nOrderID: {order_id}")
             return True
         else:
-            log_terminal(f"[NIFTY] Order failed: {resp.status_code} - {resp.text[:200]}", "ERROR")
-            send_telegram_msg(f"NIFTY ORDER FAILED\n{resp.text[:200]}")
+            log_terminal(f"[NIFTY] ❌ Order failed: {resp.status_code} - {resp.text[:200]}", "ERROR")
+            send_telegram_msg(f"🔴 NIFTY ORDER FAILED\n{resp.text[:200]}")
             return False
 
     except Exception as e:
@@ -300,16 +251,11 @@ def execute_nifty_trade(direction: str) -> bool:
         log_terminal("[NIFTY] Trade already active. Holding.", "INFO")
         return False
 
-    symbol, _ = get_nifty_symbol()
     expiry = get_next_expiry(skip_current_week=True)
-    chain  = fetch_nifty_option_chain(symbol=symbol, expiry=expiry)
-    
-    if chain is None:
-        return False # Error was already logged by fetch_nifty_option_chain
+    chain  = fetch_nifty_option_chain(expiry=expiry)
 
-    if len(chain) == 0:
-        log_terminal(f"[NIFTY] Empty option chain for {expiry}. Data might not be populated by Upstox yet.", "ERROR")
-        send_telegram_msg(f"⚠️ [NIFTY WARNING] Empty option chain for {expiry}. Market data unavailable right now.")
+    if not chain:
+        log_terminal(f"[NIFTY] Empty option chain for {expiry}.", "ERROR")
         return False
 
     best = find_target_premium_option(direction, chain)
@@ -318,29 +264,25 @@ def execute_nifty_trade(direction: str) -> bool:
         return False
 
     lots     = int(db.get_param('nifty_lots', '1') or '1')
-    import config
-    lot_size = getattr(config, 'NIFTY_LOT_SIZE', 65)  # DR. SAAB FIX: Strictly 65 (Effective 2026).
+    lot_size = int(db.get_param('nifty_lot_size', '25') or '25')  # Nifty lot = 25
     qty      = lots * lot_size
 
     log_terminal(
         f"[NIFTY] Executing {direction}: {best['type']} strike={best['strike']} "
-        f"ltp=Rs.{best['ltp']:.1f} expiry={expiry} qty={qty}", "TRADE"
+        f"ltp=₹{best['ltp']:.1f} expiry={expiry} qty={qty}", "TRADE"
     )
     send_telegram_msg(
         f"🎯 NIFTY SIGNAL: {direction}\n"
         f"Strike: {best['strike']} {best['type']}\n"
-        f"Premium: Rs.{best['ltp']:.1f} | Expiry: {expiry}\n"
+        f"Premium: ₹{best['ltp']:.1f} | Expiry: {expiry}\n"
         f"Lots: {lots} × {lot_size} = {qty} units"
     )
 
     success = place_nifty_order(best['instrument'], qty, side='BUY')
     if success:
-        readable_sym = f"NIFTY {best['strike']} {best['type']}"
         db.set_param('nifty_trade_active',  'YES')
-        db.set_param('nifty_active_symbol', readable_sym)
-        db.set_param('nifty_active_key',    best['instrument'])
+        db.set_param('nifty_active_symbol', best['instrument'])
         db.set_param('nifty_last_direction', direction)
         db.set_param('nifty_entry_premium', str(best['ltp']))
         db.set_param('nifty_expiry', expiry)
-        db.set_param('nifty_unrealized_pnl', '0.0')
     return success

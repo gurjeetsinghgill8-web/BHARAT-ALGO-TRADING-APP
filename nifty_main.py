@@ -27,12 +27,10 @@ import nifty_executor
 # ============================================================
 # SINGLETON LOCK (won't conflict with crypto bot port 47200)
 # ============================================================
-LOCK_PORT = 47201
-
 def _acquire_lock():
     lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        lock.bind(('127.0.0.1', LOCK_PORT))
+        lock.bind(('127.0.0.1', 47201))
         return lock
     except socket.error:
         print("🚨 NIFTY BOT ALREADY RUNNING. EXITING.")
@@ -49,52 +47,44 @@ def check_nifty_sl_tp():
     """
     if db.get_param('nifty_trade_active', 'NO') != 'YES':
         return
-    is_live = db.get_param('nifty_trade_mode', 'PAPER') == 'LIVE'
+    if db.get_param('nifty_trade_mode', 'PAPER') != 'LIVE':
+        return
+
     entry_prem = float(db.get_param('nifty_entry_premium', '0') or '0')
-    if entry_prem <= 0: return
+    if entry_prem <= 0:
+        return
 
     sl_pct = float(db.get_param('nifty_sl_percent', '30') or '30')
     tp_pct = float(db.get_param('nifty_tp_percent', '80') or '80')
 
-    if is_live:
-        positions = nifty_executor.get_nifty_positions()
-        if not positions:
-            db.set_param('nifty_trade_active', 'NO')
-            db.set_param('nifty_active_symbol', 'NONE')
-            return
-        
-        # In LIVE mode, we trust the exchange LTP
-        for p in positions:
-            ltp = float(p.get('last_price', 0) or p.get('ltp', 0))
-            if ltp <= 0: continue
-            pnl_pct = ((ltp - entry_prem) / entry_prem) * 100
-            db.set_param('nifty_unrealized_pnl', str(pnl_pct))
-            
-            if pnl_pct <= -sl_pct:
-                log_terminal(f"🚨 NIFTY STOP LOSS HIT: {pnl_pct:.1f}% | Exiting...", "ALERT")
-                send_telegram_msg(f"🔴 NIFTY SL TRIGGERED | Loss: {pnl_pct:.1f}%")
-                nifty_executor.square_off_nifty_all()
-            elif pnl_pct >= tp_pct:
-                log_terminal(f"💰 NIFTY TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking...", "TRADE")
-                send_telegram_msg(f"✅ NIFTY TP HIT | Profit: {pnl_pct:.1f}% 🎯")
-                nifty_executor.square_off_nifty_all()
-    else:
-        # PAPER MODE: Fetch LTP for the tracked virtual key
-        v_key = db.get_param('nifty_active_key', '')
-        if not v_key: return
-        
-        ltp = nifty_executor.get_nifty_ltp(v_key)
-        if ltp <= 0: return
-        
+    positions = nifty_executor.get_nifty_positions()
+    if not positions:
+        # Position gone (expired or already closed)
+        db.set_param('nifty_trade_active', 'NO')
+        db.set_param('nifty_active_symbol', 'NONE')
+        return
+
+    for p in positions:
+        ltp = float(p.get('last_price', 0) or p.get('ltp', 0))
+        if ltp <= 0 or entry_prem <= 0:
+            continue
+
         pnl_pct = ((ltp - entry_prem) / entry_prem) * 100
+
+        if pnl_pct <= -sl_pct:
+            log_terminal(f"🚨 NIFTY STOP LOSS HIT: {pnl_pct:.1f}% | Exiting...", "ALERT")
+            send_telegram_msg(f"🔴 NIFTY SL TRIGGERED | Loss: {pnl_pct:.1f}%")
+            nifty_executor.square_off_nifty_all()
+            return
+
+        if pnl_pct >= tp_pct:
+            log_terminal(f"💰 NIFTY TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking...", "TRADE")
+            send_telegram_msg(f"✅ NIFTY TP HIT | Profit: {pnl_pct:.1f}% 🎯")
+            nifty_executor.square_off_nifty_all()
+            return
+
+        # Update live PnL to DB for dashboard
         db.set_param('nifty_unrealized_pnl', str(pnl_pct))
-        
-        # In paper mode, we still check for SL/TP to auto-exit
-        if pnl_pct <= -sl_pct or pnl_pct >= tp_pct:
-            log_terminal(f"[NIFTY] PAPER {'SL' if pnl_pct < 0 else 'TP'} HIT: {pnl_pct:.1f}%", "TRADE")
-            db.set_param('nifty_trade_active', 'NO')
-            db.set_param('nifty_active_symbol', 'NONE')
-            send_telegram_msg(f"📝 NIFTY PAPER TRADE CLOSED | PnL: {pnl_pct:.1f}%")
 
 
 # ============================================================
@@ -161,13 +151,13 @@ def main():
     lock = _acquire_lock()
 
     print("=" * 60)
-    print("     BHARAT ALGOVERSE v3.0 - NIFTY MODULE STARTED   ")
+    print("   📈 BHARAT ALGOVERSE v3.0 — NIFTY MODULE STARTED   ")
     print("=" * 60)
-    print("  [+] Market Window: 9:25 AM - 3:10 PM IST")
-    print("  [+] Strategy: Positional Options (Next-Week Expiry)")
-    print("  [+] Strike Rule: Nearest Rs.120 premium")
-    print("  [+] Supertrend: Multi-TF | Multi-Setting")
-    print("  [+] SAR Flip: Auto-exit & re-enter on signal flip")
+    print("  ✅ Market Window: 9:25 AM – 3:10 PM IST")
+    print("  ✅ Strategy: Positional Options (Next-Week Expiry)")
+    print("  ✅ Strike Rule: Nearest ₹120 premium")
+    print("  ✅ Supertrend: Multi-TF | Multi-Setting")
+    print("  ✅ SAR Flip: Auto-exit & re-enter on signal flip")
     print("=" * 60)
 
     # ── Load secrets (Upstox token + Telegram) ──────────────
@@ -182,7 +172,7 @@ def main():
         'nifty_st_period':       '10',
         'nifty_st_multiplier':   '1.5',
         'nifty_lots':            '1',
-        'nifty_lot_size':        '65',
+        'nifty_lot_size':        '25',
         'nifty_target_premium':  '120',
         'nifty_sl_percent':      '30',
         'nifty_tp_percent':      '80',

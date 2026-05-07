@@ -31,7 +31,6 @@ IST = pytz.timezone("Asia/Kolkata")
 # NSE SECTOR INDEX MAP  (yfinance tickers)
 # ============================================================
 SECTOR_INDICES = {
-    # ── NSE Nifty Sectors ──────────────────────────────────
     "Nifty Auto":       "^CNXAUTO",
     "Nifty Bank":       "^NSEBANK",
     "Nifty IT":         "^CNXIT",
@@ -52,24 +51,6 @@ SECTOR_INDICES = {
     "Nifty Consumption":"^CNXCONSUMPTION",
     "Nifty Finance":    "^CNXFINANCE",
     "Nifty CPSE":       "^CNXCPSE",
-    # ── Defence (New) ──────────────────────────────────────
-    "Nifty Defence":    "^CNXDEFENCE",   # Nifty India Defence Index
-}
-
-# ── BSE Sensex Sectors (separate report — deeper coverage) ──
-BSE_SECTOR_INDICES = {
-    "BSE Auto":          "^BSEAUTO",
-    "BSE Bankex":        "^SPIBANKEX",
-    "BSE IT":            "^BSEIT",
-    "BSE Healthcare":    "^BSEHC",
-    "BSE FMCG":          "^BSEFMCG",
-    "BSE Metal":         "^BSEMETAL",
-    "BSE Realty":        "^BSEREALTY",
-    "BSE Oil & Gas":     "^BSEOILGAS",
-    "BSE Power":         "^BSEPOWER",
-    "BSE Capital Goods": "^BSECG",
-    "BSE Consumer Dur":  "^BSECD",
-    "BSE Telecom":       "^BSETECK",
 }
 
 # ============================================================
@@ -123,33 +104,22 @@ SECTOR_STOCKS = {
     "Nifty Infra":   [
         ("LT.NS","Large"), ("ADANIPORTS.NS","Large"), ("IRFC.NS","Large"),
         ("RVNL.NS","Mid"), ("IRCON.NS","Mid"), ("NBCC.NS","Mid"),
-        ("KEC.NS","Mid"), ("KPIL.NS","Small"),
+        ("KEC.NS","Mid"), ("KALPATPOWR.NS","Small"),
     ],
     "Nifty Finance": [
         ("BAJFINANCE.NS","Large"), ("BAJAJFINSV.NS","Large"), ("HDFCAMC.NS","Large"),
-        ("LICHSGFIN.NS","Large"), ("MUTHOOTFIN.NS","Mid"), ("CHOLAFIN.NS","Mid"),
+        ("LICIHSGFIN.NS","Large"), ("MUTHOOTFIN.NS","Mid"), ("CHOLAFIN.NS","Mid"),
         ("M&MFIN.NS","Mid"),
     ],
     "Nifty Media":   [
         ("ZEEL.NS","Mid"), ("SUNTV.NS","Mid"), ("NETWORK18.NS","Mid"),
-        ("PVRINOX.NS","Small"),
+        ("PVR.NS","Small"), ("INOXLEISUR.NS","Small"),
     ],
-    "Nifty Midcap 100":  [
+    "Nifty Midcap 100":[
         ("CAMS.NS","Mid"), ("ANGELONE.NS","Mid"), ("POLICYBZR.NS","Mid"),
         ("PAYTM.NS","Mid"), ("NYKAA.NS","Mid"),
     ],
-    # ── Defence (New) ──────────────────────────────────────
-    "Nifty Defence":    [
-        ("HAL.NS","Large"),        # Hindustan Aeronautics — aircraft + engines
-        ("BEL.NS","Large"),        # Bharat Electronics — radar, defence systems
-        ("BEML.NS","Mid"),         # BEML — mining + defence vehicles
-        ("COCHINSHIP.NS","Mid"),   # Cochin Shipyard — naval vessels
-        ("MAZDOCK.NS","Mid"),      # Mazagon Dock — submarine builder
-        ("MTAR.NS","Small"),       # MTAR Technologies — defence components
-        ("PARAS.NS","Small"),      # Paras Defence — space & defence optics
-    ],
 }
-
 
 NIFTY_TICKER = "^NSEI"
 RS_PERIOD    = 55   # Primary RS period (days)

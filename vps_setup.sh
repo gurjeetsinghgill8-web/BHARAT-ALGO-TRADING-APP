@@ -38,7 +38,7 @@ sudo ufw allow 8502/tcp 2>/dev/null || true
 # ── 5. Create systemd service: Dashboard ────────────────
 cat > /etc/systemd/system/bharat_dashboard.service << 'EOF'
 [Unit]
-Description=Bharat AlgoVerse Dashboard v3.0
+Description=Bharat AlgoVerse Dashboard Master v3.0
 After=network.target
 
 [Service]
@@ -52,35 +52,16 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-# ── 6. Create systemd service: Buying Engine ────────────
+# ── 6. Create systemd service: Crypto Engine ────────────
 cat > /etc/systemd/system/bharat_engine.service << 'EOF'
 [Unit]
-Description=Bharat AlgoVerse Buying Engine v3.0
+Description=Bharat AlgoVerse Crypto Engine v3.0
 After=network.target
 
 [Service]
 User=root
-Environment=BOT_INSTANCE=BUYING
 WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
-ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 main_buying.py
-Restart=always
-RestartSec=15
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# ── 6b. Create systemd service: Selling Engine ───────────
-cat > /etc/systemd/system/bharat_selling_engine.service << 'EOF'
-[Unit]
-Description=Bharat AlgoVerse Selling Engine v3.0
-After=network.target
-
-[Service]
-User=root
-Environment=BOT_INSTANCE=SELLING
-WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
-ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 main_selling.py
+ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 main.py
 Restart=always
 RestartSec=15
 
@@ -122,48 +103,31 @@ RestartSec=30
 WantedBy=multi-user.target
 EOF
 
-# ── 8b. Create systemd service: Selling Dashboard ────────
-cat > /etc/systemd/system/bharat_selling_dashboard.service << 'EOF'
-[Unit]
-Description=Bharat AlgoVerse Selling Dashboard v3.0
-After=network.target
-
-[Service]
-User=root
-Environment=BOT_INSTANCE=SELLING
-WorkingDirectory=/root/BHARAT-ALGO-TRADING-APP
-ExecStart=/root/BHARAT-ALGO-TRADING-APP/venv/bin/python3 -m streamlit run app_selling.py --server.port 8502 --server.address 0.0.0.0
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 # ── 9. Reload + Enable + Start all services ─────────────
+# First, stop and disable the legacy dual-island services
+sudo systemctl stop bharat_selling_dashboard bharat_selling_engine 2>/dev/null || true
+sudo systemctl disable bharat_selling_dashboard bharat_selling_engine 2>/dev/null || true
+sudo rm -f /etc/systemd/system/bharat_selling_dashboard.service
+sudo rm -f /etc/systemd/system/bharat_selling_engine.service
+
 sudo systemctl daemon-reload
 
 sudo systemctl enable  bharat_dashboard
-sudo systemctl enable  bharat_selling_dashboard
 sudo systemctl enable  bharat_engine
-sudo systemctl enable  bharat_selling_engine
+sudo systemctl enable  bharat_nifty
 sudo systemctl enable  bharat_invest
 
 sudo systemctl restart bharat_dashboard
-sudo systemctl restart bharat_selling_dashboard
 sudo systemctl restart bharat_engine
-sudo systemctl restart bharat_selling_engine
-sudo systemctl stop bharat_nifty || true
+sudo systemctl restart bharat_nifty
 sudo systemctl restart bharat_invest
 
 echo "===================================================="
-echo "  AUTO-HEAL COMPLETE! System is now LIVE."
+echo "  AUTO-HEAL COMPLETE! Unified System is now LIVE."
 echo ""
-echo "  Buying Dashboard : http://46.224.133.16:8501"
-echo "  Selling Dashboard: http://46.224.133.16:8502"
+echo "  Master Dashboard : http://46.224.133.16:8501"
 echo ""
-echo "  Buying Bot Status : systemctl status bharat_engine"
-echo "  Selling Bot Status: systemctl status bharat_selling_engine"
+echo "  Crypto Bot Status : systemctl status bharat_engine"
 echo "  Nifty Bot Status  : systemctl status bharat_nifty"
 echo "  Invest Bot Status : systemctl status bharat_invest"
 echo ""
@@ -171,3 +135,4 @@ echo "  IMPORTANT: If secrets.txt is missing on VPS,"
 echo "  create it manually:"
 echo "    nano /root/BHARAT-ALGO-TRADING-APP/secrets.txt"
 echo "===================================================="
+
