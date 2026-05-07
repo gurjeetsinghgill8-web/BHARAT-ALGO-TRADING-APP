@@ -1,21 +1,17 @@
-# --- BHARAT ALGOVERSE v3.0 | SINGLE BOT CONFIGURATION ---
-# STRICT RULE: Pure Option Buying | 5-Minute Timeframe | 6 Lots
+# --- BHARAT ALGOVERSE v3.0 | STABLE V3 CONFIGURATION ---
+# RESTORED MASTER VERSION: Pure Option Buying | 5-Minute | 6 Lots
 
 STRATEGY_MODE = "BUYING"
 TIMEFRAME = "5m"
-STABLE_CANDLE_ONLY = True  # Always use iloc[-2] for stability
+STABLE_CANDLE_ONLY = True 
 
-# LOT SETTINGS
-CRYPTO_LOT_SIZE = 6        # Strict 6 Lots Rule
+# MASTER LOT SETTINGS (Dr. Saab's Strict Rule)
+CRYPTO_LOT_SIZE = 6
 
-# DATABASE SETTINGS
+# DATABASE & UI
 DB_NAME = "buying.db"
-
-# UI & PORT SETTINGS
 PORT = 8501
-
-# NOTIFICATION SETTINGS
-TELEGRAM_PREFIX = "🚀 [BHARAT PRO 5M]"
+TELEGRAM_PREFIX = "🚀 [BHARAT V3 STABLE]"
 
 # LOGGING
 LOG_FILE = "buying_trades.log"

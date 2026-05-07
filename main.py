@@ -5,10 +5,12 @@ import pandas as pd
 import db
 import logic
 import delta_executor
+import crypto_roller
 import os
 import sys
 import socket
 import traceback
+import json
 import config
 from utils import log_terminal, send_telegram_msg
 
@@ -19,13 +21,13 @@ def allowed_gai_family():
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
 # ============================================================
-# JANITOR: Syncs reality, enforces Clean Slate
+# JANITOR: Syncs reality, enforces Clean Slate, guards quantity
 # ============================================================
 def run_janitor():
     # 1. Sync Reality from Exchange
     delta_executor.sync_delta_position()
 
-    # 2. Get Current Signal (from iloc[-2] for stability)
+    # 2. Get Current Signal (from configured timeframe)
     asset = "BTC"
     timeframe = config.TIMEFRAME
     signal = logic.get_supertrend_signal(asset, timeframe=timeframe)
@@ -35,12 +37,19 @@ def run_janitor():
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
 
-    # JANITOR FLIP RULE: If signal flips, close current trade
+    # CASE: SIGNAL SELL BUT CALL OPEN
     if signal == "SELL" and call_active:
-        log_terminal(f"🔄 JANITOR FLIP: Signal {signal} but have CALL. Closing CALL!", "ALERT")
+        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
         delta_executor.square_off_crypto()
+
+    # CASE: SIGNAL BUY BUT PUT OPEN
     elif signal == "BUY" and put_active:
-        log_terminal(f"🔄 JANITOR FLIP: Signal {signal} but have PUT. Closing PUT!", "ALERT")
+        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
+        delta_executor.square_off_crypto()
+
+    # CASE: SIGNAL WAIT BUT ANYTHING OPEN
+    elif signal == "WAIT" and (call_active or put_active):
+        log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
         delta_executor.square_off_crypto()
 
     # ZOMBIE LOCK RECOVERY
@@ -48,7 +57,7 @@ def run_janitor():
         db.set_param("local_trade_active", "NO")
 
 # ============================================================
-# SL/TP MONITOR (40% SL | 100% TP)
+# IN-CODE SL/TP MONITOR  (40% SL | 100% TP)
 # ============================================================
 def check_sl_tp():
     mode = db.get_param('trade_mode', 'PAPER')
@@ -85,59 +94,82 @@ def check_sl_tp():
                     log_terminal(f"🚨 STOP LOSS HIT: {pnl_pct:.1f}% | Exiting {symbol}...", "ALERT")
                     send_telegram_msg(f"🔴 STOP LOSS TRIGGERED: {symbol} | Loss: {pnl_pct:.1f}%")
                     delta_executor.square_off_crypto(target_pid=pid)
+                    return
 
                 # --- TAKE PROFIT HIT ---
                 if pnl_pct >= tp_pct:
                     log_terminal(f"💰 TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking {symbol}...", "TRADE")
                     send_telegram_msg(f"✅ TAKE PROFIT HIT: {symbol} | Profit: {pnl_pct:.1f}% 🎯")
                     delta_executor.square_off_crypto(target_pid=pid)
-                    # No auto-reinvest in this clean version unless explicitly asked again
-        except:
-            pass
+                    return
+
+        except Exception as e:
+            print(f"[SL/TP ERROR] {e}")
 
 # ============================================================
-# MAIN EVALUATOR: HUNTER MODE (Entry if Empty)
+# MAIN EVALUATOR: HUNTER MODE (Immediate Entry)
 # ============================================================
 def run_crypto_sar():
+    # Forced ON
+    db.set_param('crypto_algo_running', 'ON')
+
     asset     = "BTC"
     timeframe = config.TIMEFRAME
     signal    = logic.get_supertrend_signal(asset, timeframe=timeframe)
-    
+    db.set_param("signal_target", signal)
+
     # Sync with exchange
     delta_executor.sync_delta_position()
     active_call = db.get_param("active_call_symbol", "NONE")
     active_put  = db.get_param("active_put_symbol",  "NONE")
     active_any  = (active_call != "NONE" or active_put != "NONE")
 
-    # ---- HUNTER MODE RULE: If Empty and Signal exists, ENTER IMMEDIATELY ----
+    # ---- HUNTER MODE RULE: Entry if Empty ----
     if not active_any:
         if signal in ["BUY", "SELL"]:
-            log_terminal(f"🎯 HUNTER MODE: No position. Taking fresh {signal} entry.", "TRADE")
+            log_terminal(f"🎯 HUNTER MODE: Signal {signal}. Taking fresh 6-lot entry.", "TRADE")
             send_telegram_msg(f"🚨 HUNTER MODE: Forcing Immediate {signal} Entry.")
             delta_executor.execute_crypto_trade(asset, signal)
+    else:
+        # Check if we need to roll (V3 feature)
+        crypto_roller.check_and_roll_crypto()
 
 # ============================================================
 # MAIN
 # ============================================================
 def main():
+    # Singleton lock
+    try:
+        lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lock_socket.bind(('127.0.0.1', 47200))
+    except socket.error:
+        print("🚨 BOT ALREADY RUNNING. EXITING.")
+        sys.exit(1)
+
     print("=" * 60)
-    print("     🚀 BHARAT ALGO-PRO (v3.0 - CLEAN RESET) 🚀     ")
+    print("     🚀 BHARAT ALGOVERSE v3.0 - STABLE MASTER 🚀     ")
     print("=" * 60)
-    print(f"  ✅ Strategy: PURE BUYING")
+    print(f"  ✅ Strategy: PURE BUYING (V3)")
     print(f"  ✅ Timeframe: {config.TIMEFRAME}")
     print(f"  ✅ Lot Size: {config.CRYPTO_LOT_SIZE}")
     print("=" * 60)
 
     if not db.load_secrets():
-        print("❌ SECRETS.TXT NOT FOUND! EXITING.")
+        print("❌ SECRETS.TXT MISSING!")
         sys.exit(1)
-        
-    # Reset local flags
+
+    # Reset locks
     db.set_param("local_trade_active", "NO")
     db.set_param("order_pending", "NO")
+    
+    # Defaults
+    db.set_param('st_period', '10')
+    db.set_param('st_multiplier', '1.5')
+    db.set_param('crypto_trade_size', str(config.CRYPTO_LOT_SIZE))
+    db.set_param('candle_timeframe', config.TIMEFRAME)
 
-    log_terminal("Bharat Algo-Pro Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGO-PRO STARTED\n✅ Pure Buying | 5M | 6 Lots | Hunter Mode: ON")
+    log_terminal("Bharat AlgoVerse V3 Stable Started.", "START")
+    send_telegram_msg("🚀 BHARAT V3 STABLE STARTED\n✅ Pure Buying | 5M | 6 Lots | Hunter Mode: ON")
 
     while True:
         try:
