@@ -863,7 +863,7 @@ def fetch_delta_real_fills(days_back=30):
     try:
         import datetime
         api_key = db.get_param('delta_api_key', '')
-        if not api_key: return []
+        if not api_key: return [{'error': 'No API Key found'}]
         
         path = "/v2/fills"
         query = "?page_size=100"
@@ -873,15 +873,14 @@ def fetch_delta_real_fills(days_back=30):
         
         if resp.status_code == 200:
             return resp.json().get('result', [])
-        return []
+        return [{'error': f"HTTP {resp.status_code}: {resp.text[:100]}"}]
     except Exception as e:
-        print(f"Error fetching real fills: {e}")
-        return []
+        return [{'error': str(e)}]
 
 def get_delta_real_stats(days=1):
     """Calculates PnL, Win Rate from actual API fills."""
     fills = fetch_delta_real_fills()
-    if not fills:
+    if not fills or (len(fills)>0 and 'error' in fills[0]):
         return 0.0, 0, 0.0, 0.0
         
     import datetime
@@ -906,10 +905,9 @@ def get_delta_real_stats(days=1):
                 net_rpnl = rpnl - fee
                 
                 total_pnl += net_rpnl
-                if rpnl != 0: 
-                    trade_count += 1
-                    if net_rpnl > 0:
-                        wins += 1
+                trade_count += 1
+                if net_rpnl > 0:
+                    wins += 1
         except Exception:
             continue
             
@@ -924,6 +922,9 @@ def get_delta_real_history_df():
     if not fills:
         return pd.DataFrame()
         
+    if len(fills) > 0 and 'error' in fills[0]:
+        return pd.DataFrame([{'timestamp': 'ERROR', 'symbol': fills[0]['error'], 'direction': 'N/A', 'entry_price': 0, 'exit_price': 0, 'pnl': 0, 'status': 'FAILED'}])
+        
     records = []
     for f in fills:
         try:
@@ -932,16 +933,15 @@ def get_delta_real_history_df():
             fee = float(f.get('fee', 0))
             net_rpnl = rpnl - fee
             
-            if rpnl != 0:
-                records.append({
-                    'timestamp': created_str,
-                    'symbol': f.get('symbol', 'UNKNOWN'),
-                    'direction': f.get('side', '').upper(),
-                    'entry_price': 0, 
-                    'exit_price': float(f.get('price', 0)),
-                    'pnl': round(net_rpnl, 2),
-                    'status': 'CLOSED'
-                })
+            records.append({
+                'timestamp': created_str,
+                'symbol': f.get('symbol', 'UNKNOWN'),
+                'direction': f.get('side', '').upper(),
+                'entry_price': float(f.get('price', 0)), 
+                'exit_price': float(f.get('price', 0)),
+                'pnl': round(net_rpnl, 2),
+                'status': 'CLOSED' if rpnl != 0 else 'OPEN/FILL'
+            })
         except Exception:
             continue
             
