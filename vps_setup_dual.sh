@@ -41,9 +41,9 @@ setup_instance() {
         python3 -m venv venv
     fi
     source venv/bin/activate
-    pip install -q --upgrade pip
-    pip install -q requests pandas  # Ensure core libs are first
-    pip install -q -r requirements.txt
+    pip install -q --no-cache-dir --upgrade pip
+    pip install -q --no-cache-dir requests pandas  # Ensure core libs are first
+    pip install -q --no-cache-dir -r requirements.txt
 
     # 2. Create Surgical config.py for this instance
     cat > config.py << EOF
