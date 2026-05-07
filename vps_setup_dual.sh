@@ -41,13 +41,13 @@ setup_instance() {
     git reset --hard origin/main
     git pull origin main
 
-    # 1. Create Virtual Environment if not exists
-    if [ ! -d "venv" ]; then
-        python3 -m venv venv
-    fi
+    # 1. Surgical Environment Cleanup (Ensure no binary mismatch)
+    echo "🧹 Cleaning Virtual Environment for $MODE..."
+    rm -rf venv
+    python3 -m venv venv
     source venv/bin/activate
     pip install -q --no-cache-dir --upgrade pip
-    pip install -q --no-cache-dir -r requirements.txt
+    pip install -q --no-cache-dir --force-reinstall -r requirements.txt
 
     # 2. Transfer 'Soul' (API Keys & Tokens) from legacy folder if missing
     LEGACY="/root/BHARAT-ALGO-TRADING-APP"
