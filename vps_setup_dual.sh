@@ -9,6 +9,9 @@
 REPO_URL="https://github.com/gurjeetsinghgill8-web/BHARAT-ALGO-TRADING-APP.git"
 
 echo "💉 Starting Surgical Separation of Engines..."
+sudo pkill -9 python3 2>/dev/null || true
+sudo pkill -9 streamlit 2>/dev/null || true
+rm -f /root/BHARAT-BUYING/bot.lock /root/BHARAT-SELLING/bot.lock /root/BHARAT-ALGO-TRADING-APP/bot.lock
 sudo apt-get update -q && sudo apt-get install -y -q python3-venv
 
 setup_instance() {
