@@ -15,6 +15,9 @@ def init_db():
                        exit_price REAL, status TEXT, pnl REAL)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS daily_stats 
                       (date TEXT PRIMARY KEY, total_pnl REAL, status TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS system_errors
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, 
+                       module TEXT, error_msg TEXT)''')
     conn.commit()
     conn.close()
 
@@ -117,5 +120,26 @@ def get_stats(days=1):
     
     conn.close()
     return total_pnl, count, win_rate, avg_pnl
+
+def log_system_error(module, msg):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        ts = datetime.now().strftime('%H:%M:%S')
+        cursor.execute("INSERT INTO system_errors (timestamp, module, error_msg) VALUES (?, ?, ?)", (ts, module, msg))
+        cursor.execute("DELETE FROM system_errors WHERE timestamp < datetime('now', '-6 hours')")
+        conn.commit()
+        conn.close()
+    except: pass
+
+def get_recent_errors(hours=6):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM system_errors WHERE timestamp >= datetime('now', ?) ORDER BY id DESC", (f'-{hours} hours',))
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
+    except: return []
 
 init_db()

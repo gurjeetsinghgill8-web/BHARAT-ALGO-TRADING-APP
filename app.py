@@ -331,7 +331,7 @@ with st.sidebar:
     st.markdown('<div class="section-title">📂 Switch Module</div>', unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)", "💹 Investment (RS)", "💎 Personal (Alpha King)"],
+        ["🚀 Crypto (BTC)", "📈 Nifty (NSE)", "💹 Investment (RS)", "💎 Personal (Alpha King)", "⚙️ API Config (Auth)"],
         key="page_selector",
         label_visibility="collapsed"
     )
@@ -970,6 +970,15 @@ elif page == "📈 Nifty (NSE)":
             f"All trades will use expiry: **{_next_exp}** (next {weekday_name}).\n\n"
             f"⚠️ Current week's options are always skipped to avoid heavy theta decay."
         )
+
+    # ── System Audit Log (Last 6 Hours) ───────────────────
+    st.markdown('<div class="section-title">🛠️ System Audit (Last 6h)</div>', unsafe_allow_html=True)
+    _errors = db.get_recent_errors(hours=6)
+    if _errors:
+        err_df = pd.DataFrame(_errors, columns=['ID', 'Time', 'Module', 'Message'])
+        st.dataframe(err_df[['Time', 'Module', 'Message']], use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ No system errors detected in the last 6 hours.")
 
     st.caption("BHARAT AlgoVerse v3.0 • Nifty Module • Built for Dr. Saab 🩺")
 
@@ -1645,3 +1654,66 @@ elif page == "💎 Personal (Alpha King)":
     st.caption("Developed for Personal Use • Alpha King Module • v1.0")
 
 
+# ══════════════════════════════════════════════════════════════
+# PAGE 5 — API CONFIG (AUTH)
+# ══════════════════════════════════════════════════════════════
+elif page == "⚙️ API Config (Auth)":
+    st.markdown("# ⚙️ API & Auth Configuration")
+    st.caption("Manage your exchange credentials and automated login settings.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="section-title">🗝️ Upstox Credentials</div>', unsafe_allow_html=True)
+        _u_api    = db.get_param('upstox_api_key', '')
+        _u_secret = db.get_param('upstox_api_secret', '')
+        _u_rurl   = db.get_param('upstox_redirect_uri', 'https://127.0.0.1')
+        _u_phone  = db.get_param('upstox_phone', '')
+        _u_pin    = db.get_param('upstox_pin', '')
+        _u_totp   = db.get_param('upstox_totp_secret', '')
+
+        u_api    = st.text_input("Upstox API Key", _u_api)
+        u_secret = st.text_input("Upstox API Secret", _u_secret, type="password")
+        u_rurl   = st.text_input("Redirect URI", _u_rurl)
+        u_phone  = st.text_input("Upstox Phone No", _u_phone)
+        u_pin    = st.text_input("Upstox PIN", _u_pin, type="password")
+        u_totp   = st.text_input("TOTP Secret (2FA Key)", _u_totp, help="Get this from Upstox 'My Account' -> '2FA' -> 'Enable TOTP'")
+
+        if st.button("💾 SAVE UPSTOX SETTINGS"):
+            db.set_param('upstox_api_key', u_api)
+            db.set_param('upstox_api_secret', u_secret)
+            db.set_param('upstox_redirect_uri', u_rurl)
+            db.set_param('upstox_phone', u_phone)
+            db.set_param('upstox_pin', u_pin)
+            db.set_param('upstox_totp_secret', u_totp)
+            st.success("✅ Upstox settings saved to DB!")
+
+    with col2:
+        st.markdown('<div class="section-title">🔑 Delta Exchange (Crypto)</div>', unsafe_allow_html=True)
+        _d_api    = db.get_param('delta_api_key', '')
+        _d_secret = db.get_param('delta_api_secret', '')
+        
+        d_api    = st.text_input("Delta API Key", _d_api) 
+        d_secret = st.text_input("Delta API Secret", _d_secret, type="password")
+        
+        if st.button("💾 SAVE DELTA SETTINGS"):
+            db.set_param('delta_api_key', d_api)
+            db.set_param('delta_api_secret', d_secret)
+            st.success("✅ Delta settings saved!")
+
+        st.divider()
+        st.markdown('<div class="section-title">🧪 Auth Test</div>', unsafe_allow_html=True)
+        if st.button("🚀 TRIGGER AUTO-LOGIN TEST"):
+            with st.spinner("Launching headless browser on VPS..."):
+                try:
+                    import auto_login_upstox
+                    auto_login_upstox.run_auto_login()
+                    st.success("✅ Auto-login flow completed! Check system logs.")
+                except Exception as e:
+                    st.error(f"Test failed: {e}")
+
+    st.info("💡 **Security Note:** All credentials are stored locally in the VPS database (`trading_app.db`). Do not share this dashboard link with anyone.")
+
+    st.caption("Developed for Dr. Saab 🩺")
+
+st.markdown('</div>', unsafe_allow_html=True) # End main-container

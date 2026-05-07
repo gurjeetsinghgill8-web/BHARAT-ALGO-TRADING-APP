@@ -27,10 +27,12 @@ import nifty_executor
 # ============================================================
 # SINGLETON LOCK (won't conflict with crypto bot port 47200)
 # ============================================================
+LOCK_PORT = 47201
+
 def _acquire_lock():
     lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        lock.bind(('127.0.0.1', 47201))
+        lock.bind(('127.0.0.1', LOCK_PORT))
         return lock
     except socket.error:
         print("🚨 NIFTY BOT ALREADY RUNNING. EXITING.")
@@ -159,13 +161,13 @@ def main():
     lock = _acquire_lock()
 
     print("=" * 60)
-    print("   📈 BHARAT ALGOVERSE v3.0 — NIFTY MODULE STARTED   ")
+    print("     BHARAT ALGOVERSE v3.0 - NIFTY MODULE STARTED   ")
     print("=" * 60)
-    print("  ✅ Market Window: 9:25 AM – 3:10 PM IST")
-    print("  ✅ Strategy: Positional Options (Next-Week Expiry)")
-    print("  ✅ Strike Rule: Nearest ₹120 premium")
-    print("  ✅ Supertrend: Multi-TF | Multi-Setting")
-    print("  ✅ SAR Flip: Auto-exit & re-enter on signal flip")
+    print("  [+] Market Window: 9:25 AM - 3:10 PM IST")
+    print("  [+] Strategy: Positional Options (Next-Week Expiry)")
+    print("  [+] Strike Rule: Nearest Rs.120 premium")
+    print("  [+] Supertrend: Multi-TF | Multi-Setting")
+    print("  [+] SAR Flip: Auto-exit & re-enter on signal flip")
     print("=" * 60)
 
     # ── Load secrets (Upstox token + Telegram) ──────────────

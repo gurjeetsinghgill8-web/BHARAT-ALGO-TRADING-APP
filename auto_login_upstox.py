@@ -14,20 +14,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 def run_auto_login():
     print("="*60)
-    print(" [SURGERY] BHARAT ALGOVERSE - UPSTOX 100% AUTO-LOGIN ")
-    print("="*60)
-    
-    # Load secrets from Streamlit secrets.toml
+    # 0. Initialize variables
     API_KEY, API_SECRET, R_URL, PHONE_NO, PIN, TOTP_SECRET = "", "", "", "", "", ""
+
+    # 1. Load from Streamlit secrets.toml (priority)
     try:
-        import os
         toml_path = os.path.join(".streamlit", "secrets.toml")
         if os.path.exists(toml_path):
             with open(toml_path, 'r') as f:
                 for line in f:
                     if "=" in line:
                         k, v = line.strip().split('=', 1)
-                        k = k.strip()
+                        k = k.strip().upper()
                         v = v.strip().strip('"').strip("'")
                         if k == "UPSTOX_PHONE": PHONE_NO = v
                         if k == "UPSTOX_PIN": PIN = v
@@ -36,12 +34,21 @@ def run_auto_login():
                         if k == "UPSTOX_REDIRECT_URI": R_URL = v
                         if k == "UPSTOX_TOTP_SECRET": TOTP_SECRET = v
     except Exception as e:
-        print(f"Error reading secrets: {e}")
+        print(f"Error reading secrets file: {e}")
+
+    # 2. Fallback to DB Settings
+    if not PHONE_NO: PHONE_NO = db.get_param('upstox_phone', '')
+    if not PIN:      PIN = db.get_param('upstox_pin', '')
+    if not TOTP_SECRET: TOTP_SECRET = db.get_param('upstox_totp_secret', '')
+    if not API_KEY:    API_KEY = db.get_param('upstox_api_key', '')
+    if not API_SECRET: API_SECRET = db.get_param('upstox_api_secret', '')
+    if not R_URL:      R_URL = db.get_param('upstox_redirect_uri', 'https://127.0.0.1')
 
     # Ask for missing credentials
     if not PHONE_NO or not PIN or not TOTP_SECRET:
-        print("\n❌ CRITICAL ERROR: Auto-login failed!")
-        print("Missing UPSTOX_PHONE, UPSTOX_PIN, or UPSTOX_TOTP_SECRET in .streamlit/secrets.toml")
+        msg = "Missing UPSTOX_PHONE, UPSTOX_PIN, or UPSTOX_TOTP_SECRET in secrets.toml"
+        print(f"\n❌ CRITICAL ERROR: {msg}")
+        db.log_system_error("AUTO-LOGIN", msg)
         return
 
     if not API_KEY or not API_SECRET:
@@ -49,18 +56,25 @@ def run_auto_login():
         return
 
     print("\n[STARTING] Launching Headless Chrome Browser...")
+    import platform
     chrome_options = Options()
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
+    
+    if platform.system() == "Linux":
+        # Force binary path for stability on VPS
+        chrome_options.binary_location = "/usr/bin/google-chrome"
 
     try:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
     except Exception as e:
-        print(f"[ERROR] Failed to start Chrome Driver: {e}")
-        print("Make sure Google Chrome is installed on this system!")
+        msg = f"Failed to start Chrome Driver: {e}"
+        print(f"[ERROR] {msg}")
+        db.log_system_error("AUTO-LOGIN", msg)
         return
 
     try:
@@ -143,8 +157,9 @@ def run_auto_login():
             print(f"[ERROR] API Error {response.status_code}: {response.text}")
 
     except Exception as e:
-        print(f"\n[ERROR] Login flow failed! Upstox may have changed their UI or invalid credentials.")
-        print(f"Error details: {e}")
+        msg = f"Login flow failed: {e}"
+        print(f"\n[ERROR] {msg}")
+        db.log_system_error("AUTO-LOGIN", msg)
     finally:
         driver.quit()
 

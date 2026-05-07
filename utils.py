@@ -24,9 +24,13 @@ def log_terminal(message, type="INFO"):
         "ALERT": "[ALERT]",
         "DEBUG": "[DEBUG]"
     }
-    icon = icons.get(type, "🔹")
+    icon = icons.get(type, "[INFO]")
     formatted_msg = f"[{timestamp}] {icon} {message}"
     print(formatted_msg)
+    
+    # Auto-audit errors to DB
+    if type in ["ERROR", "ALERT"]:
+        db.log_system_error(type, message)
     
     # Auto-alert Telegram for critical events
     if type in ["TRADE", "ALERT", "ERROR"]:
