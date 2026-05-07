@@ -51,20 +51,42 @@ def get_nifty_symbol():
     if inst == 'NIFTY_MID_SELECT': return "NSE_INDEX|Nifty Midcap Select", 0 # Monday
     return "NSE_INDEX|Nifty 50", 3
 
-def get_next_expiry(skip_current_week: bool = True) -> str:
+def get_next_expiry(skip_current_week=True):
     """
-    Returns the next expiry date as YYYY-MM-DD.
-    Auto-detects the correct expiry weekday based on the instrument being traded.
+    Dynamically fetches the exact available expiry dates from Upstox API 
+    instead of relying on hardcoded weekdays (since NSE often changes them).
     """
-    _, expiry_wd = get_nifty_symbol()
-    today = date.today()
-
-    days_ahead = (expiry_wd - today.weekday()) % 7
-    this_expiry = today + timedelta(days=days_ahead)
-
-    if skip_current_week:
-        return (this_expiry + timedelta(weeks=1)).strftime('%Y-%m-%d')
-    return this_expiry.strftime('%Y-%m-%d')
+    symbol, _ = get_nifty_symbol()
+    url = f"{BASE_URL}/option/contract"
+    params = {'instrument_key': symbol}
+    
+    try:
+        resp = requests.get(url, headers=_headers(), params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json().get('data', [])
+            # Extract all unique expiry dates
+            expiries = sorted(list(set(d.get('expiry') for d in data if d.get('expiry'))))
+            
+            if not expiries:
+                log_terminal(f"[NIFTY] No expiry dates found for {symbol}", "ERROR")
+                return "2026-05-14" # Fallback
+                
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Filter out past dates
+            future_expiries = [e for e in expiries if e >= today]
+            
+            if not future_expiries:
+                return expiries[-1]
+                
+            if skip_current_week and len(future_expiries) > 1:
+                return future_expiries[1]
+            return future_expiries[0]
+            
+    except Exception as e:
+        log_terminal(f"[NIFTY] Expiry fetch exception: {e}", "ERROR")
+        
+    return "2026-05-14" # Fallback
 
 def get_next_week_thursday() -> str:
     return get_next_expiry(skip_current_week=True)
@@ -203,12 +225,12 @@ def place_nifty_order(instrument_key: str, qty: int, side: str = 'BUY') -> bool:
 
         if resp.status_code in [200, 201]:
             order_id = resp.json().get('data', {}).get('order_id', 'N/A')
-            log_terminal(f"[NIFTY] ✅ Order placed: {side} {qty}×{instrument_key} | OrderID={order_id}", "TRADE")
-            send_telegram_msg(f"🟢 NIFTY ORDER PLACED\n{side} {qty} × {instrument_key}\nOrderID: {order_id}")
+            log_terminal(f"[NIFTY] Order placed: {side} {qty}x{instrument_key} | OrderID={order_id}", "TRADE")
+            send_telegram_msg(f"NIFTY ORDER PLACED\n{side} {qty} x {instrument_key}\nOrderID: {order_id}")
             return True
         else:
-            log_terminal(f"[NIFTY] ❌ Order failed: {resp.status_code} - {resp.text[:200]}", "ERROR")
-            send_telegram_msg(f"🔴 NIFTY ORDER FAILED\n{resp.text[:200]}")
+            log_terminal(f"[NIFTY] Order failed: {resp.status_code} - {resp.text[:200]}", "ERROR")
+            send_telegram_msg(f"NIFTY ORDER FAILED\n{resp.text[:200]}")
             return False
 
     except Exception as e:
@@ -300,12 +322,12 @@ def execute_nifty_trade(direction: str) -> bool:
 
     log_terminal(
         f"[NIFTY] Executing {direction}: {best['type']} strike={best['strike']} "
-        f"ltp=₹{best['ltp']:.1f} expiry={expiry} qty={qty}", "TRADE"
+        f"ltp=Rs.{best['ltp']:.1f} expiry={expiry} qty={qty}", "TRADE"
     )
     send_telegram_msg(
         f"🎯 NIFTY SIGNAL: {direction}\n"
         f"Strike: {best['strike']} {best['type']}\n"
-        f"Premium: ₹{best['ltp']:.1f} | Expiry: {expiry}\n"
+        f"Premium: Rs.{best['ltp']:.1f} | Expiry: {expiry}\n"
         f"Lots: {lots} × {lot_size} = {qty} units"
     )
 

@@ -21,20 +21,7 @@ def init_db():
 def load_secrets():
     """Loads API keys from secrets.txt into DB. All keys lowercased automatically."""
     secrets_file = "secrets.txt"
-    abs_path = os.path.abspath(secrets_file)
-    if not os.path.exists(secrets_file):
-        print("\n" + "!"*60)
-        print(f"CRITICAL ERROR: secrets.txt NOT FOUND at {abs_path}")
-        print("Format required:")
-        print("  DELTA_API_KEY=your_key")
-        print("  DELTA_API_SECRET=your_secret")
-        print("  TELEGRAM_TOKEN=your_bot_token")
-        print("  TELEGRAM_CHAT_ID=your_chat_id")
-        print("  UPSTOX_ACCESS_TOKEN=your_upstox_token   ← Nifty ke liye")
-        print("!"*60 + "\n")
-        return False
-
-    # Key name normalisation map
+    secrets_file = "secrets.txt"    # Key name normalisation map
     # secrets.txt key → DB key
     _key_map = {
         'telegram_token':      'telegram_bot_token',
@@ -49,24 +36,30 @@ def load_secrets():
         'upstox_redirect_uri': 'upstox_redirect_uri',
     }
 
+    secrets_files = ["secrets.txt", ".streamlit/secrets.toml"]
     loaded = []
-    with open(secrets_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#') or '=' not in line:
-                continue
-            parts = line.split('=', 1)
-            if len(parts) != 2:
-                continue
-            k = parts[0].strip().lower()
-            v = parts[1].strip()
-            db_key = _key_map.get(k, k)   # use mapped key, else raw key
-            if k == 'trade_mode':
-                v = v.upper()
-            set_param(db_key, v)
-            loaded.append(db_key)
+    
+    for secrets_file in secrets_files:
+        if os.path.exists(secrets_file):
+            with open(secrets_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or line.startswith('[') or '=' not in line:
+                        continue
+                    parts = line.split('=', 1)
+                    if len(parts) != 2:
+                        continue
+                    k = parts[0].strip().lower()
+                    v = parts[1].strip().strip('"').strip("'")
+                    db_key = _key_map.get(k, k)   # use mapped key, else raw key
+                    if k == 'trade_mode':
+                        v = v.upper()
+                    set_param(db_key, v)
+                    loaded.append(db_key)
 
-    print(f"[secrets] Loaded {len(loaded)} keys: {loaded}")
+    if not loaded:
+        print("\nCRITICAL ERROR: No secrets found in secrets.txt or .streamlit/secrets.toml")
+        return False
     return True
 
 def set_param(key, value):

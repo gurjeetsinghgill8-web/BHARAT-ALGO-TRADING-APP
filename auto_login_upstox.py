@@ -14,39 +14,43 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 def run_auto_login():
     print("="*60)
-    print(" 💉 BHARAT ALGOVERSE - UPSTOX 100% AUTO-LOGIN SURGERY ")
+    print(" [SURGERY] BHARAT ALGOVERSE - UPSTOX 100% AUTO-LOGIN ")
     print("="*60)
     
-    # Load secrets from DB
-    API_KEY = db.get_param('upstox_api_key', '')
-    API_SECRET = db.get_param('upstox_api_secret', '')
-    R_URL = db.get_param('upstox_redirect_uri', 'https://127.0.0.1')
-    PHONE_NO = db.get_param('upstox_phone', '')
-    PIN = db.get_param('upstox_pin', '')
-    TOTP_SECRET = db.get_param('upstox_totp_secret', '')
+    # Load secrets from Streamlit secrets.toml
+    API_KEY, API_SECRET, R_URL, PHONE_NO, PIN, TOTP_SECRET = "", "", "", "", "", ""
+    try:
+        import os
+        toml_path = os.path.join(".streamlit", "secrets.toml")
+        if os.path.exists(toml_path):
+            with open(toml_path, 'r') as f:
+                for line in f:
+                    if "=" in line:
+                        k, v = line.strip().split('=', 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k == "UPSTOX_PHONE": PHONE_NO = v
+                        if k == "UPSTOX_PIN": PIN = v
+                        if k == "UPSTOX_API_KEY": API_KEY = v
+                        if k == "UPSTOX_API_SECRET": API_SECRET = v
+                        if k == "UPSTOX_REDIRECT_URI": R_URL = v
+                        if k == "UPSTOX_TOTP_SECRET": TOTP_SECRET = v
+    except Exception as e:
+        print(f"Error reading secrets: {e}")
 
     # Ask for missing credentials
-    if not PHONE_NO:
-        PHONE_NO = input("Enter Upstox Phone Number: ").strip()
-        db.set_param('upstox_phone', PHONE_NO)
-    if not PIN:
-        PIN = input("Enter Upstox 6-digit PIN: ").strip()
-        db.set_param('upstox_pin', PIN)
-    if not TOTP_SECRET:
-        print("\n[TOTP SECRET KEY NEEDED]")
-        print("To make this 100% automatic, you need the TOTP Secret Key from Upstox.")
-        print("When setting up Authenticator App in Upstox, copy the text code instead of scanning the QR.")
-        TOTP_SECRET = input("Enter TOTP Secret Key (leave blank if you want to enter OTP manually): ").strip()
-        if TOTP_SECRET:
-            db.set_param('upstox_totp_secret', TOTP_SECRET)
+    if not PHONE_NO or not PIN or not TOTP_SECRET:
+        print("\n❌ CRITICAL ERROR: Auto-login failed!")
+        print("Missing UPSTOX_PHONE, UPSTOX_PIN, or UPSTOX_TOTP_SECRET in .streamlit/secrets.toml")
+        return
 
     if not API_KEY or not API_SECRET:
         print("❌ Error: Please set upstox_api_key and upstox_api_secret in the DB first.")
         return
 
-    print("\n⏳ Launching Headless Chrome Browser...")
+    print("\n[STARTING] Launching Headless Chrome Browser...")
     chrome_options = Options()
-    # chrome_options.add_argument("--headless") # Uncomment this to run completely hidden
+    chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
@@ -55,7 +59,7 @@ def run_auto_login():
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
     except Exception as e:
-        print(f"❌ Failed to start Chrome Driver: {e}")
+        print(f"[ERROR] Failed to start Chrome Driver: {e}")
         print("Make sure Google Chrome is installed on this system!")
         return
 
@@ -67,12 +71,12 @@ def run_auto_login():
             'redirect_uri': R_URL
         }
         auth_url = "https://api.upstox.com/v2/login/authorization/dialog?" + urllib.parse.urlencode(params)
-        print(f"🌐 Navigating to Upstox Login...")
+        print(f"[NAVIGATING] To Upstox Login...")
         driver.get(auth_url)
         
         # 2. Enter Phone Number
         wait = WebDriverWait(driver, 15)
-        print("📱 Entering Phone Number...")
+        print("[PHONE] Entering Phone Number...")
         phone_input = wait.until(EC.presence_of_element_located((By.ID, "mobileNum")))
         phone_input.send_keys(PHONE_NO)
         driver.find_element(By.ID, "getOtp").click()
@@ -80,33 +84,32 @@ def run_auto_login():
         # 3. Handle OTP (via TOTP or Manual)
         otp_input = wait.until(EC.presence_of_element_located((By.ID, "otpNum")))
         if TOTP_SECRET:
-            print("🔑 Generating TOTP Automatically...")
+            print("[TOTP] Generating TOTP Automatically...")
             totp = pyotp.TOTP(TOTP_SECRET)
             current_otp = totp.now()
             print(f"   Generated OTP: {current_otp}")
             otp_input.send_keys(current_otp)
         else:
-            current_otp = input("📥 Enter the OTP sent to your phone: ").strip()
+            current_otp = input("[INPUT] Enter the OTP sent to your phone: ").strip()
             otp_input.send_keys(current_otp)
             
         driver.find_element(By.ID, "continueBtn").click()
         
         # 4. Enter PIN
-        print("🔐 Entering PIN...")
+        print("[PIN] Entering PIN...")
         pin_input = wait.until(EC.presence_of_element_located((By.ID, "pinCode")))
         pin_input.send_keys(PIN)
         
-        # Wait for Upstox to automatically redirect after PIN (sometimes it clicks itself)
-        # We will wait for the URL to change to the redirect_uri
-        print("⏳ Waiting for Upstox redirection...")
+        # Wait for Upstox to automatically redirect after PIN
+        print("[WAIT] Waiting for Upstox redirection...")
         wait.until(EC.url_contains("code="))
         
         current_url = driver.current_url
         auth_code = current_url.split('code=')[1].split('&')[0]
-        print(f"✅ Auth Code Extracted!")
+        print(f"[SUCCESS] Auth Code Extracted!")
         
         # 5. Exchange Auth Code for Access Token
-        print("⏳ Fetching final Access Token from Upstox API...")
+        print("[FETCHING] Final Access Token from Upstox API...")
         token_url = "https://api.upstox.com/v2/login/authorization/token"
         headers = {
             'accept': 'application/json',
@@ -131,16 +134,16 @@ def run_auto_login():
                     with open('secrets.txt', 'a') as f:
                         f.write(f"\nUPSTOX_ACCESS_TOKEN={access_token}\n")
                         
-                print("\n" + "🟢"*10)
-                print(" SURGERY SUCCESSFUL! New Upstox Token Saved!")
-                print("🟢"*10)
+                print("\n" + "="*20)
+                print(" [SUCCESS] New Upstox Token Saved!")
+                print("="*20)
             else:
-                print("❌ Received 200 but no access_token found in response.")
+                print("[ERROR] Received 200 but no access_token found in response.")
         else:
-            print(f"❌ API Error {response.status_code}: {response.text}")
+            print(f"[ERROR] API Error {response.status_code}: {response.text}")
 
     except Exception as e:
-        print(f"\n❌ Login flow failed! Upstox may have changed their UI or invalid credentials.")
+        print(f"\n[ERROR] Login flow failed! Upstox may have changed their UI or invalid credentials.")
         print(f"Error details: {e}")
     finally:
         driver.quit()

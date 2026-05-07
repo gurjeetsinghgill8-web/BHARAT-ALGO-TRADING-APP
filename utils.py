@@ -17,12 +17,12 @@ def send_telegram_msg(message):
 def log_terminal(message, type="INFO"):
     timestamp = datetime.now().strftime("%H:%M:%S")
     icons = {
-        "START": "🔹",
-        "INFO": "ℹ️",
-        "TRADE": "🟢",
-        "ERROR": "❌",
-        "ALERT": "🚨",
-        "DEBUG": "🔍"
+        "START": "[START]",
+        "INFO": "[INFO]",
+        "TRADE": "[TRADE]",
+        "ERROR": "[ERROR]",
+        "ALERT": "[ALERT]",
+        "DEBUG": "[DEBUG]"
     }
     icon = icons.get(type, "🔹")
     formatted_msg = f"[{timestamp}] {icon} {message}"
