@@ -43,52 +43,45 @@ def _headers() -> dict:
 # DB key: nifty_expiry_weekday  (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri)
 # Default: 1 (Tuesday) — per Dr. Saab config
 # ============================================================
-_WEEKDAY_NAMES = {
-    '0': 'Monday', '1': 'Tuesday', '2': 'Wednesday',
-    '3': 'Thursday', '4': 'Friday'
-}
+def get_nifty_symbol():
+    inst = db.get_param('nifty_instrument', '^NSEI')
+    if inst == '^NSEI': return "NSE_INDEX|Nifty 50", 3       # Thursday
+    if inst == '^NSEBANK': return "NSE_INDEX|Nifty Bank", 2    # Wednesday
+    if inst == '^CNXFIN': return "NSE_INDEX|Nifty Fin Service", 1 # Tuesday
+    if inst == 'NIFTY_MID_SELECT': return "NSE_INDEX|Nifty Midcap Select", 0 # Monday
+    return "NSE_INDEX|Nifty 50", 3
 
 def get_next_expiry(skip_current_week: bool = True) -> str:
     """
     Returns the next expiry date as YYYY-MM-DD.
-    Expiry weekday is read from DB key 'nifty_expiry_weekday' (0-4).
-    Default = 1 (Tuesday) for FinNifty/custom setup.
-    skip_current_week=True: Always goes to NEXT week (safer, avoids theta)
+    Auto-detects the correct expiry weekday based on the instrument being traded.
     """
-    expiry_wd = int(db.get_param('nifty_expiry_weekday', '1') or '1')  # 1 = Tuesday
-    today     = date.today()
+    _, expiry_wd = get_nifty_symbol()
+    today = date.today()
 
-    # Find this week's expiry day
     days_ahead = (expiry_wd - today.weekday()) % 7
-    if days_ahead == 0:
-        days_ahead = 7   # same day = go to next week's same day
     this_expiry = today + timedelta(days=days_ahead)
 
     if skip_current_week:
-        # Always use NEXT week's expiry
-        next_expiry = this_expiry + timedelta(weeks=1)
-        return next_expiry.strftime('%Y-%m-%d')
-    else:
-        return this_expiry.strftime('%Y-%m-%d')
+        return (this_expiry + timedelta(weeks=1)).strftime('%Y-%m-%d')
+    return this_expiry.strftime('%Y-%m-%d')
 
-
-# Keep backward-compatible alias
 def get_next_week_thursday() -> str:
-    """Legacy alias — now reads from DB expiry_weekday setting."""
     return get_next_expiry(skip_current_week=True)
 
 
 # ============================================================
 # LEGO 6: Fetch Nifty Option Chain (Upstox)
 # ============================================================
-def fetch_nifty_option_chain(symbol: str = "NSE_INDEX|Nifty 50",
-                              expiry: str = None) -> list:
+def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
     """
     Fetches Nifty option chain from Upstox v2 API.
     Returns flat list of option contracts.
     """
+    if symbol is None:
+        symbol, _ = get_nifty_symbol()
     if expiry is None:
-        expiry = get_next_week_thursday()
+        expiry = get_next_expiry(skip_current_week=True)
 
     try:
         url    = f"{BASE_URL}/option/chain"
@@ -251,8 +244,9 @@ def execute_nifty_trade(direction: str) -> bool:
         log_terminal("[NIFTY] Trade already active. Holding.", "INFO")
         return False
 
+    symbol, _ = get_nifty_symbol()
     expiry = get_next_expiry(skip_current_week=True)
-    chain  = fetch_nifty_option_chain(expiry=expiry)
+    chain  = fetch_nifty_option_chain(symbol=symbol, expiry=expiry)
 
     if not chain:
         log_terminal(f"[NIFTY] Empty option chain for {expiry}.", "ERROR")

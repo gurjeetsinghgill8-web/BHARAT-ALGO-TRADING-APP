@@ -963,9 +963,11 @@ elif page == "📈 Nifty (NSE)":
     # ── Next Week Expiry Info ───────────────────────────
     if _has_nifty:
         _next_exp = nifty_executor.get_next_week_thursday()
+        exp_dt = datetime.strptime(_next_exp, '%Y-%m-%d')
+        weekday_name = exp_dt.strftime('%A')
         st.info(
             f"📅 **Next-Week Expiry Rule Active**\n\n"
-            f"All trades will use expiry: **{_next_exp}** (next Thursday).\n\n"
+            f"All trades will use expiry: **{_next_exp}** (next {weekday_name}).\n\n"
             f"⚠️ Current week's options are always skipped to avoid heavy theta decay."
         )
 
