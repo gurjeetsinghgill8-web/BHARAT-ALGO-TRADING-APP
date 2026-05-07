@@ -1,0 +1,12 @@
+# --- BHARAT ALGOVERSE v4.0 | ENGINE CONFIGURATION ---
+# Instance: 5m Option Buying (Aggressive)
+
+STRATEGY_MODE = "BUYING"
+TIMEFRAME = "5m"
+STABLE_CANDLE_ONLY = True
+DB_NAME = "buying_5m.db"
+PORT = 8501
+TELEGRAM_PREFIX = "🟢 [BUYING-5M]"
+LOG_FILE = "buying_5m.log"
+DEEP_ITM_LEVEL = 0 # Standard ITM/ATM
+LOT_SIZE = 1

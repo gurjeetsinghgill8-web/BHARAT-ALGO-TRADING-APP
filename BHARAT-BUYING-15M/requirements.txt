@@ -1,0 +1,12 @@
+numpy
+pandas
+pandas-ta-classic
+requests
+streamlit
+pyotp
+plotly
+yfinance
+pytz
+upstox-python-sdk
+selenium
+webdriver-manager
