@@ -472,6 +472,12 @@ if page == "🚀 Crypto (BTC)":
         _tf_options  = ["5m", "15m", "1h", "4h"]
         _tf_idx      = _tf_options.index(_tf_val) if _tf_val in _tf_options else 0
         _offset_opts = ["ATM (0)", "OTM +1", "OTM +2"]
+        
+        _strategy_val = db.get_param('crypto_strategy', 'OPTION_SELLING') or 'OPTION_SELLING'
+        _strategy_opts = ["OPTION_SELLING", "OPTION_BUYING"]
+        _strategy_idx = _strategy_opts.index(_strategy_val) if _strategy_val in _strategy_opts else 0
+
+        s_strategy = st.selectbox("Strategy Type", _strategy_opts, index=_strategy_idx, key="s_strategy")
 
         s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
                               index=1 if _mode_val == "LIVE" else 0, key="s_mode")
@@ -479,7 +485,9 @@ if page == "🚀 Crypto (BTC)":
         s_lots = st.slider("Lot Size (Contracts)", 1, 50, max(1, _lots_val), key="s_lots")
         s_strikes = st.slider("Number of Strike Prices", 1, 5, max(1, _strikes_val), key="s_strikes",
                               help="Take multiple strikes at once")
-        s_expiry = st.slider("Min Expiry Days", 0, 14, max(0, _expiry_val), key="s_expiry")
+        # Default expiry to 1 (next day) instead of 3
+        _display_expiry = _expiry_val if _expiry_val != 3 else 1 
+        s_expiry = st.slider("Min Expiry Days (0=Today, 1=Next Day)", 0, 14, max(0, _display_expiry), key="s_expiry")
 
         col_sl, col_tp = st.columns(2)
         with col_sl:
@@ -496,6 +504,7 @@ if page == "🚀 Crypto (BTC)":
 
         if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
             try:
+                db.set_param('crypto_strategy',   s_strategy)
                 db.set_param('trade_mode',        s_mode)
                 db.set_param('candle_timeframe',  s_tf)
                 db.set_param('crypto_trade_size', str(s_lots))

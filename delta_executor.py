@@ -215,10 +215,10 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Expiry Rule: Smart Expiry (Lego Block 2)
-    # We pick expiries based on the threshold (default 3 days) to avoid theta decay.
-    today = datetime.date.today()
-    threshold = int(db.get_param('expiry_threshold', '3'))
+    # 2. Expiry Rule: Smart Expiry
+    # We pick expiries based on the threshold (default 1 day) to avoid theta decay or benefit from it.
+    today = datetime.datetime.utcnow().date()
+    threshold = int(db.get_param('expiry_threshold', '1'))
     min_expiry_dt = today + datetime.timedelta(days=threshold)
     min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
     
@@ -233,7 +233,7 @@ def find_gill_crypto_option(asset, direction):
         return None
         
     best_expiry = valid_expiries[0] 
-    log_crypto(f"Selected Expiry: {best_expiry} (3-Day Rule applied)")
+    log_crypto(f"Selected Expiry: {best_expiry} (Threshold: {threshold} days applied)")
     
     # 3. Filter for options with that specific expiry
     near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
@@ -590,11 +590,21 @@ def square_off_crypto(target_pid=None):
                     log_terminal(f"⚠️ Size=0 for {pid}, skipping.", "WARN")
                     continue
 
+                # For Option Selling, position size is short (negative). We must buy to close.
+                # For Option Buying, position size is long (positive). We must sell to close.
+                raw_size_for_close = 0
+                for p in r_pos.json().get('result', []):
+                    if str(p.get('product_id')) == pid:
+                        raw_size_for_close = float(p.get('size', 0))
+                        break
+                        
+                close_side = "buy" if raw_size_for_close < 0 else "sell"
+
                 # CRITICAL FIX: size must be INTEGER for Delta Exchange
                 payload_dict = {
                     "product_id": int(pid),
                     "size": int(size),  # Must be int, not float!
-                    "side": "sell",
+                    "side": close_side,
                     "order_type": "market_order",
                     "reduce_only": True
                 }
@@ -759,9 +769,24 @@ def execute_crypto_trade(asset, direction):
         return
 
     # 3. Find Best Option to Open
-    opt = find_gill_crypto_option(asset, direction)
+    strategy_type = db.get_param('crypto_strategy', 'OPTION_SELLING')
+    
+    if strategy_type == "OPTION_SELLING":
+        # Option Selling:
+        # BUY signal -> Sell PUT (benefiting from melt)
+        # SELL signal -> Sell CALL
+        opt_direction = "SELL" if direction == "BUY" else "BUY"
+        trade_side = "sell"
+    else:
+        # Option Buying:
+        # BUY signal -> Buy CALL
+        # SELL signal -> Buy PUT
+        opt_direction = direction
+        trade_side = "buy"
+
+    opt = find_gill_crypto_option(asset, opt_direction)
     if not opt: 
-        log_terminal(f"ERROR: Could not find suitable {direction} option.", "ERROR")
+        log_terminal(f"ERROR: Could not find suitable {opt_direction} option for strategy {strategy_type}.", "ERROR")
         return
         
     symbol, price, strike, expiry, pid = opt
@@ -774,7 +799,7 @@ def execute_crypto_trade(asset, direction):
             payload_dict = {
                 "product_id": int(pid),
                 "size": int(qty),
-                "side": "buy",
+                "side": trade_side,
                 "order_type": "market_order"
             }
             import json
