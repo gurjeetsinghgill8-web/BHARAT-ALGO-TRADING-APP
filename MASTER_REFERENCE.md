@@ -124,7 +124,7 @@ UPSTOX_ACCESS_TOKEN=your_upstox_token   ← Required for Nifty LIVE
 | `nifty_st_multiplier` | 1.5 | Supertrend multiplier |
 | `nifty_expiry_weekday` | 1 | 0=Mon, 1=Tue, 2=Wed, 3=Thu |
 | `nifty_target_premium` | 120 | Target option premium Rs. |
-| `nifty_lot_size` | 25 | Nifty lot = 25 units |
+| `nifty_lot_size` | 65 | Nifty lot = 65 units (Effective 2026) |
 | `nifty_sl_percent` | 30 | SL % of entry premium |
 | `nifty_tp_percent` | 80 | TP % of entry premium |
 

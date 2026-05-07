@@ -50,6 +50,7 @@ def load_secrets():
         _key_map['selling_delta_api_key'] = 'delta_api_key'
         _key_map['selling_delta_api_secret'] = 'delta_api_secret'
         _key_map['selling_telegram_token'] = 'telegram_bot_token'
+        _key_map['selling_telegram_chat_id'] = 'telegram_chat_id'
 
     secrets_files = ["secrets.txt", ".streamlit/secrets.toml"]
     loaded = []
