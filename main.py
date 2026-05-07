@@ -231,6 +231,13 @@ def main():
 
     if not db.load_secrets():
         sys.exit(1)
+        
+    # --- RESET STALE LOCKS ON STARTUP (Dr. Saab's Clean Slate) ---
+    db.set_param("local_trade_active", "NO")
+    db.set_param("order_pending", "NO")
+    db.set_param("crypto_active_symbol", "NONE")
+    db.set_param("active_call_symbol", "NONE")
+    db.set_param("active_put_symbol", "NONE")
 
     # --- DEFAULT PARAMS (only if not already set by dashboard) ---
     if not db.get_param('st_period'):        db.set_param('st_period', '10')
