@@ -798,6 +798,8 @@ def execute_crypto_trade(asset, direction):
     else:
         # Option Buying:
         # BUY signal -> Buy CALL
+        opt_direction = direction
+        trade_side = "buy"
         # SELL signal -> Buy PUT
         opt_direction = direction
         trade_side = "buy"
@@ -854,4 +856,94 @@ def execute_crypto_trade(asset, direction):
             db.set_param("active_put_symbol", symbol)
             db.set_param("active_put_pid", str(pid))
         db.set_param("crypto_active_symbol", symbol)
+
+# --- REAL HISTORY API INTEGRATION ---
+def fetch_delta_real_fills(days_back=30):
+    """Fetches real historical fills from Delta Exchange using user's API keys."""
+    try:
+        import datetime
+        api_key = db.get_param('delta_api_key', '')
+        if not api_key: return []
+        
+        path = "/v2/fills"
+        query = "?page_size=100"
+        url = f"https://api.india.delta.exchange{path}{query}"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            return resp.json().get('result', [])
+        return []
+    except Exception as e:
+        print(f"Error fetching real fills: {e}")
+        return []
+
+def get_delta_real_stats(days=1):
+    """Calculates PnL, Win Rate from actual API fills."""
+    fills = fetch_delta_real_fills()
+    if not fills:
+        return 0.0, 0, 0.0, 0.0
+        
+    import datetime
+    cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    
+    total_pnl = 0.0
+    wins = 0
+    trade_count = 0
+    
+    for f in fills:
+        try:
+            created_str = f.get('created_at', '')
+            if not created_str: continue
+            if '.' in created_str:
+                dt = datetime.datetime.strptime(created_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc)
+            else:
+                dt = datetime.datetime.strptime(created_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                
+            if dt >= cutoff_dt:
+                rpnl = float(f.get('realized_pnl', 0))
+                fee = float(f.get('fee', 0))
+                net_rpnl = rpnl - fee
+                
+                total_pnl += net_rpnl
+                if rpnl != 0: 
+                    trade_count += 1
+                    if net_rpnl > 0:
+                        wins += 1
+        except Exception:
+            continue
+            
+    win_rate = (wins / trade_count * 100) if trade_count > 0 else 0.0
+    avg_pnl = (total_pnl / trade_count) if trade_count > 0 else 0.0
+    
+    return total_pnl, trade_count, win_rate, avg_pnl
+
+def get_delta_real_history_df():
+    """Returns a Pandas DataFrame of the real trade history formatted for the dashboard."""
+    fills = fetch_delta_real_fills()
+    if not fills:
+        return pd.DataFrame()
+        
+    records = []
+    for f in fills:
+        try:
+            created_str = f.get('created_at', '').replace('T', ' ').split('.')[0]
+            rpnl = float(f.get('realized_pnl', 0))
+            fee = float(f.get('fee', 0))
+            net_rpnl = rpnl - fee
+            
+            if rpnl != 0:
+                records.append({
+                    'timestamp': created_str,
+                    'symbol': f.get('symbol', 'UNKNOWN'),
+                    'direction': f.get('side', '').upper(),
+                    'entry_price': 0, 
+                    'exit_price': float(f.get('price', 0)),
+                    'pnl': round(net_rpnl, 2),
+                    'status': 'CLOSED'
+                })
+        except Exception:
+            continue
+            
+    return pd.DataFrame(records)
 

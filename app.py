@@ -196,6 +196,16 @@ def get_trade_history(days: int):
 
 def get_equity_curve(days: int):
     try:
+        if _has_delta:
+            df = delta_executor.get_delta_real_history_df()
+            if not df.empty:
+                cutoff = datetime.now() - pd.Timedelta(days=days)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df[df['timestamp'] >= cutoff].copy()
+                df = df.sort_values('timestamp')
+                df['cum_pnl'] = df['pnl'].cumsum()
+            return df
+            
         conn = sqlite3.connect("trading_app.db")
         df = pd.read_sql_query(
             f"SELECT timestamp, pnl FROM trades WHERE timestamp >= datetime('now', '-{days} days') ORDER BY id ASC",
@@ -228,10 +238,16 @@ except Exception:
     upnl = 0.0
 
 try:
-    pnl_1d,  cnt_1d,  wr_1d,  avg_1d  = db.get_stats(days=1)
-    pnl_7d,  cnt_7d,  wr_7d,  avg_7d  = db.get_stats(days=7)
-    pnl_30d, cnt_30d, wr_30d, avg_30d = db.get_stats(days=30)
-    pnl_90d, cnt_90d, wr_90d, avg_90d = db.get_stats(days=90)
+    if _has_delta:
+        pnl_1d,  cnt_1d,  wr_1d,  avg_1d  = delta_executor.get_delta_real_stats(days=1)
+        pnl_7d,  cnt_7d,  wr_7d,  avg_7d  = delta_executor.get_delta_real_stats(days=7)
+        pnl_30d, cnt_30d, wr_30d, avg_30d = delta_executor.get_delta_real_stats(days=30)
+        pnl_90d, cnt_90d, wr_90d, avg_90d = delta_executor.get_delta_real_stats(days=90)
+    else:
+        pnl_1d,  cnt_1d,  wr_1d,  avg_1d  = db.get_stats(days=1)
+        pnl_7d,  cnt_7d,  wr_7d,  avg_7d  = db.get_stats(days=7)
+        pnl_30d, cnt_30d, wr_30d, avg_30d = db.get_stats(days=30)
+        pnl_90d, cnt_90d, wr_90d, avg_90d = db.get_stats(days=90)
 except Exception:
     pnl_1d = cnt_1d = wr_1d = avg_1d = 0.0
     pnl_7d = cnt_7d = wr_7d = avg_7d = 0.0
@@ -523,8 +539,8 @@ if page == "🚀 Crypto (BTC)":
     st.divider()
 
     # ── TRADE JOURNAL ───────────────────────────────────────────────
-    st.markdown('<div class="section-title">📜 Trade Journal (Last 30 Trades)</div>', unsafe_allow_html=True)
-    df_hist = get_trade_history(90)
+    st.markdown('<div class="section-title">📜 Trade Journal (Real API Fills)</div>', unsafe_allow_html=True)
+    df_hist = delta_executor.get_delta_real_history_df() if _has_delta else get_trade_history(90)
     if not df_hist.empty:
         def color_direction(val):
             return 'color: #10b981' if val == 'BUY' else ('color: #f43f5e' if val == 'SELL' else '')
