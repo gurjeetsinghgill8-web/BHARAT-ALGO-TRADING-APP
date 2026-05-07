@@ -6,7 +6,7 @@ yfinance
 requests
 pytz
 upstox-python-sdk
-pandas-ta
+https://github.com/twopirllc/pandas-ta/archive/development.zip
 selenium
 webdriver-manager
 pyotp
