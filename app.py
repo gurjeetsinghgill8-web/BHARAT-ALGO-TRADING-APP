@@ -547,6 +547,150 @@ if page == "🚀 Crypto (BTC)":
     else:
         st.info("📭 No trades yet. Bot will populate this table as trades execute.")
 
+    st.divider()
+
+    # ── THE 6-HOUR UNICORN SCANNER (PAPER MODE) ─────────────────────────
+    st.markdown('<div class="section-title">🦄 Crypto Blaster: The 6-Hour Unicorn Scanner (Paper Mode)</div>', unsafe_allow_html=True)
+    
+    uc1, uc2 = st.columns([1, 2])
+    
+    import json
+    from datetime import datetime, timedelta
+    
+    # Check Lock file
+    lock_file_path = "active_unicorns.json"
+    unicorns = []
+    time_remaining_str = "00:00:00"
+    
+    if os.path.exists(lock_file_path):
+        try:
+            with open(lock_file_path, 'r') as f:
+                u_data = json.load(f)
+                unicorns = u_data.get('coins', [])
+                last_scan = datetime.fromisoformat(u_data.get('timestamp'))
+                next_scan = last_scan + timedelta(hours=6)
+                if datetime.now() < next_scan:
+                    rem = next_scan - datetime.now()
+                    rem_secs = rem.total_seconds()
+                    hours, remainder = divmod(rem_secs, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    time_remaining_str = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+                else:
+                    time_remaining_str = "SCANNING PENDING"
+        except Exception as e:
+            pass
+            
+    with uc1:
+        st.markdown(f'''
+        <div style="background:rgba(255,255,255,0.05); padding:15px; border-radius:10px; border:1px solid rgba(255,255,255,0.1);">
+            <div style="color:#e2e8f0; font-size:1.1rem; font-weight:700;">⏱️ Next Refresh In</div>
+            <div style="color:#f59e0b; font-size:2.2rem; font-weight:900; font-family:monospace;">{time_remaining_str}</div>
+            <p style="color:#94a3b8; font-size:0.8rem; margin-top:5px;">Module runs on a strict 6-hour lock cycle.</p>
+        </div>
+        ''', unsafe_allow_html=True)
+        
+        unicorn_status = "STOPPED"
+        if os.name == 'nt':
+            try:
+                out = subprocess.check_output('tasklist /FI "IMAGENAME eq python.exe" /FO CSV', shell=True).decode()
+                if "unicorn_scanner.py" in out: unicorn_status = "RUNNING"
+            except: pass
+        else:
+            try:
+                out = subprocess.check_output("pgrep -f unicorn_scanner.py || true", shell=True).decode()
+                if out.strip(): unicorn_status = "RUNNING"
+            except: pass
+            
+        c_btn1, c_btn2 = st.columns(2)
+        with c_btn1:
+            if st.button("▶ Start Scanner", key="uni_start"):
+                try:
+                    if os.name == 'nt':
+                        subprocess.Popen(["python", "unicorn_scanner.py"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        subprocess.Popen("nohup python3 unicorn_scanner.py &", shell=True)
+                    st.success("Started!")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                st.rerun()
+        with c_btn2:
+            if st.button("■ Stop Scanner", key="uni_stop"):
+                try:
+                    if os.name == 'nt':
+                        subprocess.run('wmic process where "CommandLine like \'%unicorn_scanner.py%\'" delete', shell=True)
+                    else:
+                        subprocess.run("pkill -f unicorn_scanner.py", shell=True)
+                    st.success("Stopped!")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                st.rerun()
+                
+        if unicorn_status == "RUNNING":
+            st.markdown('<span class="badge badge-green">● SCANNER RUNNING</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="badge badge-red">● SCANNER STOPPED</span>', unsafe_allow_html=True)
+            
+        st.markdown("<br><b>Active Locked Unicorns</b>", unsafe_allow_html=True)
+        if unicorns:
+            for u in unicorns:
+                u_sym = u.get('symbol', 'UNKNOWN')
+                u_chg = u.get('change', 0)
+                u_vol = u.get('volume', 0) / 1000000
+                live_pnl = u.get('live_pnl', 0)
+                chg_col = "#10b981" if u_chg >= 0 else "#f43f5e"
+                pnl_col = "#10b981" if live_pnl >= 0 else "#f43f5e"
+                pos = u.get('current_position', 'NONE')
+                st.markdown(f'''
+                <div style="background:#0f172a; border-left:4px solid #f59e0b; padding:10px; margin-bottom:10px; border-radius:4px;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:#e2e8f0; font-weight:700;">{u_sym}</span>
+                        <span style="color:{pnl_col}; font-size:0.9rem; font-weight:bold;">{live_pnl:+.2f}%</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-top:4px;">
+                        <span style="color:{chg_col}; font-size:0.8rem;">24h: {u_chg:+.2f}%</span>
+                        <span style="color:#94a3b8; font-size:0.8rem;">Pos: {pos}</span>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+        else:
+            st.info("No unicorns locked currently.")
+            
+    with uc2:
+        st.markdown("<b>Paper Trade Journal (Simulated Lego Logic)</b>", unsafe_allow_html=True)
+        
+        # Calculate real-time Paper P&L
+        paper_file = "crypto_paper_trades.csv"
+        if os.path.exists(paper_file):
+            try:
+                pdf = pd.read_csv(paper_file)
+                total_pnl = pdf['pnl_pct'].sum() if 'pnl_pct' in pdf.columns else 0.0
+                pnl_col_main = "#10b981" if total_pnl >= 0 else "#f43f5e"
+                
+                st.markdown(f'''
+                <div style="background:rgba(255,255,255,0.05); padding:10px 15px; border-radius:10px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="color:#e2e8f0; font-weight:600;">Net Simulated P&L</span>
+                    <span style="color:{pnl_col_main}; font-size:1.5rem; font-weight:800;">{total_pnl:+.2f}%</span>
+                </div>
+                ''', unsafe_allow_html=True)
+                
+                pdf_show = pdf.tail(15).copy() # Show last 15
+                
+                # Format dataframe
+                def color_pnl_paper(val):
+                    try:
+                        return 'color: #10b981' if float(val) >= 0 else 'color: #f43f5e'
+                    except:
+                        return ''
+                
+                show_cols_p = ['timestamp', 'coin', 'direction', 'entry_price', 'exit_price', 'pnl_pct', 'status']
+                valid_cols = [c for c in show_cols_p if c in pdf_show.columns]
+                p_styled = pdf_show[valid_cols].style.map(color_pnl_paper, subset=['pnl_pct'] if 'pnl_pct' in valid_cols else [])
+                st.dataframe(p_styled, use_container_width=True, key="paper_journal")
+            except Exception as e:
+                st.error(f"Error loading paper trades: {e}")
+        else:
+            st.info("📭 No paper trades generated yet.")
+
     st.caption("BHARAT AlgoVerse v3.0 • Built for Dr. Saab 🩺 • Crypto Module")
 
 
