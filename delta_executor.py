@@ -749,7 +749,8 @@ def execute_crypto_trade(asset, direction):
     # This is an absolute rule per Dr. Saab.
     has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
     has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
-    strategy_type = db.get_param('crypto_strategy', 'OPTION_SELLING')
+    import config
+    strategy_type = config.STRATEGY_MODE
 
     if strategy_type == "OPTION_SELLING":
         if (direction == "BUY" and has_call) or (direction == "SELL" and has_put) or (has_call and has_put):
@@ -787,7 +788,7 @@ def execute_crypto_trade(asset, direction):
             return
 
     # 3. Find Best Option to Open
-    strategy_type = db.get_param('crypto_strategy', 'OPTION_SELLING')
+    strategy_type = config.STRATEGY_MODE
     
     if strategy_type == "OPTION_SELLING":
         # Option Selling:

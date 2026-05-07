@@ -167,8 +167,8 @@ def check_sl_tp():
 # MAIN EVALUATOR: Evaluates signal and places entries
 # ============================================================
 def run_crypto_sar():
-    if db.get_param('crypto_algo_running', 'OFF') == 'OFF':
-        return
+    # FORCED ON: Dr. Saab's rule
+    db.set_param('crypto_algo_running', 'ON')
 
     asset     = "BTC"
     timeframe = db.get_param("candle_timeframe", "5m")
@@ -191,16 +191,19 @@ def run_crypto_sar():
     else:
         db.set_param("crypto_active_symbol", "NONE")
 
-    # ---- CLEAN SLATE RULE: No trade before screen is EMPTY ----
-    if not active_any:
+    # ---- BULLETPROOF HUNTER RULE: Entry if Empty ----
+    active_symbol = db.get_param("crypto_active_symbol", "NONE")
+    
+    if active_symbol in ["NONE", "None", None, "", "0", 0] and not active_any:
         if signal in ["BUY", "SELL"]:
-            log_terminal(f"🎯 SIGNAL DETECTED: {signal}. Taking fresh entry.", "TRADE")
+            send_telegram_msg(f"🚨 POSITION EMPTY! Forcing Immediate {signal} Entry.")
+            log_terminal(f"🎯 HUNTER MODE: Taking fresh {signal} entry.", "TRADE")
             num_strikes = int(db.get_param('num_strikes', '1'))
             for i in range(num_strikes):
                 delta_executor.execute_crypto_trade(asset, signal)
                 if num_strikes > 1:
                     time.sleep(1)
-    else:
+    elif active_any:
         crypto_roller.check_and_roll_crypto()
 
 
