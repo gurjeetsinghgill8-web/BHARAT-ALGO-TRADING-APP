@@ -35,19 +35,25 @@ def run_janitor():
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
+    strategy_type = db.get_param("crypto_strategy", "OPTION_SELLING")
 
-    # CASE: SIGNAL SELL BUT CALL OPEN
-    if signal == "SELL" and call_active:
-        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
-        delta_executor.square_off_crypto()
-
-    # CASE: SIGNAL BUY BUT PUT OPEN
-    elif signal == "BUY" and put_active:
-        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
-        delta_executor.square_off_crypto()
+    if strategy_type == "OPTION_SELLING":
+        if signal == "SELL" and put_active:
+            log_terminal("JANITOR FLIP: Closing PUT to prepare for SELL entry (Selling Strategy).", "ALERT")
+            delta_executor.square_off_crypto()
+        elif signal == "BUY" and call_active:
+            log_terminal("JANITOR FLIP: Closing CALL to prepare for BUY entry (Selling Strategy).", "ALERT")
+            delta_executor.square_off_crypto()
+    else:
+        if signal == "SELL" and call_active:
+            log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry (Buying Strategy).", "ALERT")
+            delta_executor.square_off_crypto()
+        elif signal == "BUY" and put_active:
+            log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry (Buying Strategy).", "ALERT")
+            delta_executor.square_off_crypto()
 
     # CASE: SIGNAL WAIT BUT ANYTHING OPEN
-    elif signal == "WAIT" and (call_active or put_active):
+    if signal == "WAIT" and (call_active or put_active):
         log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
         delta_executor.square_off_crypto()
 
