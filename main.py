@@ -212,7 +212,7 @@ def run_crypto_sar():
 # ============================================================
 def main():
     # --- BULLETPROOF SINGLETON ---
-    instance = os.environ.get('BOT_INSTANCE', 'BUYING')
+    instance = getattr(config, 'STRATEGY_MODE', 'BUYING')
     lock_port = 47202 if instance == 'SELLING' else 47200
     
     try:
