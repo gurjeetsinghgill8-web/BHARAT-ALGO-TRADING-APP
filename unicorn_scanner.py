@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-import pandas_ta as ta
+import pandas_ta_classic as ta
 
 # --- SURGICAL CONFIG ---
 SCAN_INTERVAL_HOURS = 6
