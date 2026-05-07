@@ -200,11 +200,14 @@ def run_crypto_sar():
 # ============================================================
 def main():
     # --- BULLETPROOF SINGLETON ---
+    instance = os.environ.get('BOT_INSTANCE', 'BUYING')
+    lock_port = 47202 if instance == 'SELLING' else 47200
+    
     try:
         lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        lock_socket.bind(('127.0.0.1', 47200))
+        lock_socket.bind(('127.0.0.1', lock_port))
     except socket.error:
-        print("🚨 BOT ALREADY RUNNING. EXITING.")
+        print(f"🚨 BOT ({instance}) ALREADY RUNNING on port {lock_port}. EXITING.")
         sys.exit(1)
 
     print("=" * 60)

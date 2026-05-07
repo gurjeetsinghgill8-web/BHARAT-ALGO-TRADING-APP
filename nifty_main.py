@@ -182,7 +182,7 @@ def main():
         'nifty_st_period':       '10',
         'nifty_st_multiplier':   '1.5',
         'nifty_lots':            '1',
-        'nifty_lot_size':        '25',
+        'nifty_lot_size':        '65',
         'nifty_target_premium':  '120',
         'nifty_sl_percent':      '30',
         'nifty_tp_percent':      '80',

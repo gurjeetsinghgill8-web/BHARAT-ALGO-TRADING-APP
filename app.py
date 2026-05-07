@@ -1672,10 +1672,10 @@ elif page == "⚙️ API Config (Auth)":
         _u_pin    = db.get_param('upstox_pin', '')
         _u_totp   = db.get_param('upstox_totp_secret', '')
 
-        u_api    = st.text_input("Upstox API Key", _u_api)
-        u_secret = st.text_input("Upstox API Secret", _u_secret, type="password")
-        u_rurl   = st.text_input("Redirect URI", _u_rurl)
-        u_phone  = st.text_input("Upstox Phone No", _u_phone)
+        u_api    = st.text_input("Upstox API Key", _u_api).strip()
+        u_secret = st.text_input("Upstox API Secret", _u_secret, type="password").strip()
+        u_rurl   = st.text_input("Redirect URI", _u_rurl).strip()
+        u_phone  = st.text_input("Upstox Phone No", _u_phone).strip()
         u_pin    = st.text_input("Upstox PIN", _u_pin, type="password")
         u_totp   = st.text_input("TOTP Secret (2FA Key)", _u_totp, help="Get this from Upstox 'My Account' -> '2FA' -> 'Enable TOTP'")
 
@@ -1703,14 +1703,60 @@ elif page == "⚙️ API Config (Auth)":
 
         st.divider()
         st.markdown('<div class="section-title">🧪 Auth Test</div>', unsafe_allow_html=True)
-        if st.button("🚀 TRIGGER AUTO-LOGIN TEST"):
-            with st.spinner("Launching headless browser on VPS..."):
-                try:
-                    import auto_login_upstox
-                    auto_login_upstox.run_auto_login()
-                    st.success("✅ Auto-login flow completed! Check system logs.")
-                except Exception as e:
-                    st.error(f"Test failed: {e}")
+        st.divider()
+        st.markdown('<div class="section-title">🔑 Manual Upstox Token Flow</div>', unsafe_allow_html=True)
+        st.info("Follow these steps to generate a fresh token manually (Bypasses Captcha):")
+        
+        # 1. Generate Auth URL
+        import urllib.parse
+        params = {
+            'response_type': 'code',
+            'client_id': (u_api or _u_api).strip(),
+            'redirect_uri': (u_rurl or _u_rurl).strip()
+        }
+        auth_url = "https://api.upstox.com/v2/login/authorization/dialog?" + urllib.parse.urlencode(params)
+        
+        st.markdown(f"**Step 1:** [👉 Click here to Login to Upstox]({auth_url})")
+        st.caption("Log in with your Phone Number, OTP, and PIN. You will be redirected to a blank page.")
+        
+        # 2. Get Code
+        auth_code = st.text_input("Step 2: Paste the 'code' from the redirected URL", 
+                                help="Look at the URL after login. Copy everything after 'code='")
+        
+        # 3. Exchange & Save
+        if st.button("🔥 GENERATE & SAVE ACCESS TOKEN"):
+            if not auth_code:
+                st.error("Please paste the code first!")
+            else:
+                with st.spinner("Exchanging code for token..."):
+                    try:
+                        url = "https://api.upstox.com/v2/login/authorization/token"
+                        headers = {'accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'}
+                        data = {
+                            'code': auth_code.strip(),
+                            'client_id': (u_api or _u_api).strip(),
+                            'client_secret': (u_secret or _u_secret).strip(),
+                            'redirect_uri': (u_rurl or _u_rurl).strip(),
+                            'grant_type': 'authorization_code'
+                        }
+                        import requests
+                        resp = requests.post(url, headers=headers, data=data)
+                        if resp.status_code == 200:
+                            token = resp.json().get('access_token')
+                            if token:
+                                # Save to DB
+                                db.set_param('upstox_access_token', token)
+                                # Save to access_token.txt as requested
+                                with open('access_token.txt', 'w') as f:
+                                    f.write(token)
+                                st.success("✅ SUCCESS! Token saved to DB and 'access_token.txt'.")
+                                st.balloons()
+                            else:
+                                st.error("Received 200 but no token in response.")
+                        else:
+                            st.error(f"Failed: {resp.status_code} - {resp.text}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
     st.info("💡 **Security Note:** All credentials are stored locally in the VPS database (`trading_app.db`). Do not share this dashboard link with anyone.")
 

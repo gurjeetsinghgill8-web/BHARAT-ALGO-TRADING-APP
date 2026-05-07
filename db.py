@@ -2,7 +2,13 @@ import os
 import sqlite3
 from datetime import datetime
 
-DB_NAME = "trading_app.db"
+import os
+
+instance = os.environ.get('BOT_INSTANCE', 'BUYING')
+if instance == 'SELLING':
+    DB_NAME = "trading_app_selling.db"
+else:
+    DB_NAME = "trading_app.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -38,6 +44,12 @@ def load_secrets():
         'upstox_api_secret':   'upstox_api_secret',
         'upstox_redirect_uri': 'upstox_redirect_uri',
     }
+
+    # If this is the SELLING bot, map the special "selling_" keys to standard keys
+    if instance == 'SELLING':
+        _key_map['selling_delta_api_key'] = 'delta_api_key'
+        _key_map['selling_delta_api_secret'] = 'delta_api_secret'
+        _key_map['selling_telegram_token'] = 'telegram_bot_token'
 
     secrets_files = ["secrets.txt", ".streamlit/secrets.toml"]
     loaded = []

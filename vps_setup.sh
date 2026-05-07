@@ -110,12 +110,13 @@ sudo systemctl daemon-reload
 
 sudo systemctl enable  bharat_dashboard
 sudo systemctl enable  bharat_engine
-sudo systemctl enable  bharat_nifty
+# sudo systemctl enable  bharat_nifty
 sudo systemctl enable  bharat_invest
 
 sudo systemctl restart bharat_dashboard
 sudo systemctl restart bharat_engine
-sudo systemctl restart bharat_nifty
+# sudo systemctl restart bharat_nifty
+sudo systemctl stop bharat_nifty || true
 sudo systemctl restart bharat_invest
 
 echo "===================================================="

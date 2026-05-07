@@ -23,6 +23,21 @@ BASE_URL = "https://api.upstox.com/v2"
 
 # ── Auth Header ────────────────────────────────────────────
 def _headers() -> dict:
+    token = ""
+    # 1. Surgical Bypass: Check manual token file first
+    try:
+        import os
+        if os.path.exists("access_token.txt"):
+            with open("access_token.txt", "r") as f:
+                token = f.read().strip()
+                if token: return {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type":  "application/json",
+                    "Accept":        "application/json",
+                }
+    except: pass
+
+    # 2. Fallback to DB
     token = db.get_param('upstox_access_token', '')
     return {
         "Authorization": f"Bearer {token}",
@@ -126,40 +141,10 @@ def fetch_nifty_option_chain(symbol: str = None, expiry: str = None) -> list:
                             'expiry':       expiry,
                         })
             return flat
-        elif resp.status_code == 401:
-            log_terminal("[NIFTY] UPSTOX TOKEN EXPIRED. Auto-Healing Started...", "ALERT")
-            send_telegram_msg("⚠️ [NIFTY AUTO-HEAL] Token expired! Triggering automated background login...")
-            try:
-                import auto_login_upstox
-                auto_login_upstox.run_auto_login()
-                
-                # Retry fetch with fresh token
-                resp = requests.get(url, headers=_headers(), params=params, timeout=10)
-                if resp.status_code == 200:
-                    send_telegram_msg("✅ [NIFTY AUTO-HEAL] Success! Token regenerated autonomously. Resuming trades.")
-                    data = resp.json().get('data', [])
-                    flat = []
-                    for strike in data:
-                        sp = float(strike.get('strike_price', 0))
-                        for opt_type, key in [('CE', 'call_options'), ('PE', 'put_options')]:
-                            opt = strike.get(key)
-                            if opt:
-                                flat.append({
-                                    'strike':       sp,
-                                    'type':         opt_type,
-                                    'ltp':          float(opt.get('market_data', {}).get('ltp', 0)),
-                                    'instrument':   opt.get('instrument_key', ''),
-                                    'symbol':       opt.get('trading_symbol', ''),
-                                    'expiry':       expiry,
-                                })
-                    return flat
-                else:
-                    send_telegram_msg(f"🔴 [NIFTY ERROR] Auto-Heal Failed! Upstox still returned {resp.status_code}. Check credentials.")
-                    return None
-            except Exception as auto_e:
-                log_terminal(f"[NIFTY] Auto-Heal Exception: {auto_e}", "ERROR")
-                send_telegram_msg(f"🔴 [NIFTY ERROR] Auto-Heal script crashed: {auto_e}")
-                return None
+        elif resp.status_code in [401, 403]:
+            log_terminal(f"[NIFTY] UPSTOX AUTH FAILURE ({resp.status_code}). Manual Token Required.", "ALERT")
+            send_telegram_msg("🔴 [NIFTY AUTH ERROR] Token expired or invalid. Please visit the Dashboard to generate a new token manually.")
+            return None
         else:
             log_terminal(f"[NIFTY] Option chain fetch failed: {resp.status_code} - {resp.text[:150]}", "ERROR")
             return None
@@ -214,7 +199,7 @@ def place_nifty_order(instrument_key: str, qty: int, side: str = 'BUY') -> bool:
     """
     Places market order on Upstox.
     side: 'BUY' or 'SELL'
-    qty: number of lots × lot size (default Nifty lot = 25)
+    qty: number of lots × lot size (default Nifty lot = 65)
     """
     mode = db.get_param('nifty_trade_mode', 'PAPER') or 'PAPER'
     if mode != 'LIVE':
@@ -333,7 +318,7 @@ def execute_nifty_trade(direction: str) -> bool:
         return False
 
     lots     = int(db.get_param('nifty_lots', '1') or '1')
-    lot_size = int(db.get_param('nifty_lot_size', '25') or '25')  # Nifty lot = 25
+    lot_size = 65  # DR. SAAB FIX: Strictly 65 (Effective 2026).
     qty      = lots * lot_size
 
     log_terminal(

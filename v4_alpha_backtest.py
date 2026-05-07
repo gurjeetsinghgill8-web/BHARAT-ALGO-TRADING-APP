@@ -1,4 +1,6 @@
-
+[5/7/2026 12:46 PM] Gg Gg Delhi: Main abhi yah nahin samajh Pa Raha Hun ki yah chal kahan hai mere mobile per ya mere laptop ki IP adress per kyunki mere laptop ko to apne mobile se hi Wi-Fi Diya hua hai to laptop mere mobile ka Wi-Fi use kar raha hai ghar ka nahin kar raha hai Delhi mein ghar per kam rahata hun aur mobile Se sab kuchh karta hun to uske hisab Se mujhe fayda jugaad Bata ke rakho
+[5/7/2026 2:54 PM] Gg Gg Delhi: Pahle hamen yah dekhna padega kya Ham donon strategy Bitcoin mein ek Sath Chala sakte hain aur ismein kuchh technical fault to nahin aaega na ek mein Ham 5 minut per option karenge Jaise Aaj expire to usse next Diwali aur
+[5/7/2026 2:55 PM] Gg Gg Delhi: Dusri Jo strategy mein Ham super trend 15 minut wale per chalayenge aur usmein option sel karenge slidely out of the money but vo 15 minut mein signal lega aur vahan per option selling hogi theek hai so support buying mein agar signal upar Hai to call Bai Hoti Hai per salary bhi sem time per sel Hoti Hai tumhen pata hai to ise technically check karke batao Kya yahi donon chijen possible hai ek Sath chalana to batao FIR Ham usko Chala denge kyunki ek hi botal per donon chijen available to hai but hamen do study chalane wala logic usmein dalna hoga but yah bhi dekhna hai ki vah pahli strateg ke sath clash na Karen uska ful form banana hoga kisi ko pahli wali chhoti Si chal rahi hai vah chalti Rahe aur dusri interfere na Karen aur unko pata rahegi bhai vah kaun si side mein jakar kam karenge
 import yfinance as yf
 import pandas as pd
 import numpy as np
