@@ -9,6 +9,11 @@
 REPO_URL="https://github.com/gurjeetsinghgill8-web/BHARAT-ALGO-TRADING-APP.git"
 
 echo "💉 Starting Surgical Separation of Engines..."
+# 1. KILL ALL LEGACY SERVICES (The Conflict Source)
+echo "🛑 Stopping Legacy Services..."
+sudo systemctl stop bharat_engine bharat_dashboard bharat_invest bharat_nifty bharat_selling bharat_selling_dashboard 2>/dev/null || true
+sudo systemctl disable bharat_engine bharat_dashboard bharat_invest bharat_nifty bharat_selling bharat_selling_dashboard 2>/dev/null || true
+
 sudo pkill -9 python3 2>/dev/null || true
 sudo pkill -9 streamlit 2>/dev/null || true
 rm -f /root/BHARAT-BUYING/bot.lock /root/BHARAT-SELLING/bot.lock /root/BHARAT-ALGO-TRADING-APP/bot.lock
@@ -42,7 +47,6 @@ setup_instance() {
     fi
     source venv/bin/activate
     pip install -q --no-cache-dir --upgrade pip
-    pip install -q --no-cache-dir requests pandas  # Ensure core libs are first
     pip install -q --no-cache-dir -r requirements.txt
 
     # 2. Transfer 'Soul' (API Keys & Tokens) from legacy folder if missing
