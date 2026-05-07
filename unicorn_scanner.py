@@ -34,24 +34,16 @@ def get_blasting_unicorns():
     
     for t in tickers:
         symbol = t.get('symbol', '')
-        if not symbol.endswith('USDT'):
+        if not (symbol.endswith('USDT') or symbol.endswith('USD')):
             continue
             
         try:
             # Ticker stats
             mark_price = float(t.get('mark_price', 0))
-            vol_24h = float(t.get('turnover_24h', 0))  # Turnover usually means quote volume (USDT)
+            vol_24h = float(t.get('turnover_usd', t.get('turnover', 0)))
             
-            # Some tickers don't have turnover_24h but volume_24h
-            if vol_24h == 0:
-                vol_24h = float(t.get('volume_24h', 0)) * mark_price
-                
             # Price change calculations
-            open_24h = float(t.get('open_24h', 0))
-            if open_24h > 0:
-                change_pct = ((mark_price - open_24h) / open_24h) * 100
-            else:
-                change_pct = 0
+            change_pct = float(t.get('mark_change_24h', t.get('ltp_change_24h', 0)))
                 
             # Filters
             if vol_24h > 500000 and change_pct > 8:
@@ -91,15 +83,14 @@ def manage_unicorns():
                 data = json.load(f)
                 last_scan = datetime.fromisoformat(data['timestamp'])
                 
-                # Agar 6 ghante nahi huye, toh purane coins hi chalao
                 if datetime.now() < last_scan + timedelta(hours=SCAN_INTERVAL_HOURS):
-                    print(f"🕒 Coins Locked. Next scan in: {last_scan + timedelta(hours=SCAN_INTERVAL_HOURS) - datetime.now()}")
+                    print(f"Coins Locked. Next scan in: {last_scan + timedelta(hours=SCAN_INTERVAL_HOURS) - datetime.now()}")
                     return data['coins']
         except Exception as e:
             print(f"Error reading lock file: {e}. Rescanning.")
     
     # Naya scan karo agar 6 ghante ho gaye hain
-    print("🔍 6 Hours passed (or no lock)! Scanning for new Unicorns...")
+    print("6 Hours passed (or no lock)! Scanning for new Unicorns...")
     new_coins = get_blasting_unicorns()
     
     with open(LOCK_FILE, 'w') as f:
@@ -178,7 +169,7 @@ def log_trade(coin_name, entry_price, exit_price, pnl_pct, status, direction):
         df = df_new
         
     df.to_csv(LOG_FILE, index=False)
-    print(f"📝 Simulated Trade Logged: {coin_name} | {direction} | Entry: {entry_price} | PnL: {pnl_pct}% | {status}")
+    print(f"Simulated Trade Logged: {coin_name} | {direction} | Entry: {entry_price} | PnL: {pnl_pct}% | {status}")
 
 def paper_trade_logic(coin):
     """
@@ -215,7 +206,7 @@ def paper_trade_logic(coin):
         current_pos = coin.get('current_position', 'NONE')
         entry_price = float(coin.get('entry_price', 0))
         
-        print(f"🔍 {symbol} Check -> Pos: {current_pos}, Close[-2]: {close_price:.4f}, SAR: {sar_val:.4f}, Dir: {signal_dir}")
+        print(f"{symbol} Check -> Pos: {current_pos}, Close[-2]: {close_price:.4f}, SAR: {sar_val:.4f}, Dir: {signal_dir}")
         
         # Logic: If Price > SAR AND no Buy position
         if signal_dir == 1 and current_pos != "BUY":
@@ -257,7 +248,7 @@ def paper_trade_logic(coin):
     return coin
 
 if __name__ == "__main__":
-    print("🚀 BHARAT ALGOVERSE - UNICORN SCANNER 🦄 STARTED")
+    print("BHARAT ALGOVERSE - UNICORN SCANNER STARTED")
     print("Isolation Mode: Running independently.")
     
     while True:
@@ -272,9 +263,9 @@ if __name__ == "__main__":
             save_unicorns_state(updated_coins)
             
             # Wait for 5 minutes (300 seconds) before next paper trade check
-            print(f"💤 Sleeping for {PAPER_TRADE_INTERVAL_MINS} minutes...")
+            print(f"Sleeping for {PAPER_TRADE_INTERVAL_MINS} minutes...")
             time.sleep(PAPER_TRADE_INTERVAL_MINS * 60)
             
         except Exception as e:
-            print(f"⚠️ Blaster Error: {e}")
+            print(f"Blaster Error: {e}")
             time.sleep(30)
