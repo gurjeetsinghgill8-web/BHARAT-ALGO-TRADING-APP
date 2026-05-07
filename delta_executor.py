@@ -370,7 +370,7 @@ def sync_delta_position():
             
             if len(positions) > 0:
                 if not hasattr(sync_delta_position, "last_diag"): sync_delta_position.last_diag = 0
-                if time.time() - sync_delta_position.last_diag > 300: # Every 5 mins
+                if time.time() - sync_delta_position.last_diag > 60: # Every 1 min (Dr. Saab's Pulse)
                     send_telegram_msg(f"🔍 SYNC DIAGNOSTIC: Found {len(positions)} positions on Exchange.\nSymbols: {active_symbols if active_symbols else 'UNKNOWN (Check Pulse)'}")
                     sync_delta_position.last_diag = time.time()
 

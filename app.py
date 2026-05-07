@@ -256,20 +256,22 @@ except Exception:
 
 # ── SIDEBAR ────────────────────────────────────────────────────
 with st.sidebar:
+    import config
     # --- DYNAMIC INSTANCE HEADER ---
-    instance = os.environ.get('BOT_INSTANCE', 'BUYING')
+    instance = config.STRATEGY_MODE
+    tf = config.TIMEFRAME
     if instance == 'SELLING':
-        st.markdown("""
+        st.markdown(f"""
             <div style="background:#78350f; padding:15px; border-radius:10px; margin-bottom:20px; border-left:5px solid #f59e0b;">
                 <h2 style="margin:0; color:#fef3c7; font-size:1.2rem;">🛡️ SELLING INSTANCE</h2>
-                <p style="margin:0; color:#fde68a; font-size:0.8rem;">15m Strategy | Sub-Account</p>
+                <p style="margin:0; color:#fde68a; font-size:0.8rem;">{tf} Strategy | Sub-Account</p>
             </div>
         """, unsafe_allow_html=True)
     else:
-        st.markdown("""
+        st.markdown(f"""
             <div style="background:#064e3b; padding:15px; border-radius:10px; margin-bottom:20px; border-left:5px solid #10b981;">
                 <h2 style="margin:0; color:#ecfdf5; font-size:1.2rem;">🚀 BUYING INSTANCE</h2>
-                <p style="margin:0; color:#a7f3d0; font-size:0.8rem;">5m Strategy | Main Account</p>
+                <p style="margin:0; color:#a7f3d0; font-size:0.8rem;">{tf} Strategy | Main Account</p>
             </div>
         """, unsafe_allow_html=True)
 

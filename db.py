@@ -1,14 +1,10 @@
 import os
 import sqlite3
 from datetime import datetime
+import config
 
-import os
-
-instance = os.environ.get('BOT_INSTANCE', 'BUYING')
-if instance == 'SELLING':
-    DB_NAME = "trading_app_selling.db"
-else:
-    DB_NAME = "trading_app.db"
+DB_NAME = config.DB_NAME
+instance = config.STRATEGY_MODE
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)

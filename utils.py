@@ -7,8 +7,12 @@ def send_telegram_msg(message):
     chat_id = db.get_param('telegram_chat_id')
     if not token or not chat_id: return
     
+    import config
+    prefix = getattr(config, 'TELEGRAM_PREFIX', '🚀')
+    full_message = f"{prefix} {message}"
+    
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": full_message, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:

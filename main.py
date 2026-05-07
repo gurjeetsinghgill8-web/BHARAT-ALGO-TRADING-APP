@@ -11,6 +11,7 @@ import sys
 import socket
 import traceback
 import json
+import config
 from utils import log_terminal, send_telegram_msg
 
 # --- FORCE IPv4 GLOBALLY ---
@@ -35,7 +36,7 @@ def run_janitor():
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
-    strategy_type = db.get_param("crypto_strategy", "OPTION_BUYING")
+    strategy_type = config.STRATEGY_MODE
 
     if strategy_type == "OPTION_SELLING":
         if signal == "SELL" and put_active:
@@ -63,7 +64,7 @@ def run_janitor():
 
     # --- AGGRESSIVE LOGGING (As requested by Dr. Saab) ---
     active_side = "CALL" if call_active else ("PUT" if put_active else "NONE")
-    print(f"[JANITOR] Instance: {os.environ.get('BOT_INSTANCE')} | Strategy: {strategy_type} | Signal: {signal} | Active: {active_side}")
+    print(f"{config.TELEGRAM_PREFIX} | Mode: {strategy_type} | Signal: {signal} | Active: {active_side}")
 
     # QUANTITY GUARD: Prevent over-trading
     try:

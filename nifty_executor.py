@@ -318,7 +318,8 @@ def execute_nifty_trade(direction: str) -> bool:
         return False
 
     lots     = int(db.get_param('nifty_lots', '1') or '1')
-    lot_size = 65  # DR. SAAB FIX: Strictly 65 (Effective 2026).
+    import config
+    lot_size = getattr(config, 'NIFTY_LOT_SIZE', 65)  # DR. SAAB FIX: Strictly 65 (Effective 2026).
     qty      = lots * lot_size
 
     log_terminal(
