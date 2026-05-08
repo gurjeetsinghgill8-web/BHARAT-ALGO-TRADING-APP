@@ -1046,6 +1046,31 @@ elif page == "\U0001f4b9 Investment (RS)":
     with iv5:
         st.markdown('<div class="section-title">\U0001f4dc Strategic Advisor Reports</div>', unsafe_allow_html=True)
         
+        # --- INSTANT NEWS BUTTON (USER REQUEST) ---
+        st.markdown("""
+        <div class="kpi-card" style="border: 2px solid #6366f1; margin-bottom: 25px;">
+            <div class="kpi-label">Instant Market Intelligence</div>
+            <p style="font-size: 0.9rem; opacity: 0.8;">Click below to generate a fresh intelligence report and push it to your Telegram network instantly.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("🚀 GENERATE & PUSH INSTANT NEWSLETTER", key="instant_push_btn"):
+            with st.spinner("🩺 Dr. Saab is analyzing the market..."):
+                try:
+                    import invest_newsletter
+                    # 1. Generate fresh content
+                    report = invest_newsletter.generate_newsletter_content("DAILY")
+                    # 2. Push to Telegram
+                    invest_newsletter.push_newsletter_to_telegram(report)
+                    # 3. Success UI
+                    st.success(f"✅ INSTANT REPORT DELIVERED!\n\nView here: {report['url']}")
+                    st.balloons()
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"Instant generation failed: {_e}")
+
+        st.divider()
         REPORTS_DIR = os.path.join(os.getcwd(), "reports", "newsletters")
         if os.path.exists(REPORTS_DIR):
             files = sorted([f for f in os.listdir(REPORTS_DIR) if f.endswith(".html")], reverse=True)
