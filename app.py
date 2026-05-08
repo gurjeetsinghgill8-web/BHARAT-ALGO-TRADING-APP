@@ -783,10 +783,12 @@ elif page == "\U0001f4b9 Investment (RS)":
         st.stop()
 
     # ── Tabs ────────────────────────────────────────────────
-    iv1, iv2, iv3, iv4, iv5 = st.tabs([
+    iv1, iv2, iv3, iv4, iv5, iv6, iv7 = st.tabs([
         "\U0001f4ca Market Pulse",
         "\U0001f3c6 Sector Ranking",
         "\U0001f3af Top Stocks",
+        "\U0001f680 BB Blast Radar",
+        "\U0001f552 Masterstroke Backtest",
         "\u2699\ufe0f Settings",
         "\U0001f4dc Strategic Reports"
     ])
@@ -858,8 +860,8 @@ elif page == "\U0001f4b9 Investment (RS)":
     with iv2:
         st.markdown('<div class="section-title">\U0001f3c6 Sector RS-55 Ranking vs Nifty 50</div>', unsafe_allow_html=True)
 
-        if st.button("\U0001f504 Scan All Sectors Now", key="iv_sector_btn"):
-            with st.spinner("Scanning all NSE sectors (may take 60-90 sec)..."):
+        if st.button("\U0001f504 Scan 70+ BSE Detailed Sectors", key="iv_sector_btn"):
+            with st.spinner("Analyzing Entire Indian Economy (70+ Sectors)..."):
                 try:
                     _period = int(db.get_param("invest_rs_period", "55") or "55")
                     sectors = invest_rs_engine.scan_sectors(_period)
@@ -909,14 +911,28 @@ elif page == "\U0001f4b9 Investment (RS)":
     with iv3:
         st.markdown('<div class="section-title">\U0001f3af Top Stocks by RS-55 (Within Sectors)</div>', unsafe_allow_html=True)
 
-        _sector_list = list(invest_rs_engine.SECTOR_STOCKS.keys())
-        _sel_sector  = st.selectbox("Pick a Sector to Scan Stocks", _sector_list, key="iv_sector_sel")
+        _sector_list = list(invest_rs_engine.BSE_SECTOR_MAP.keys())
+        _sel_sector  = st.selectbox("Pick a BSE Sector to Analyze", _sector_list, key="iv_sector_sel")
 
-        if st.button("\U0001f504 Scan Stocks in This Sector", key="iv_stock_btn"):
-            with st.spinner(f"Scanning {_sel_sector} stocks..."):
+        if st.button("\U0001f504 Analyze Stocks in Sector", key="iv_stock_btn"):
+            with st.spinner(f"Analyzing {_sel_sector} stocks..."):
                 try:
                     _period = int(db.get_param("invest_rs_period", "55") or "55")
-                    stocks  = invest_rs_engine.scan_stocks_in_sector(_sel_sector, _period)
+                    # Simplified scanning for the tab
+                    stocks = []
+                    for t in invest_rs_engine.BSE_SECTOR_MAP[_sel_sector]:
+                        rs = invest_rs_engine.calc_rs(t, "^NSEI", _period)
+                        if rs:
+                            stocks.append({
+                                "symbol": t.replace(".NS", ""),
+                                "rs": rs,
+                                "vs_nifty_pct": (rs - 1) * 100,
+                                "outperforming": rs > 1.0,
+                                "cap": "N/A" # We don't have cap data in the simple map
+                            })
+                    stocks.sort(key=lambda x: x["rs"], reverse=True)
+                    for i, s in enumerate(stocks, 1): s["rank"] = i
+                    
                     if stocks:
                         import pandas as pd, plotly.express as px
                         df_st = pd.DataFrame(stocks)
@@ -926,15 +942,13 @@ elif page == "\U0001f4b9 Investment (RS)":
                             {True: "\U0001f7e2 Strong", False: "\U0001f534 Weak"}
                         )
                         st.dataframe(
-                            df_st[["rank","symbol","cap","RS-55","vs Nifty","Status"]],
+                            df_st[["rank","symbol","RS-55","vs Nifty","Status"]],
                             use_container_width=True, hide_index=True
                         )
-                        colors = {"Large":"#10b981","Mid":"#6366f1","Small":"#f59e0b"}
-                        df_st["color"] = df_st["cap"].map(colors)
                         fig2 = px.bar(
                             df_st, x="symbol", y="vs_nifty_pct",
-                            color="cap",
-                            color_discrete_map=colors,
+                            color="outperforming",
+                            color_discrete_map={True: "#10b981", False: "#f43f5e"},
                             labels={"vs_nifty_pct":"% vs Nifty","symbol":"Stock"},
                             title=f"{_sel_sector} — Stock RS-{_period}",
                             template="plotly_dark",
@@ -946,23 +960,6 @@ elif page == "\U0001f4b9 Investment (RS)":
                         )
                         st.plotly_chart(fig2, use_container_width=True, key="iv_stock_chart")
 
-                        # Allocation hint
-                        top3 = stocks[:3]
-                        if top3:
-                            st.markdown("**\U0001f4b0 Suggested Allocation (Top 3):**")
-                            ac1, ac2, ac3 = st.columns(3)
-                            cols = [ac1, ac2, ac3]
-                            pcts = [50, 30, 20]
-                            for idx, (col, st_data, pct) in enumerate(zip(cols, top3, pcts)):
-                                with col:
-                                    cap_icon = {"Large":"\U0001f3e6","Mid":"\U0001f3e2","Small":"\U0001f3ea"}.get(st_data["cap"],"\U0001f4e6")
-                                    st.markdown(f"""
-                                    <div class="kpi-card">
-                                      <div class="kpi-label">{cap_icon} {st_data["symbol"]}</div>
-                                      <div class="kpi-value blue">{pct}%</div>
-                                      <div class="kpi-sub">{st_data["cap"]} Cap | RS: {st_data["rs"]:.3f}</div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
                     else:
                         st.warning("No stocks found for this sector.")
                 except Exception as _e:
@@ -1042,8 +1039,8 @@ elif page == "\U0001f4b9 Investment (RS)":
                 db.set_param("invest_algo_running","OFF")
                 st.warning("Bot set to OFF. Will stop on next loop check.")
 
-    # ── TAB 5: Strategic Reports ──────────────────────────────
-    with iv5:
+    # ── TAB 7: Strategic Reports ──────────────────────────────
+    with iv7:
         st.markdown('<div class="section-title">\U0001f4dc Strategic Advisor Reports</div>', unsafe_allow_html=True)
         
         # --- INSTANT NEWS BUTTON (USER REQUEST) ---
