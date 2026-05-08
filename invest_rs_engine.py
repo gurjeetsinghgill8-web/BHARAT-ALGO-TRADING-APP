@@ -51,6 +51,8 @@ SECTOR_INDICES = {
     "Nifty Consumption":"^CNXCONSUMPTION",
     "Nifty Finance":    "^CNXFINANCE",
     "Nifty CPSE":       "^CNXCPSE",
+    "Nifty Defence":    "^CNXDEFENSE",
+    "Nifty Digital":    "^CNXDIGITAL",
 }
 
 # ============================================================
@@ -119,10 +121,33 @@ SECTOR_STOCKS = {
         ("CAMS.NS","Mid"), ("ANGELONE.NS","Mid"), ("POLICYBZR.NS","Mid"),
         ("PAYTM.NS","Mid"), ("NYKAA.NS","Mid"),
     ],
+    "Nifty Defence": [
+        ("HAL.NS", "Large"), ("BEL.NS", "Large"), ("MAZDOCK.NS", "Mid"),
+        ("COCHINSHIP.NS", "Mid"), ("BDL.NS", "Mid"), ("DATAINFRA.NS", "Small"),
+    ],
+    "Nifty Digital": [
+        ("TCS.NS", "Large"), ("INFY.NS", "Large"), ("ZOMATO.NS", "Large"),
+        ("TATAELXSI.NS", "Mid"), ("KPITTECH.NS", "Mid"), ("AFFLE.NS", "Mid"),
+    ],
+}
+
+# ============================================================
+# SPECIAL LISTS (Hardcoded for Newsletter)
+# ============================================================
+SPECIAL_LISTS = {
+    "Defense Strategy": [
+        "HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS", "BDL.NS", 
+        "GRSE.NS", "BEML.NS", "ASTRAZEN.NS", "ZEN_TECH.NS"
+    ],
+    "AI & Digital Strategy": [
+        "TATAELXSI.NS", "KPITTECH.NS", "AFFLE.NS", "ZOMATO.NS", "CEINFO.NS",
+        "HAPPSTMNDS.NS", "CYIENT.NS", "NETWEB.NS", "DATAINFRA.NS"
+    ]
 }
 
 NIFTY_TICKER = "^NSEI"
 RS_PERIOD    = 55   # Primary RS period (days)
+RS_PERIOD_LONG = 120 # 6 months for weekly deep dive
 RSI_PERIOD   = 14   # RSI for Nifty pulse
 
 

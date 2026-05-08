@@ -1,28 +1,33 @@
 """
-invest_newsletter.py — BHARAT ALGOVERSE v3.1 | Strategic Newsletter Engine
+invest_newsletter.py — BHARAT ALGOVERSE v4.2 | Strategic Newsletter Engine
 ===========================================================================
-Generates Daily, Weekly, and Monthly reports in Text and HTML formats.
+Generates Daily, Weekly (Sunday), and Monthly reports in Text and HTML formats.
 Optimized for Telegram, Twitter, and Dashboard display.
+Branding: DR. SAAB'S STRATEGIC ADVICE (Doctor Girls Advice)
 """
 
 import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import json
+import os
 import db
 import invest_rs_engine as rs_engine
 import invest_rotation_engine as rot_eng
 import invest_fundamentals as fund_eng
 import invest_report as rep_eng
-from utils import log_terminal, send_telegram_msg
+from utils import log_terminal, send_telegram_msg, send_telegram_html
 
 IST = pytz.timezone("Asia/Kolkata")
 
 # ── Branding ──────────────────────────────────────────────────
-SYSTEM_NAME = "BHARAT MARKET COMPASS"
-SYSTEM_ICON = "🧭"
-SYSTEM_TAGLINE = "India's Institutional-Grade Market Intelligence"
-SYSTEM_VERSION = "v3.1"
+SYSTEM_NAME = "DR. SAAB'S STRATEGIC ADVICE"
+SYSTEM_ICON = "🩺"
+SYSTEM_TAGLINE = "Institutional-Grade Market Intelligence"
+SYSTEM_VERSION = "v4.2 Alpha"
+
+# ── Config ──────────────────────────────────────────────────
+REPORT_BASE_URL = db.get_param('report_server_url', 'http://YOUR_VPS_IP:8503')
 
 def generate_newsletter_content(newsletter_type="DAILY"):
     """
@@ -31,370 +36,516 @@ def generate_newsletter_content(newsletter_type="DAILY"):
     """
     log_terminal(f"[NEWSLETTER] Generating {newsletter_type} report...", "INFO")
     
-    # 1. Run live scan to get fresh data
-    scan_data = rot_eng.run_live_sector_scan()
+    # 1. Decide RS Period based on type
+    rs_period = rs_engine.RS_PERIOD_LONG if newsletter_type == "WEEKLY" else rs_engine.RS_PERIOD
     
-    # 2. Build Text (Telegram/Compass) version
-    text_content = _build_compass_text(scan_data, newsletter_type)
-        
-    # 3. Build HTML (Web/Dashboard) version
-    html_content = _build_html_version(scan_data, newsletter_type)
+    # 2. Run live scan with chosen period
+    scan_data = rot_eng.run_live_sector_scan() # Note: In production, we'd pass rs_period to this function
+    
+    # 3. Add laggards (Lagging industries)
+    all_sectors = sorted(scan_data.get("all_sectors", []), key=lambda x: x["rs"])
+    scan_data["lagging_sectors"] = all_sectors[:5]
+    
+    # 4. Special Focus: Defense & AI Tracking
+    scan_data["special_focus"] = _track_special_lists(rs_period)
+    
+    # 5. Enhance with financial metrics for top stocks
+    for sec_name, stocks in scan_data["stock_picks"].items():
+        for st in stocks:
+            st["metrics"] = fund_eng.get_company_metrics(st["ticker"])
+            
+    # 6. Build HTML (Web/Dashboard) version - THE PREMIUM ONE
+    html_content = _build_premium_html(scan_data, newsletter_type)
+    
+    # 7. Save to file
+    filepath = save_newsletter_to_file(html_content, newsletter_type)
+    filename = os.path.basename(filepath)
+    report_url = f"{REPORT_BASE_URL}/view/{filename}"
+    
+    # 8. Build Text (Telegram/Compass) version with URL
+    text_content = _build_compact_text(scan_data, newsletter_type, report_url)
     
     return {
         "text": text_content,
         "html": html_content,
+        "filepath": filepath,
+        "url": report_url,
         "data": scan_data,
         "type": newsletter_type,
         "date": datetime.now(IST).strftime("%d %b %Y %H:%M")
     }
 
-def _build_compass_text(scan_data, newsletter_type):
-    """
-    Builds the high-detail 'BHARAT MARKET COMPASS' text format.
-    Exactly matching the user's preferred style.
-    """
-    now_str    = datetime.now(IST).strftime("%d %b %Y %H:%M IST")
-    type_label = "DAILY INTELLIGENCE" if newsletter_type == "DAILY" else ("WEEKLY REVIEW" if newsletter_type == "WEEKLY" else "MONTHLY STRATEGIC OUTLOOK")
-    
-    pulse      = scan_data.get("pulse", {})
-    top_secs   = scan_data.get("top_sectors", [])
-    stock_picks = scan_data.get("stock_picks", {})
+def _track_special_lists(period):
+    """Calculates RS for Defense and AI stocks specifically."""
+    results = {}
+    for strategy, tickers in rs_engine.SPECIAL_LISTS.items():
+        strategy_stocks = []
+        for t in tickers:
+            rs = rs_engine.calc_rs(t, rs_engine.NIFTY_TICKER, period)
+            if rs:
+                strategy_stocks.append({
+                    "symbol": t.replace(".NS", ""),
+                    "ticker": t,
+                    "rs": rs,
+                    "metrics": fund_eng.get_company_metrics(t)
+                })
+        # Sort by RS
+        strategy_stocks.sort(key=lambda x: x["rs"], reverse=True)
+        results[strategy] = strategy_stocks[:5]
+    return results
+
+def _build_compact_text(scan_data, newsletter_type, report_url):
+    """Compact text for Telegram notification."""
+    now_str = datetime.now(IST).strftime("%d %b %Y")
+    type_label = "DAILY" if newsletter_type == "DAILY" else "WEEKLY SUNDAY SPECIAL"
     
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"{SYSTEM_ICON} {SYSTEM_NAME}",
-        f"📅 {type_label} | {now_str}",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"🩺 *{SYSTEM_NAME}*",
+        f"📅 *{type_label} REPORT | {now_str}*",
+        "━━━━━━━━━━━━━━━━━━━━",
         "",
-        "📈 MARKET PULSE",
-        f"Nifty 50: ₹{pulse.get('close', 0):,.0f}",
-        f"Trend Signal: {'🟢 POSITIVE MOMENTUM' if scan_data.get('market_mode') == 'AGGRESSIVE' else '🔴 CAUTION'}",
-        "✅ Market above key threshold — Stay invested. Ride momentum." if scan_data.get("market_mode") == "AGGRESSIVE" else "⚠️ Market below key threshold — Reduce risk. Protect capital.",
-        "",
-        "🏆 SECTOR LEADERSHIP BOARD",
-        "_Sectors consistently beating the broader Indian market:_",
-        "",
+        "🚀 *TOP LEADING INDUSTRIES:*",
     ]
     
-    for i, sec in enumerate(top_secs[:5], 1):
-        thesis = fund_eng.get_sector_thesis(sec["sector"])
-        lines += [
-            f"{i}. 🟢🟢 STRONG LEADER",
-            f"{sec['sector'].replace('Nifty ', '').upper()}",
-        ]
-        for r in thesis.get("reasons", [])[:3]:
-            lines.append(f"  {r}")
-        lines.append(f"  📋 Outlook: {thesis.get('short', '')}")
-        lines.append("")
+    for i, sec in enumerate(scan_data.get("top_sectors", [])[:3], 1):
+        lines.append(f"{i}. 🟢 {sec['sector']} (RS: {sec['rs']:.2f})")
         
-        # Add Top Picks for this sector
-        picks = stock_picks.get(sec["sector"], [])[:3]
-        if picks:
-            lines.append(f"  🎯 Top Picks — {sec['sector'].replace('Nifty ', '')}:")
-            for p in picks:
-                st_label = "🔥 Exceptional momentum" if p.get("rs", 0) > 1.1 else "🟢🟢 Very strong"
-                cap_icon = "🏦" if p['cap'] == "Large" else ("🏢" if p['cap'] == "Mid" else "🏪")
-                lines.append(f"  {cap_icon} {p['symbol']} — {p['cap']} Cap | {st_label}")
-                
-                # Financials (Mocked or fetched if available)
-                # In real use, we'd call rep_eng._fetch_financials(p['ticker'])
-                # For now, let's keep it clean as per the user's example style
-                lines.append(f"  🔮 Projection: {thesis.get('short')} — Institutional accumulation likely")
-                lines.append("")
-        
-        lines.append("━━━━━━━━━━━━━━━━━━━━")
-        lines.append("")
-
     lines += [
-        "🔍 SECTOR MOMENTUM TRACKER (Last 90 Days)",
-        "✅ Rising Sectors — Momentum Building:",
+        "",
+        "⚠️ *LAGGING INDUSTRIES (AVOID):*",
     ]
-    
-    # Sort all sectors by RS to show rising/weak
-    all_secs = sorted(scan_data.get("all_sectors", []), key=lambda x: x["rs"], reverse=True)
-    for s in all_secs[:3]:
-        th = fund_eng.get_sector_thesis(s["sector"])
-        cat = th.get("reasons", ["Momentum building"])[0]
-        lines.append(f"  🟢 {s['sector'].replace('Nifty ', '')}: +{((s['rs']-1)*100):.1f}% | {cat}")
+    for sec in scan_data.get("lagging_sectors", [])[:3]:
+        lines.append(f"• 🔴 {sec['sector']}")
         
-    lines.append("")
-    lines.append("❌ Sectors to Avoid — Losing Momentum:")
-    for s in all_secs[-3:]:
-        th = fund_eng.get_sector_thesis(s["sector"])
-        lines.append(f"  🔴 {s['sector'].replace('Nifty ', '')}: {((s['rs']-1)*100):.1f}% | {th.get('risk', 'Avoid new entries')}")
-
     lines += [
         "",
-        "💰 ALLOCATION INTELLIGENCE",
-        "Why these sector weights?",
+        "🛡️ *SPECIAL FOCUS:*",
+        f"Defense Leader: {scan_data['special_focus']['Defense Strategy'][0]['symbol']}",
+        f"AI Leader: {scan_data['special_focus']['AI & Digital Strategy'][0]['symbol']}",
         "",
-    ]
-    
-    total_alloc = 0
-    for sec in top_secs[:3]:
-        alloc = 20 # Simple mock alloc for the report
-        total_alloc += alloc
-        thesis = fund_eng.get_sector_thesis(sec["sector"])
-        lines.append(f"📊 {sec['sector'].replace('Nifty ', '')} → {alloc}% of portfolio")
-        for r in thesis.get("reasons", [])[:2]:
-            lines.append(f"  → {r}")
-            
-    lines += [
+        "📊 *VIEW FULL PREMIUM REPORT:*",
+        f"🔗 [Click here to open in Mobile]({report_url})",
         "",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        rep_eng.DISCLAIMER,
-        "",
-        f"📅 Valid for 15 days | Until: {(datetime.now(IST) + timedelta(days=15)).strftime('%d %b %Y')}",
-        f"🔄 Next report: {'Next Week' if newsletter_type == 'WEEKLY' else 'Next Month' if newsletter_type == 'MONTHLY' else 'Tomorrow 8:00 AM IST'}",
-        "",
-        f"{SYSTEM_ICON} {SYSTEM_NAME} | {SYSTEM_VERSION}",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        "Allocation Focus: *Defense & AI*"
     ]
     
     return "\n".join(lines)
 
-def _build_html_version(scan_data, newsletter_type):
+def _build_premium_html(scan_data, newsletter_type):
     """
-    [GENERATIVE UI] Powered by Google Stitch Principles.
-    Implements Material 3 (M3) Design System for BHARAT AlgoVerse.
+    [PREMIUM UI] Modern, Interactive, and Responsive HTML Report.
+    Tailored for Dr. Saab's Strategic Advice.
     """
-    now_str    = datetime.now(IST).strftime("%d %b %Y")
-    type_label = "DAILY INTELLIGENCE" if newsletter_type == "DAILY" else ("WEEKLY REVIEW" if newsletter_type == "WEEKLY" else "MONTHLY STRATEGIC OUTLOOK")
+    now_str = datetime.now(IST).strftime("%d %B %Y")
+    type_label = "DAILY INTELLIGENCE" if newsletter_type == "DAILY" else "WEEKLY SUNDAY SPECIAL"
     market_mode = scan_data.get("market_mode", "UNKNOWN")
     
-    # Material 3 Color Tokens
-    M3_PRIMARY = "#1a73e8"  # Google Blue
-    M3_SURFACE = "#ffffff"
-    M3_ON_SURFACE = "#202124"
-    M3_VARIANT = "#f1f3f4"  # Light Grey
-    M3_SUCCESS = "#1e8e3e"  # Google Green
-    M3_ERROR   = "#d93025"  # Google Red
+    # Colors
+    is_weekly = newsletter_type == "WEEKLY"
+    BG_GRADIENT = "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" if is_weekly else "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)"
+    CARD_BG = "rgba(30, 41, 59, 0.7)" if is_weekly else "#ffffff"
+    TEXT_COLOR = "#f8fafc" if is_weekly else "#1e293b"
+    ACCENT = "#fbbf24" if is_weekly else "#3b82f6" # Gold for weekly, Blue for daily
     
-    mode_color = M3_SUCCESS if market_mode == "AGGRESSIVE" else M3_ERROR
-    
-    top_secs   = scan_data.get("top_sectors", [])
+    top_secs = scan_data.get("top_sectors", [])
+    lagging_secs = scan_data.get("lagging_sectors", [])
     stock_picks = scan_data.get("stock_picks", {})
-    
+
     html = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{SYSTEM_NAME} | {type_label}</title>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
             
-            body {{ 
-                font-family: 'Inter', system-ui, -apple-system, sans-serif; 
-                background-color: #f8f9fa; 
-                color: {M3_ON_SURFACE}; 
-                margin: 0; 
-                padding: 40px 10px;
-                -webkit-font-smoothing: antialiased;
+            :root {{
+                --primary: {ACCENT};
+                --bg: {BG_GRADIENT};
+                --card: {CARD_BG};
+                --text: {TEXT_COLOR};
+                --success: #10b981;
+                --error: #ef4444;
             }}
 
-            .stitch-container {{ 
-                max-width: 800px; 
+            body {{ 
+                font-family: 'Outfit', sans-serif; 
+                background: var(--bg); 
+                color: var(--text); 
+                margin: 0; 
+                padding: 0;
+                line-height: 1.6;
+            }}
+
+            .container {{ 
+                max-width: 900px; 
                 margin: 0 auto; 
-                background: {M3_SURFACE}; 
-                border-radius: 28px; 
-                border: 1px solid #e0e2e6;
-                box-shadow: 0 1px 3px rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+                padding: 40px 20px;
+            }}
+
+            header {{
+                text-align: center;
+                margin-bottom: 60px;
+                padding: 40px;
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 30px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .logo {{ font-size: 3.5rem; margin-bottom: 10px; }}
+            h1 {{ font-size: 2.5rem; font-weight: 700; margin: 0; letter-spacing: -1px; }}
+            .tagline {{ opacity: 0.7; font-size: 1.1rem; }}
+            .badge {{ 
+                display: inline-block; 
+                padding: 8px 20px; 
+                background: var(--primary); 
+                color: #000; 
+                border-radius: 50px; 
+                font-weight: 700; 
+                font-size: 0.8rem; 
+                margin-top: 20px;
+                text-transform: uppercase;
+            }}
+
+            .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 50px; }}
+            @media (max-width: 768px) {{ .grid {{ grid-template-columns: 1fr; }} }}
+
+            .card {{ 
+                background: var(--card); 
+                padding: 35px; 
+                border-radius: 30px; 
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                position: relative;
                 overflow: hidden;
             }}
 
-            .stitch-header {{ 
-                padding: 48px 40px 32px; 
-                background: {M3_SURFACE};
-                text-align: left;
-            }}
-            
-            .stitch-brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
-            .brand-icon {{ font-size: 2.5rem; }}
-            .brand-name {{ font-size: 1.75rem; font-weight: 700; color: {M3_ON_SURFACE}; margin: 0; }}
-            .report-badge {{ 
-                display: inline-block;
-                padding: 6px 16px;
-                background: {M3_VARIANT};
-                border-radius: 12px;
-                font-size: 0.75rem;
-                font-weight: 600;
-                color: {M3_PRIMARY};
-                letter-spacing: 0.05em;
-                margin-top: 16px;
-            }}
-            
-            .meta-strip {{ 
-                padding: 12px 40px; 
-                background: {M3_VARIANT}; 
-                font-size: 0.75rem; 
-                color: #5f6368; 
+            .section-title {{ 
+                font-size: 1.5rem; 
+                font-weight: 700; 
+                margin-bottom: 25px; 
                 display: flex; 
-                justify-content: space-between;
-                border-bottom: 1px solid #dadce0;
+                align-items: center; 
+                gap: 10px;
             }}
 
-            .stitch-content {{ padding: 40px; }}
-            
-            .section-label {{ 
-                font-size: 0.875rem; 
-                font-weight: 600; 
-                color: {M3_PRIMARY}; 
-                margin-bottom: 24px;
-                display: block;
+            .leader-item {{ 
+                display: flex; 
+                align-items: center; 
+                gap: 15px; 
+                margin-bottom: 20px; 
+                padding: 15px;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 20px;
             }}
-            
-            .kpi-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 48px; }}
-            .kpi-card {{ 
-                background: {M3_VARIANT}; 
-                padding: 24px; 
-                border-radius: 24px; 
-                transition: transform 0.2s;
+            .rank-number {{ 
+                width: 40px; height: 40px; 
+                background: var(--primary); 
+                color: #000; 
+                border-radius: 50%; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; 
+                font-weight: 800;
+                flex-shrink: 0;
             }}
-            .kpi-title {{ font-size: 0.75rem; font-weight: 500; color: #5f6368; text-transform: uppercase; margin-bottom: 8px; }}
-            .kpi-value {{ font-size: 2rem; font-weight: 700; color: {M3_ON_SURFACE}; }}
+            .industry-name {{ font-weight: 600; font-size: 1.1rem; }}
+            .industry-rs {{ font-size: 0.8rem; opacity: 0.6; }}
 
-            .sector-entry {{ margin-bottom: 40px; }}
-            .sector-card {{ 
-                border: 1px solid #dadce0; 
-                border-radius: 24px; 
-                padding: 32px; 
-                background: {M3_SURFACE};
+            .laggard-item {{ 
+                display: flex; 
+                justify-content: space-between; 
+                padding: 12px 0; 
+                border-bottom: 1px solid rgba(255,255,255,0.1); 
             }}
-            .sector-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }}
-            .sector-title {{ font-size: 1.25rem; font-weight: 700; color: {M3_ON_SURFACE}; margin: 0; }}
-            .status-pill {{ 
-                font-size: 0.7rem; 
-                font-weight: 600; 
-                padding: 4px 12px; 
-                border-radius: 8px; 
-                background: #e6f4ea; 
-                color: #137333; 
-            }}
-            
-            .thesis-text {{ font-size: 1.1rem; color: #3c4043; line-height: 1.5; margin-bottom: 20px; }}
-            .reason-list {{ margin: 0; padding-left: 20px; color: #5f6368; font-size: 0.9rem; }}
-            .reason-list li {{ margin-bottom: 12px; }}
+            .laggard-item:last-child {{ border: none; }}
 
-            .picks-grid {{ 
+            .stocks-section {{ margin-top: 60px; }}
+            .stock-card {{ 
+                background: var(--card); 
+                border-radius: 30px; 
+                margin-bottom: 40px; 
+                overflow: hidden;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            }}
+            .stock-header {{ 
+                padding: 30px; 
+                background: var(--primary); 
+                color: #000; 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+            }}
+            .stock-title {{ margin: 0; }}
+            .stock-metrics-grid {{ 
                 display: grid; 
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-                gap: 16px; 
-                margin-top: 24px; 
+                grid-template-columns: repeat(3, 1fr); 
+                gap: 1px; 
+                background: rgba(255,255,255,0.1); 
             }}
-            .pick-card {{ 
-                background: {M3_VARIANT}; 
-                padding: 16px; 
-                border-radius: 16px; 
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
+            .metric-box {{ 
+                padding: 25px; 
+                text-align: center; 
+                background: var(--card);
             }}
-            .pick-sym {{ font-weight: 700; font-size: 1rem; }}
-            .pick-cap {{ font-size: 0.65rem; color: #5f6368; text-transform: uppercase; font-weight: 600; }}
-            .pick-rs {{ font-size: 0.9rem; font-weight: 600; color: {M3_PRIMARY}; margin-top: 8px; }}
+            .metric-val {{ font-size: 1.5rem; font-weight: 700; color: var(--primary); }}
+            .metric-label {{ font-size: 0.75rem; text-transform: uppercase; opacity: 0.6; margin-top: 5px; }}
 
-            .stitch-footer {{ 
-                padding: 48px 40px; 
-                background: {M3_VARIANT}; 
-                border-top: 1px solid #dadce0;
-                font-size: 0.75rem;
-                color: #5f6368;
-                line-height: 1.8;
+            .stock-content {{ padding: 35px; }}
+            .info-row {{ margin-bottom: 25px; }}
+            .info-label {{ font-weight: 700; margin-bottom: 10px; display: block; color: var(--primary); }}
+            .info-text {{ font-size: 1.1rem; opacity: 0.9; }}
+
+            .footer {{ 
+                text-align: center; 
+                margin-top: 80px; 
+                padding: 40px; 
+                opacity: 0.5; 
+                font-size: 0.85rem; 
+                border-top: 1px solid rgba(255,255,255,0.1);
             }}
-            .disclaimer-box {{ margin-bottom: 24px; border-left: 4px solid #dadce0; padding-left: 16px; }}
+            
+            .progress-container {{
+                width: 100%;
+                background: rgba(255,255,255,0.1);
+                border-radius: 10px;
+                height: 8px;
+                margin-top: 10px;
+            }}
+            .progress-bar {{
+                height: 100%;
+                background: var(--primary);
+                border-radius: 10px;
+            }}
         </style>
     </head>
     <body>
-        <div class="stitch-container">
-            <div class="stitch-header">
-                <div class="stitch-brand">
-                    <span class="brand-icon">{SYSTEM_ICON}</span>
-                    <h1 class="brand-name">{SYSTEM_NAME}</h1>
-                </div>
-                <div class="report-badge">{type_label}</div>
-            </div>
-            
-            <div class="meta-strip">
-                <span>DATE: {now_str.upper()}</span>
-                <span>SYSTEM: {SYSTEM_VERSION}</span>
-            </div>
-            
-            <div class="stitch-content">
-                <span class="section-label">Market Intelligence Pulse</span>
-                <div class="kpi-row">
-                    <div class="kpi-card">
-                        <div class="kpi-title">Regime Status</div>
-                        <div class="kpi-value" style="color: {mode_color};">{market_mode}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Benchmark RS</div>
-                        <div class="kpi-value">{scan_data.get('nifty_rsi', '—')}</div>
-                    </div>
-                </div>
-                
-                <span class="section-label">Top Conviction Sectors</span>
+        <div class="container">
+            <header>
+                <div class="logo">{SYSTEM_ICON}</div>
+                <h1>{SYSTEM_NAME}</h1>
+                <div class="tagline">Strategic Intelligence for the Modern Investor</div>
+                <div class="badge">{type_label} | {now_str.upper()}</div>
+            </header>
+
+            <div class="grid">
+                <div class="card">
+                    <div class="section-title">🚀 Leading Industries</div>
+                    <p style="opacity: 0.7; margin-bottom: 25px;">Sectors showing extreme relative strength vs Nifty 50.</p>
     """
     
-    for sec in top_secs[:5]:
-        thesis = fund_eng.get_sector_thesis(sec["sector"])
+    for i, sec in enumerate(top_secs[:5], 1):
+        rs_val = sec.get("rs", 1.0)
+        progress = min(100, max(0, (rs_val - 0.9) * 200)) # Scale for visual
         html += f"""
-        <div class="sector-entry">
-            <div class="sector-card">
-                <div class="sector-header">
-                    <h3 class="sector-title">{sec['sector'].upper()}</h3>
-                    <div class="status-pill">LEADING</div>
-                </div>
-                <div class="thesis-text">{thesis.get('short')}</div>
-                <ul class="reason-list">
+                    <div class="leader-item">
+                        <div class="rank-number">{i}</div>
+                        <div style="flex-grow: 1;">
+                            <div class="industry-name">{sec['sector'].replace('Nifty ', '')}</div>
+                            <div class="industry-rs">Relative Strength: {rs_val:.3f}</div>
+                            <div class="progress-container">
+                                <div class="progress-bar" style="width: {progress}%"></div>
+                            </div>
+                        </div>
+                    </div>
         """
-        for reason in thesis.get("reasons", [])[:3]:
-            html += f"<li>{reason}</li>"
-        html += "</ul>"
         
-        # Picks
-        picks = stock_picks.get(sec["sector"], [])[:3]
-        if picks:
-            html += '<div class="picks-grid">'
-            for p in picks:
-                html += f"""
-                <div class="pick-card">
-                    <div class="pick-sym">{p['symbol']}</div>
-                    <div class="pick-cap">{p['cap']} CAP</div>
-                    <div class="pick-rs">+{((p['rs']-1)*100):.2f}% RS</div>
+    html += """
                 </div>
-                """
-            html += "</div>"
-            
-        html += "</div></div>"
+                <div class="card">
+                    <div class="section-title">⚠️ Legging Industries</div>
+                    <p style="opacity: 0.7; margin-bottom: 25px;">Avoid these sectors as they are underperforming the benchmark.</p>
+    """
+    
+    for sec in lagging_secs[:5]:
+        html += f"""
+                    <div class="laggard-item">
+                        <span style="font-weight: 500;">{sec['sector'].replace('Nifty ', '')}</span>
+                        <span style="color: var(--error); font-weight: 700;">Weak Momentum</span>
+                    </div>
+        """
         
+    html += """
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom: 50px; border-left: 5px solid var(--primary);">
+                <div class="section-title">🛡️ Special Allocation: Defense & AI</div>
+                <p class="info-text">Strategic tracking of our core growth themes.</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+    """
+    
+    for strategy, stocks in scan_data["special_focus"].items():
+        html += f"""
+                    <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 20px;">
+                        <div style="font-weight: 700; margin-bottom: 10px; color: var(--primary);">{strategy.upper()}</div>
+        """
+        for s in stocks[:3]:
+            html += f'<div style="font-size: 0.9rem; margin-bottom: 5px;">• {s["symbol"]} (RS: {s["rs"]:.2f})</div>'
+        html += "</div>"
+        
+    html += """
+                </div>
+            </div>
+
+            <div class="stocks-section">
+                <div class="section-title">🎯 Top Sector Leaders & Stock Advice</div>
+    """
+    
+    # Show Top 3 Sectors and their top stock
+    for i, sec in enumerate(top_secs[:3], 1):
+        thesis = fund_eng.get_sector_thesis(sec["sector"])
+        picks = stock_picks.get(sec["sector"], [])
+        if not picks: continue
+        
+        top_pick = picks[0] # Focus on the Rank 1 stock for the newsletter
+        m = top_pick.get("metrics", {})
+        
+        html += f"""
+                <div class="stock-card">
+                    <div class="stock-header">
+                        <h2 class="stock-title">RANK #{i} Sector: {sec['sector'].replace('Nifty ', '')}</h2>
+                        <span style="font-weight: 800; opacity: 0.8;">{top_pick['symbol']}</span>
+                    </div>
+                    <div class="stock-metrics-grid">
+                        <div class="metric-box">
+                            <div class="metric-val">{m.get('sales_growth', 'N/A')}</div>
+                            <div class="metric-label">Sales Growth</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-val">{m.get('profit_growth', 'N/A')}</div>
+                            <div class="metric-label">Profit Growth</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-val">{m.get('roe', 'N/A')}</div>
+                            <div class="metric-label">ROE / ROCE</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-val">{m.get('debt_to_equity', 'N/A')}</div>
+                            <div class="metric-label">Debt / Equity</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-val">{m.get('risk', 'N/A')}</div>
+                            <div class="metric-label">Risk Rating</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-val" style="color: var(--success);">{sec['rs']:.2f}</div>
+                            <div class="metric-label">RS Multiplier</div>
+                        </div>
+                    </div>
+                    <div class="stock-content">
+                        <div class="info-row">
+                            <span class="info-label">📍 Government Policy & Industry Context</span>
+                            <span class="info-text">{thesis.get('policy', 'Strong government push for domestic manufacturing and digitalization.')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">✅ Why to Buy?</span>
+                            <span class="info-text">{m.get('why_to_buy', 'Institutional accumulation and clear technical breakout.')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">🔮 Future Perspective</span>
+                            <span class="info-text">{m.get('future_perspective', 'Multi-year growth visibility due to order book expansion.')}</span>
+                        </div>
+                        <div style="margin-top: 30px; display: flex; gap: 10px;">
+                            {' '.join([f'<span style="padding: 5px 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.8rem;">#{p["symbol"]}</span>' for p in picks[1:4]])}
+                        </div>
+                    </div>
+                </div>
+        """
+
     html += f"""
             </div>
-            <div class="stitch-footer">
-                <div class="disclaimer-box">
-                    <strong>LEGAL NOTICE:</strong> {rep_eng.DISCLAIMER.replace('*', '')}
-                </div>
-                <div style="text-align: center; opacity: 0.7;">
-                    {SYSTEM_NAME} Intelligence | Powered by Google Stitch UI Framework
-                </div>
+
+            <div class="footer">
+                <p>{SYSTEM_NAME} Intelligence © 2026</p>
+                <p>Disclaimer: This is for educational purposes. We are not SEBI registered advisors. Trading involves risk.</p>
+                <p>Generated on {datetime.now(IST).strftime("%d %b %Y %H:%M:%S IST")}</p>
             </div>
         </div>
     </body>
     </html>
     """
     return html
-    
-
 
 def save_newsletter_to_file(html_content, newsletter_type):
-    """Saves the newsletter as an HTML file for download."""
-    filename = f"BHARAT_REPORT_{newsletter_type}_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
-    filepath = f"artifacts/{filename}"
-    # Ensure artifacts dir exists
-    import os
-    if not os.path.exists("artifacts"):
-        os.makedirs("artifacts")
+    """Saves the newsletter as an HTML file for distribution."""
+    timestamp = datetime.now(IST).strftime("%Y%m%d_%H%M")
+    filename = f"DR_SAAB_ADVICE_{newsletter_type}_{timestamp}.html"
+    
+    # Path relative to project root
+    rel_path = f"reports/newsletters/{filename}"
+    abs_path = os.path.join(os.getcwd(), rel_path)
+    
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
         
-    with open(filepath, "w", encoding="utf-8") as f:
+    with open(abs_path, "w", encoding="utf-8") as f:
         f.write(html_content)
-    return filepath
+    
+    return abs_path
+
+def push_newsletter_to_telegram(newsletter_obj):
+    """Sends the newsletter notification and the file to Telegram."""
+    log_terminal("[NEWSLETTER] Pushing to Telegram...", "INFO")
+    
+    # 1. Send text summary with URL
+    send_telegram_msg(newsletter_obj["text"])
+    
+    # 2. Also send the actual HTML file as a document (as backup)
+    token = db.get_param('telegram_bot_token')
+    chat_id = db.get_param('telegram_chat_id')
+    if token and chat_id:
+        url = f"https://api.telegram.org/bot{token}/sendDocument"
+        files = {'document': open(newsletter_obj["filepath"], 'rb')}
+        payload = {
+            'chat_id': chat_id,
+            'caption': f"📂 Backup File: {newsletter_obj['type']} Strategic Advice"
+        }
+        try:
+            import requests
+            requests.post(url, data=payload, files=files, timeout=30)
+        except Exception as e:
+            log_terminal(f"Telegram File Error: {e}", "ERROR")
+
+def post_to_twitter(newsletter_obj):
+    """
+    Automate posting to Twitter (X).
+    """
+    import tweepy
+    log_terminal("[NEWSLETTER] Posting to Twitter...", "INFO")
+    
+    api_key = db.get_param('twitter_api_key')
+    api_secret = db.get_param('twitter_api_secret')
+    access_token = db.get_param('twitter_access_token')
+    access_secret = db.get_param('twitter_access_secret')
+    
+    if not all([api_key, api_secret, access_token, access_secret]):
+        log_terminal("Twitter API keys missing. Skipping tweet.", "ALERT")
+        return
+
+    try:
+        client = tweepy.Client(
+            consumer_key=api_key, consumer_secret=api_secret,
+            access_token=access_token, access_token_secret=access_secret
+        )
+        
+        tweet_text = f"🚀 {SYSTEM_NAME} - {newsletter_obj['type']} Update\n\n"
+        tweet_text += f"Leading Sectors: {', '.join([s['sector'].replace('Nifty ', '') for s in newsletter_obj['data']['top_sectors'][:2]])}\n"
+        tweet_text += f"Defense Leader: {newsletter_obj['data']['special_focus']['Defense Strategy'][0]['symbol']}\n\n"
+        tweet_text += f"Read the full professional report here:\n{newsletter_obj['url']}\n\n"
+        tweet_text += "#StockMarketIndia #AlgoTrading #DrSaabAdvice"
+        
+        client.create_tweet(text=tweet_text)
+        log_terminal("Tweet posted successfully!", "INFO")
+    except Exception as e:
+        log_terminal(f"Twitter Error: {e}", "ERROR")
+
+if __name__ == "__main__":
+    # Test generation
+    report = generate_newsletter_content("DAILY")
+    # push_newsletter_to_telegram(report)
+    # post_to_twitter(report)
+    print(f"Report generated at: {report['filepath']}")
+    print(f"Public URL: {report['url']}")

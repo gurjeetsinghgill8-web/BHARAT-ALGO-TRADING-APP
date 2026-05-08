@@ -783,12 +783,17 @@ elif page == "\U0001f4b9 Investment (RS)":
         st.stop()
 
     # ── Tabs ────────────────────────────────────────────────
-    iv1, iv2, iv3, iv4 = st.tabs([
+    iv1, iv2, iv3, iv4, iv5 = st.tabs([
         "\U0001f4ca Market Pulse",
         "\U0001f3c6 Sector Ranking",
         "\U0001f3af Top Stocks",
-        "\u2699\ufe0f Settings"
+        "\u2699\ufe0f Settings",
+        "\U0001f4dc Strategic Reports"
     ])
+
+    # ... [Keep existing code for iv1, iv2, iv3, iv4] ...
+    # (Note: I will use the multi_replace_file_content or just target the specific range)
+    # Actually, I'll just replace the tabs initialization and then add the iv5 block at the end.
 
     # ── Pull cached scan from DB ─────────────────────────────
     _last_scan_dt = db.get_param("invest_last_scan_dt", "Never") or "Never"
@@ -1036,6 +1041,70 @@ elif page == "\U0001f4b9 Investment (RS)":
             if st.button("\u25a0 STOP Invest Bot", key="iv_stop_bot"):
                 db.set_param("invest_algo_running","OFF")
                 st.warning("Bot set to OFF. Will stop on next loop check.")
+
+    # ── TAB 5: Strategic Reports ──────────────────────────────
+    with iv5:
+        st.markdown('<div class="section-title">\U0001f4dc Strategic Advisor Reports</div>', unsafe_allow_html=True)
+        
+        REPORTS_DIR = os.path.join(os.getcwd(), "reports", "newsletters")
+        if os.path.exists(REPORTS_DIR):
+            files = sorted([f for f in os.listdir(REPORTS_DIR) if f.endswith(".html")], reverse=True)
+            if not files:
+                st.info("No reports generated yet. Click 'Generate' below.")
+            else:
+                for f in files[:10]: # Show last 10
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    with c1:
+                        st.markdown(f"📄 **{f.replace('.html', '').replace('_', ' ')}**")
+                    with c2:
+                        url = f"{db.get_param('report_server_url', 'http://YOUR_VPS_IP:8503')}/view/{f}"
+                        st.link_button("\U0001f310 Open Link", url)
+                    with c3:
+                        if st.button("\U0001f5d1", key=f"del_{f}"):
+                            os.remove(os.path.join(REPORTS_DIR, f))
+                            st.rerun()
+        else:
+            st.info("Reports directory not found.")
+
+        st.divider()
+        st.markdown("**\U0001f680 Newsletter Control Center**")
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            if st.button("\U0001f4d1 Generate DAILY Report", key="gen_daily"):
+                with st.spinner("Generating..."):
+                    import invest_newsletter
+                    report = invest_newsletter.generate_newsletter_content("DAILY")
+                    st.success(f"Generated! [View]({report['url']})")
+                    st.rerun()
+        with rc2:
+            if st.button("\U0001f5d3 Generate SUNDAY Mega", key="gen_weekly"):
+                with st.spinner("Generating..."):
+                    import invest_newsletter
+                    report = invest_newsletter.generate_newsletter_content("WEEKLY")
+                    st.success(f"Generated! [View]({report['url']})")
+                    st.rerun()
+        with rc3:
+            if st.button("\U0001f4e2 Push Latest to TG", key="push_tg"):
+                with st.spinner("Pushing..."):
+                    import invest_newsletter
+                    # Logic to find latest report and push
+                    if os.path.exists(REPORTS_DIR):
+                        files = sorted([f for f in os.listdir(REPORTS_DIR) if f.endswith(".html")], reverse=True)
+                        if files:
+                            # Re-generate minimal object for push
+                            latest = files[0]
+                            filepath = os.path.join(REPORTS_DIR, latest)
+                            # Mock object for push
+                            obj = {
+                                "text": f"Latest Strategic Advice Report: {latest}",
+                                "filepath": filepath,
+                                "type": "LATEST",
+                                "url": f"{db.get_param('report_server_url', 'http://YOUR_VPS_IP:8503')}/view/{latest}"
+                            }
+                            invest_newsletter.push_newsletter_to_telegram(obj)
+                            st.success("Pushed to Telegram!")
+                        else:
+                            st.error("No reports found.")
 
     st.caption("BHARAT AlgoVerse v3.0 \u2022 RS LegoMaster \u2022 Built for Dr. Saab \U0001f9ba")
 
