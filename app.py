@@ -463,7 +463,7 @@ if page == "🚀 Crypto (BTC)":
         
         col_sl, col_cap = st.columns(2)
         with col_sl:
-            s_sl = st.number_input("Stop Loss %", 5, 90, max(5, min(90, _sl_val)), step=5, key="s_sl")
+            s_sl = st.number_input("🛡️ SL on Premium Received (%)", 5, 90, max(5, min(90, _sl_val)), step=5, key="s_sl")
         with col_cap:
             s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
                                         max(50, min(10000, _capital_val)), step=10, key="s_cap")
