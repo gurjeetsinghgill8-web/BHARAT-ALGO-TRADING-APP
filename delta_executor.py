@@ -203,32 +203,27 @@ def find_atm_strike(spot_price, options_list, direction, strike_selection="ATM")
     return options_list[target_idx]
 
 def find_gill_crypto_option(asset, direction):
-    from main import send_telegram_msg
     log_crypto(f"Scanning {direction} options for {asset}...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
-        log_crypto("Chain is empty!")
+        log_terminal("❌ ERROR: Option chain is empty! Check API connection.", "ERROR")
         return None
     
-    # SIGNAL MAPPING (Option Selling logic)
-    # BUY Signal -> Bullish -> Sell Put
-    # SELL Signal -> Bearish -> Sell Call
     target_type = 'put_options' if direction == "BUY" else 'call_options'
-    
-    # 1. Filter for type and liquidity
     all_typed_options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
     
     if not all_typed_options:
-        log_crypto(f"No liquid {target_type} found.")
+        log_terminal(f"❌ ERROR: No liquid {target_type} found on exchange.", "ERROR")
         return None
 
-    # 2. Expiry Rule: Next Day or selection from DB
+    # 2. Expiry Rule
     today = datetime.date.today()
     expiry_sel = db.get_param('expiry_selection', 'Next Day')
-    
     valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
     
-    if not valid_expiries: return None
+    if not valid_expiries:
+        log_terminal("❌ ERROR: No future expiries found in chain.", "ERROR")
+        return None
     
     if expiry_sel == "0 DTE":
         best_expiry = valid_expiries[0]
@@ -237,9 +232,6 @@ def find_gill_crypto_option(asset, direction):
     else:
         best_expiry = valid_expiries[0]
         
-    log_crypto(f"Selected Expiry: {best_expiry}")
-    
-    # 3. Filter for options with that specific expiry
     near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
     
     # 4. Get Spot Price
@@ -248,13 +240,17 @@ def find_gill_crypto_option(asset, direction):
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
         if spot_price > 0: break
     
-    if spot_price == 0: return None
+    if spot_price == 0:
+        log_terminal("❌ ERROR: Spot price not found in ticker data.", "ERROR")
+        return None
     
     # 5. Strike Selection
     strike_selection = db.get_param('strike_selection', 'ATM')
     best_opt = find_atm_strike(spot_price, near_options, direction, strike_selection=strike_selection)
     
-    if not best_opt: return None
+    if not best_opt:
+        log_terminal(f"❌ ERROR: find_atm_strike returned None for {strike_selection}.", "ERROR")
+        return None
 
     return (
         best_opt['symbol'], 
@@ -692,8 +688,8 @@ def get_dynamic_quantity(option_price):
 def execute_crypto_trade(asset, direction):
     """
     Executes a trade based on signal.
-    Does NOT block if previous position is still closing.
     """
+    log_terminal(f"🔍 EXECUTION START: {direction} {asset}", "INFO")
     mode = db.get_param('trade_mode', 'PAPER')
     
     api_key = db.get_param('delta_api_key', '')
