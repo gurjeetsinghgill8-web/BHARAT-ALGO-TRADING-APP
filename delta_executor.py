@@ -715,22 +715,18 @@ def execute_crypto_trade(asset, direction):
         
     # 2.1 PENDING ORDER SAFETY
     if db.get_param("order_pending", "NO") == "YES":
-        log_terminal("⏳ PENDING ORDER DETECTED: Waiting for previous order to fill/cancel before new trade.", "INFO")
+        log_terminal("⏳ PENDING ORDER: Waiting for previous order to fill/cancel.", "INFO")
+        send_telegram_msg("⏳ BHARAT: Pending order detected on exchange. Skipping new entry.")
         return
 
-    # 2.2 LOCAL TRADE LOCK SAFETY (Double-Entry Prevention)
+    # 2.2 LOCAL TRADE LOCK SAFETY
     if db.get_param("local_trade_active", "NO") == "YES":
-        # Check if API also sees it. If API says NONE but Local says YES, we trust Local for 2 minutes (API Lag)
-        # unless we are sure it was a failure.
-        log_terminal("🛡️ LOCAL LOCK ACTIVE: System believes a trade is already running. Blocking new entry.", "ALERT")
+        log_terminal("🛡️ LOCAL LOCK ACTIVE: Blocking new entry.", "ALERT")
         return
 
     # 2.3 TOTAL LOT GUARD
-    sync_delta_position()
-    manual_lots = int(db.get_param('crypto_trade_size', '3'))
-    # Calculate total size across all positions
+    manual_lots = int(db.get_param('crypto_trade_size', '1') or '1')
     total_open_size = 0
-    # Re-fetch positions to be absolutely sure
     try:
         path = "/v2/positions"
         url = f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC"
@@ -742,8 +738,8 @@ def execute_crypto_trade(asset, direction):
     except: pass
     
     if total_open_size >= manual_lots:
-        log_terminal(f"🛑 CAPACITY FULL: Current Size {total_open_size} >= Target {manual_lots}. No more entries allowed.", "ALERT")
-        db.set_param("local_trade_active", "YES") # Sync local lock
+        log_terminal(f"🛑 CAPACITY FULL: {total_open_size} >= {manual_lots}.", "ALERT")
+        db.set_param("local_trade_active", "YES") 
         return
 
     # 2.5 CLEAN SLATE RULE: Close EVERYTHING before a new entry
@@ -772,7 +768,7 @@ def execute_crypto_trade(asset, direction):
     # 3. Find Best Option to Open
     opt = find_gill_crypto_option(asset, direction)
     if not opt: 
-        log_terminal(f"ERROR: Could not find suitable {direction} option.", "ERROR")
+        log_terminal(f"ERROR: No suitable {direction} option found on chain.", "ERROR")
         return
         
     symbol, price, strike, expiry, pid = opt
