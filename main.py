@@ -7,6 +7,7 @@ import db
 import delta_executor
 import logic
 import requests
+import config
 
 try:
     from utils import send_telegram_msg, log_terminal
@@ -72,14 +73,22 @@ def run_crypto_magical():
     if active_any:
         pos_type = "BUY" if active_put != "NONE" else "SELL"
         if signal != pos_type:
+            # --- 5-MINUTE CANDLE LOCK (Directive 2) ---
+            last_trade_time = float(config.get_param("last_trade_time", "0"))
+            if (time.time() - last_trade_time) < 300:
+                log_terminal(f"⏳ FLIP LOCKED: Waiting for 5-min candle to close. ({int(300 - (time.time() - last_trade_time))}s left)", "INFO")
+                return
+
             log_terminal("🔄 TREND FLIP: Price crossed Anchor. Squaring off.", "ALERT")
             delta_executor.square_off_crypto()
+            config.set_param("last_trade_time", str(time.time())) # Start cooldown after flip
             return
 
     # Fresh Entry
     if not active_any:
         log_terminal(f"🎯 MAGICAL ENTRY: {signal} (LTP {ltp} vs Anchor {magical_line})", "TRADE")
         delta_executor.execute_crypto_trade("BTC", signal)
+        config.set_param("last_trade_time", str(time.time())) # Directive 1: Save entry timestamp
 
 def check_sl_tp():
     mode = db.get_param('trade_mode', 'PAPER')
@@ -107,7 +116,7 @@ def check_sl_tp():
                         delta_executor.square_off_crypto(target_pid=p.get('product_id'))
         except: pass
 
-def main():
+def main_loop():
     try:
         lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         lock_socket.bind(('127.0.0.1', 47200))
@@ -115,8 +124,8 @@ def main():
         sys.exit(1)
 
     db.load_secrets()
-    log_terminal("STABLE MAGICAL ENGINE STARTED", "START")
-    send_telegram_msg("🚀 BHARAT MAGICAL ENGINE STARTED\nStrategy: 6 PM Anchor Selling")
+    log_terminal("VERSION 4.0 ULTIMATE STABLE STARTED", "START")
+    send_telegram_msg("🚀 BHARAT MAGICAL ENGINE V4.0 LOCKED\nStrategy: 6 PM Anchor | 5-Min Candle Lock")
 
     while True:
         try:
@@ -128,4 +137,4 @@ def main():
             time.sleep(10)
 
 if __name__ == "__main__":
-    main()
+    main_loop()
