@@ -50,6 +50,13 @@ def check_magical_anchor():
 
 def run_crypto_magical():
     magical_line = check_magical_anchor()
+    
+    # --- MANUAL ANCHOR OVERRIDE (LEGO Step 3) ---
+    manual_ml = float(config.get_param("manual_magical_line", "0"))
+    if manual_ml > 0:
+        magical_line = manual_ml
+        # log_terminal(f"⚓ MANUAL ANCHOR ACTIVE: ${magical_line:,.2f}", "INFO")
+
     if magical_line == 0: return
 
     # Get LTP
@@ -102,7 +109,8 @@ def check_sl_tp():
     mode = db.get_param('trade_mode', 'PAPER')
     if mode != "LIVE": return
 
-    sl_pct = float(db.get_param('sl_percent', '25'))
+    # --- DYNAMIC STOP-LOSS (LEGO Step 3) ---
+    sl_percent = float(config.get_param("stop_loss_percentage", "25"))
     
     for asset in ["BTC", "ETH"]:
         try:
@@ -119,8 +127,8 @@ def check_sl_tp():
                     entry_val = float(p.get('entry_value', 1) or 1)
                     pnl_pct = (upnl / abs(entry_val)) * 100
                     
-                    if pnl_pct <= -sl_pct:
-                        log_terminal(f"🚨 SL HIT: {pnl_pct:.1f}%", "ALERT")
+                    if pnl_pct <= -sl_percent:
+                        log_terminal(f"🚨 SL HIT: {pnl_pct:.1f}% (Threshold: {sl_percent}%)", "ALERT")
                         delta_executor.square_off_crypto(target_pid=p.get('product_id'))
         except: pass
 
