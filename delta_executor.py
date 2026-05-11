@@ -49,7 +49,13 @@ def get_current_position():
                     sym = p.get('product', {}).get('symbol') or ""
                     entry_price = float(p.get('avg_entry_price') or 0)
                     
-                    pos_type = 'PUT' if sym.upper().startswith("P-") else 'CALL'
+                    # Exact Parsing Logic (Lead Engineer's Directive)
+                    symbol_upper = sym.upper()
+                    if symbol_upper.startswith('P-') or '-P-' in symbol_upper:
+                        pos_type = 'PUT'
+                    else:
+                        pos_type = 'CALL'
+                        
                     return {'type': pos_type, 'symbol': sym, 'entry_price': entry_price}
     except: pass
     return None
