@@ -510,7 +510,6 @@ def square_off_crypto(target_pid=None):
     Otherwise, fetches LIVE positions and closes EVERYTHING with size > 0.
     """
     mode = db.get_param('trade_mode', 'PAPER')
-    from main import log_terminal, send_telegram_msg
     
     pids_to_close = []
     
@@ -695,7 +694,6 @@ def execute_crypto_trade(asset, direction):
     Executes a trade based on signal.
     Does NOT block if previous position is still closing.
     """
-    from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
     
     api_key = db.get_param('delta_api_key', '')

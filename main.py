@@ -303,7 +303,9 @@ def main():
 
         except KeyboardInterrupt: break
         except Exception as e:
-            print(f"Main Loop Error: {e}")
+            err_msg = f"⚠️ BHARAT MAIN LOOP ERROR: {e}"
+            print(err_msg)
+            send_telegram_msg(err_msg)
             time.sleep(10)
 
 
