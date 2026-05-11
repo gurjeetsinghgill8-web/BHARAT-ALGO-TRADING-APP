@@ -43,20 +43,20 @@ def get_current_position():
         headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
         if resp.status_code == 200:
-            for p in resp.json().get('result', []):
-                size = abs(float(p.get('size', 0)))
+            for position in resp.json().get('result', []):
+                size = abs(float(position.get('size', 0)))
                 if size > 0:
-                    sym = p.get('product', {}).get('symbol') or ""
-                    entry_price = float(p.get('avg_entry_price') or 0)
+                    entry_price = float(position.get('avg_entry_price') or 0)
                     
-                    # Exact Parsing Logic (Lead Engineer's Directive)
-                    symbol_upper = sym.upper()
+                    # EXACT LOGIC INJECTION START
+                    symbol_upper = str(position['symbol']).upper()
                     if symbol_upper.startswith('P-') or '-P-' in symbol_upper:
                         pos_type = 'PUT'
                     else:
                         pos_type = 'CALL'
+                    # EXACT LOGIC INJECTION END
                         
-                    return {'type': pos_type, 'symbol': sym, 'entry_price': entry_price}
+                    return {'type': pos_type, 'symbol': position['symbol'], 'entry_price': entry_price}
     except: pass
     return None
 def fetch_delta_candles(symbol, resolution="1m", limit=100):
