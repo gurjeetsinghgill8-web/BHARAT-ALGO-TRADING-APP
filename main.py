@@ -253,11 +253,12 @@ def main():
         print("🚨 BOT ALREADY RUNNING. EXITING.")
         sys.exit(1)
 
+    sl_val = db.get_param('sl_percent', '25')
     print("=" * 60)
     print("     🚀 BHARAT ALGOVERSE v3.0 - MAGICAL LINE 🚀     ")
     print("=" * 60)
     print("  ✅ Strategy: Magical Line (6 PM Anchor)")
-    print("  ✅ Stop Loss @ 40%: ON")
+    print(f"  ✅ Stop Loss @ {sl_val}%: ON")
     print("  ✅ Clean Slate: ON")
     print("=" * 60)
 
@@ -265,7 +266,7 @@ def main():
         sys.exit(1)
 
     log_terminal("Bharat AlgoVerse v3.0 - Magical Line Mode Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGOVERSE STARTED\n📍 Strategy: Magical Line (6 PM Anchor)\n✅ SL: 40% | Clean Slate: ON")
+    send_telegram_msg(f"🚀 BHARAT ALGOVERSE STARTED\n📍 Strategy: Magical Line (6 PM Anchor)\n✅ SL: {sl_val}% | Clean Slate: ON")
 
     last_pulse = 0
 
