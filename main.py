@@ -51,11 +51,9 @@ def check_magical_anchor():
 def run_crypto_magical():
     magical_line = check_magical_anchor()
     
-    # --- MANUAL ANCHOR OVERRIDE (LEGO Step 3) ---
+    # --- MANUAL ANCHOR OVERRIDE ---
     manual_ml = float(config.get_param("manual_magical_line", "0"))
-    if manual_ml > 0:
-        magical_line = manual_ml
-        # log_terminal(f"⚓ MANUAL ANCHOR ACTIVE: ${magical_line:,.2f}", "INFO")
+    if manual_ml > 0: magical_line = manual_ml
 
     if magical_line == 0: return
 
@@ -66,44 +64,48 @@ def run_crypto_magical():
         ltp = float(df['close'].iloc[-1])
     except: return
 
-    # Determine Signal
-    signal = "BUY" if ltp > magical_line else "SELL"
-    db.set_param("signal_target", signal)
-
-    # Check Positions
-    delta_executor.sync_delta_position()
-    active_call = db.get_param("active_call_symbol", "NONE")
-    active_put  = db.get_param("active_put_symbol",  "NONE")
-    active_any  = (active_call != "NONE" or active_put != "NONE")
-
-    # Trend Reversal Flip
-    if active_any:
-        pos_type = "BUY" if active_put != "NONE" else "SELL"
+    db.set_param("signal_target", "BUY" if ltp > magical_line else "SELL")
+    
+    # --- POSITION CHECK & FLIP LOGIC (STRICT EMERGENCY VERSION) ---
+    pos = delta_executor.get_current_position()
+    
+    if pos:
+        is_bullish = ltp > magical_line
+        is_bearish = ltp < magical_line
+        holding_put = (pos['type'] == 'PUT')
+        holding_call = (pos['type'] == 'CALL')
         
-        # --- SELF-CHECK (Emergency Directive) ---
-        log_terminal(f"🤖 Self-Check: I hold {pos_type}, LTP is ${ltp:,.2f}, Anchor is ${magical_line:,.2f}.", "INFO")
+        # 1. The 'DO NOTHING' Rule (Lead Engineer's Strict Order)
+        if holding_put and is_bullish:
+            log_terminal(f"🛡️ Self-Check: I hold PUT, LTP is ${ltp:,.2f} > Anchor. Holding correctly. No action.", "INFO")
+            return
         
-        if signal != pos_type:
-            # --- 5-MINUTE CANDLE LOCK (Directive 2) ---
+        if holding_call and is_bearish:
+            log_terminal(f"🛡️ Self-Check: I hold CALL, LTP is ${ltp:,.2f} < Anchor. Holding correctly. No action.", "INFO")
+            return
+
+        # 2. The 'TRUE FLIP' Rule (Only if trend actually reversed AND 5-min stabilized)
+        if (holding_put and is_bearish) or (holding_call and is_bullish):
+            # 5-MINUTE COOLDOWN CHECK
             last_trade_time = float(config.get_param("last_trade_time", "0"))
             elapsed = time.time() - last_trade_time
             if elapsed < 300:
-                log_terminal(f"⏳ FLIP LOCKED: Waiting for 5-min candle to close. ({int(300 - elapsed)}s left)", "INFO")
+                log_terminal(f"⏳ FLIP LOCKED: Trend reversed but waiting for 5-min candle stabilization. ({int(300 - elapsed)}s left)", "INFO")
                 return
 
-            log_terminal(f"🔄 TREND FLIP triggered: {pos_type} -> {signal}. Squaring off.", "ALERT")
+            new_signal = "SELL" if holding_put else "BUY" 
+            log_terminal(f"🔄 TRUE TREND FLIP: {pos['type']} -> {new_signal}. Squaring off.", "ALERT")
             delta_executor.square_off_crypto()
-            config.set_param("last_trade_time", str(time.time())) # Start cooldown after flip
+            delta_executor.execute_crypto_trade("BTC", new_signal) 
+            config.set_param("last_trade_time", str(time.time()))
             return
-        else:
-            # log_terminal("✅ Trend matches position. Continuing to hold.", "INFO")
-            pass
 
-    # Fresh Entry
-    if not active_any:
-        log_terminal(f"🎯 MAGICAL ENTRY: {signal} (LTP {ltp} vs Anchor {magical_line})", "TRADE")
+    # 3. Fresh Entry (Only if no position exists)
+    if not pos:
+        signal = "BUY" if ltp > magical_line else "SELL"
+        log_terminal(f"🎯 MAGICAL ENTRY: {signal} (LTP ${ltp:,.2f} vs Anchor ${magical_line:,.2f})", "TRADE")
         delta_executor.execute_crypto_trade("BTC", signal)
-        config.set_param("last_trade_time", str(time.time())) # Directive 1: Save entry timestamp
+        config.set_param("last_trade_time", str(time.time()))
 
 def check_sl_tp():
     mode = db.get_param('trade_mode', 'PAPER')
