@@ -468,6 +468,9 @@ if page == "🚀 Crypto (BTC)":
             s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
                                         max(50, min(10000, _capital_val)), step=10, key="s_cap")
 
+        s_manual_anchor = st.number_input("📍 Manual Anchor Override", 0.0, 150000.0, float(_magical_line), step=1.0, 
+                                          help="Change the Magical Line manually. Note: It will still auto-reset at 18:00 IST.")
+
         if st.button("💾 SAVE MAGICAL SETTINGS", key="save_strategy"):
             try:
                 db.set_param('trade_mode',        s_mode)
@@ -476,6 +479,7 @@ if page == "🚀 Crypto (BTC)":
                 db.set_param('expiry_selection',  s_expiry)
                 db.set_param('sl_percent',        str(s_sl))
                 db.set_param('estimated_capital', str(s_capital))
+                db.set_param('magical_line',      str(s_manual_anchor))
                 st.success("✅ Magical settings saved!")
                 time.sleep(1)
                 st.rerun()

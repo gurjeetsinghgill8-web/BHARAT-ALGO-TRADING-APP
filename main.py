@@ -154,7 +154,7 @@ def check_sl_tp():
 def check_magical_anchor():
     """
     Sets the Anchor Point (Magical Line) at 6:00 PM (18:00 IST).
-    The anchor stays valid for 24 hours.
+    Uses the closing price of the 5-minute candle ending at 18:00.
     """
     now = datetime.datetime.now()
     magical_line = float(db.get_param("magical_line", "0"))
@@ -162,22 +162,23 @@ def check_magical_anchor():
     today_str = now.strftime("%Y-%m-%d")
 
     # 1. Daily 6:00 PM Update Rule
-    if now.hour == 18 and now.minute == 0 and last_anchor_date != today_str:
-        log_terminal("🕒 6:00 PM REACHED: Setting New Magical Line Anchor...", "START")
+    if now.hour == 18 and now.minute >= 0 and now.minute <= 5 and last_anchor_date != today_str:
+        log_terminal("🕒 18:00 IST: Fetching 5m Closing Price for Magical Anchor...", "START")
         try:
-            df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+            # Fetch 5m candles to get the one closing at 18:00
+            df, _ = delta_executor.fetch_delta_candles("BTC", "5m", limit=2)
             if not df.empty:
                 new_anchor = float(df['close'].iloc[-1])
                 db.set_param("magical_line", str(new_anchor))
                 db.set_param("last_anchor_date", today_str)
-                send_telegram_msg(f"📍 *NEW MAGICAL ANCHOR SET*: ${new_anchor:,.2f}\nValid for next 24 hours.")
+                send_telegram_msg(f"📍 *ANCHOR ROTATION SUCCESS*\nNew Magical Line: ${new_anchor:,.2f}\n(Based on 18:00 closing price)")
                 return new_anchor
         except Exception as e:
             log_terminal(f"Anchor Update Error: {e}", "ERROR")
 
-    # 2. Cold Start: If no anchor exists, set one immediately
+    # 2. Cold Start
     if magical_line == 0:
-        log_terminal("❄️ COLD START: No Magical Line found. Anchoring now...", "START")
+        log_terminal("❄️ COLD START: Anchoring to current price...", "START")
         df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
         if not df.empty:
             new_anchor = float(df['close'].iloc[-1])
@@ -275,19 +276,29 @@ def main():
             check_sl_tp()
             delta_executor.reconcile_bracket_orders()
 
-            # Telegram Pulse every 30 mins
-            if time.time() - last_pulse > 1800:
+            # Telegram Pulse every 15 mins (User Request)
+            if time.time() - last_pulse > 900:
                 magical_line = float(db.get_param("magical_line", "0"))
+                try:
+                    df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+                    ltp = float(df['close'].iloc[-1]) if not df.empty else 0
+                except: ltp = 0
+                
+                signal = "BULLISH (UP)" if ltp > magical_line else "BEARISH (DOWN)"
                 active = db.get_param('crypto_active_symbol', 'NONE')
                 upnl = db.get_param('unrealized_pnl', '0')
+                
                 send_telegram_msg(
-                    f"✅ BHARAT PULSE (MAGICAL)\n"
-                    f"Anchor: ${magical_line:,.0f} | Active: {active}\n"
-                    f"Live PnL: ${upnl}"
+                    f"🔔 *BHARAT LIVE STATUS*\n"
+                    f"📍 Anchor: ${magical_line:,.2f}\n"
+                    f"📈 LTP: ${ltp:,.2f}\n"
+                    f"🎯 Signal: *{signal}*\n"
+                    f"📦 Active: {active}\n"
+                    f"💰 Unrealized: ${upnl}"
                 )
                 last_pulse = time.time()
 
-            time.sleep(30) # V3 Magical Loop
+            time.sleep(30) 
 
         except KeyboardInterrupt: break
         except Exception as e:
