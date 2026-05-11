@@ -23,17 +23,35 @@ def fetch_btc_spot():
         return float(df['close'].iloc[-1])
     return 0
 
+def fetch_premium(symbol):
+    """Fetch current mark price (premium) for a specific symbol."""
+    try:
+        url = f"https://api.india.delta.exchange/v2/tickers/{symbol}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            return float(resp.json().get('result', {}).get('mark_price', 0))
+    except: pass
+    return 0
+
 def get_current_position():
-    """V3 Alias for getting active position as a dict. Fixes P- prefix bug."""
+    """V3 Alias for getting active position as a dict. Fixes P- prefix bug and adds entry_price."""
     sync_delta_position()
-    call = db.get_param("active_call_symbol", "NONE")
-    put = db.get_param("active_put_symbol", "NONE")
     
-    # Emergency Fix: Delta symbols like P-BTC-81800... start with P-
-    if put != "NONE" and put.upper().startswith("P-"):
-        return {'type': 'PUT', 'symbol': put}
-    if call != "NONE":
-        return {'type': 'CALL', 'symbol': call}
+    try:
+        path = "/v2/positions"
+        query = "?underlying_asset_symbol=BTC"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            for p in resp.json().get('result', []):
+                size = abs(float(p.get('size', 0)))
+                if size > 0:
+                    sym = p.get('product', {}).get('symbol') or ""
+                    entry_price = float(p.get('avg_entry_price') or 0)
+                    
+                    pos_type = 'PUT' if sym.upper().startswith("P-") else 'CALL'
+                    return {'type': pos_type, 'symbol': sym, 'entry_price': entry_price}
+    except: pass
     return None
 def fetch_delta_candles(symbol, resolution="1m", limit=100):
     symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
