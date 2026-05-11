@@ -149,18 +149,65 @@ def check_sl_tp():
 
 
 # ============================================================
-# MAIN EVALUATOR: Evaluates signal and places entries
+# MAGICAL LINE ENGINE: 6:00 PM Anchor Logic
 # ============================================================
-def run_crypto_sar():
+def check_magical_anchor():
+    """
+    Sets the Anchor Point (Magical Line) at 6:00 PM (18:00 IST).
+    The anchor stays valid for 24 hours.
+    """
+    now = datetime.datetime.now()
+    magical_line = float(db.get_param("magical_line", "0"))
+    last_anchor_date = db.get_param("last_anchor_date", "")
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 1. Daily 6:00 PM Update Rule
+    if now.hour == 18 and now.minute == 0 and last_anchor_date != today_str:
+        log_terminal("🕒 6:00 PM REACHED: Setting New Magical Line Anchor...", "START")
+        try:
+            df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+            if not df.empty:
+                new_anchor = float(df['close'].iloc[-1])
+                db.set_param("magical_line", str(new_anchor))
+                db.set_param("last_anchor_date", today_str)
+                send_telegram_msg(f"📍 *NEW MAGICAL ANCHOR SET*: ${new_anchor:,.2f}\nValid for next 24 hours.")
+                return new_anchor
+        except Exception as e:
+            log_terminal(f"Anchor Update Error: {e}", "ERROR")
+
+    # 2. Cold Start: If no anchor exists, set one immediately
+    if magical_line == 0:
+        log_terminal("❄️ COLD START: No Magical Line found. Anchoring now...", "START")
+        df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+        if not df.empty:
+            new_anchor = float(df['close'].iloc[-1])
+            db.set_param("magical_line", str(new_anchor))
+            return new_anchor
+            
+    return magical_line
+
+def run_crypto_magical():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF':
         return
 
-    asset     = "BTC"
-    timeframe = db.get_param("candle_timeframe", "5m")
-    signal    = logic.get_supertrend_signal(asset, timeframe=timeframe)
+    # 1. Get Core Data
+    magical_line = check_magical_anchor()
+    if magical_line == 0:
+        return
+
+    try:
+        df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+        if df.empty: return
+        ltp = float(df['close'].iloc[-1])
+    except: return
+
+    # 2. Determine Signal (Magical Rule)
+    # Price > Magical Line => BUY (Bullish -> Sell Put)
+    # Price < Magical Line => SELL (Bearish -> Sell Call)
+    signal = "BUY" if ltp > magical_line else "SELL"
     db.set_param("signal_target", signal)
 
-    # Sync with exchange
+    # 3. Sync & State Management
     delta_executor.sync_delta_position()
     active_call = db.get_param("active_call_symbol", "NONE")
     active_put  = db.get_param("active_put_symbol",  "NONE")
@@ -176,18 +223,22 @@ def run_crypto_sar():
     else:
         db.set_param("crypto_active_symbol", "NONE")
 
-    # ---- CLEAN SLATE RULE: No trade before screen is EMPTY ----
+    # 4. Entry Logic (Clean Slate + Trend Following)
     if not active_any:
-        if signal in ["BUY", "SELL"]:
-            log_terminal(f"🎯 SIGNAL DETECTED: {signal}. Taking fresh entry.", "TRADE")
-            num_strikes = int(db.get_param('num_strikes', '1'))
-            for i in range(num_strikes):
-                delta_executor.execute_crypto_trade(asset, signal)
-                if num_strikes > 1:
-                    time.sleep(1)
+        log_terminal(f"🎯 MAGICAL SIGNAL: {signal} (LTP: {ltp} vs Anchor: {magical_line}). Taking fresh entry.", "TRADE")
+        num_strikes = int(db.get_param('num_strikes', '1'))
+        for i in range(num_strikes):
+            delta_executor.execute_crypto_trade("BTC", signal)
+            if num_strikes > 1: time.sleep(1)
     else:
-        crypto_roller.check_and_roll_crypto()
-
+        # Check for Flip (Price crossed Magical Line)
+        pos_type = "BUY" if active_put != "NONE" else "SELL" # Because SELL PUT is BUY Signal
+        if signal != pos_type:
+            log_terminal(f"🔄 TREND REVERSAL: Price crossed Magical Line. Squaring off to flip.", "ALERT")
+            send_telegram_msg(f"🔄 TREND REVERSAL: LTP {ltp} crossed Anchor {magical_line}. Flipping position!")
+            delta_executor.square_off_crypto()
+            time.sleep(2)
+            # Re-entry will happen on next loop
 
 # ============================================================
 # MAIN
@@ -202,63 +253,45 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("     🚀 BHARAT ALGOVERSE v3.0 - FULL AUTO 🚀     ")
+    print("     🚀 BHARAT ALGOVERSE v3.0 - MAGICAL LINE 🚀     ")
     print("=" * 60)
-    print("  ✅ Clean Slate Enforcement: ON")
+    print("  ✅ Strategy: Magical Line (6 PM Anchor)")
     print("  ✅ Stop Loss @ 40%: ON")
-    print("  ✅ Take Profit @ 100% + Auto-Reinvest: ON")
-    print("  ✅ Multi-Strike Support: ON")
-    print("  ✅ Multi-Timeframe Support: ON")
+    print("  ✅ Clean Slate: ON")
     print("=" * 60)
 
     if not db.load_secrets():
         sys.exit(1)
 
-    # --- DEFAULT PARAMS (only if not already set by dashboard) ---
-    if not db.get_param('st_period'):        db.set_param('st_period', '10')
-    if not db.get_param('st_multiplier'):    db.set_param('st_multiplier', '1.5')
-    if not db.get_param('crypto_trade_size'): db.set_param('crypto_trade_size', '1')
-    if not db.get_param('sl_percent'):       db.set_param('sl_percent', '40')
-    if not db.get_param('tp_percent'):       db.set_param('tp_percent', '100')
-    if not db.get_param('candle_timeframe'): db.set_param('candle_timeframe', '5m')
-    if not db.get_param('num_strikes'):      db.set_param('num_strikes', '1')
-
-    log_terminal("Bharat AlgoVerse v3.0 - Full Auto Mode Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% + Auto-Reinvest | Clean Slate: ON")
-
-    print("🛡️ SCANNING FOR ORPHANED TRADES...")
-    delta_executor.reconcile_bracket_orders()
+    log_terminal("Bharat AlgoVerse v3.0 - Magical Line Mode Started.", "START")
+    send_telegram_msg("🚀 BHARAT ALGOVERSE STARTED\n📍 Strategy: Magical Line (6 PM Anchor)\n✅ SL: 40% | Clean Slate: ON")
 
     last_pulse = 0
 
     while True:
         try:
             run_janitor()
-            run_crypto_sar()
-            check_sl_tp()            # <-- In-code SL/TP monitor
+            run_crypto_magical()
+            check_sl_tp()
             delta_executor.reconcile_bracket_orders()
 
             # Telegram Pulse every 30 mins
             if time.time() - last_pulse > 1800:
-                timeframe = db.get_param("candle_timeframe", "5m")
-                signal    = logic.get_supertrend_signal("BTC", timeframe=timeframe)
-                active    = db.get_param('crypto_active_symbol', 'NONE')
-                upnl      = db.get_param('unrealized_pnl', '0')
+                magical_line = float(db.get_param("magical_line", "0"))
+                active = db.get_param('crypto_active_symbol', 'NONE')
+                upnl = db.get_param('unrealized_pnl', '0')
                 send_telegram_msg(
-                    f"✅ BHARAT PULSE v3.0\n"
-                    f"Signal: {signal} | Active: {active}\n"
-                    f"Live PnL: ${upnl}\n"
-                    f"Timeframe: {timeframe}"
+                    f"✅ BHARAT PULSE (MAGICAL)\n"
+                    f"Anchor: ${magical_line:,.0f} | Active: {active}\n"
+                    f"Live PnL: ${upnl}"
                 )
                 last_pulse = time.time()
 
-            time.sleep(15)
+            time.sleep(30) # V3 Magical Loop
 
-        except KeyboardInterrupt:
-            break
+        except KeyboardInterrupt: break
         except Exception as e:
             print(f"Main Loop Error: {e}")
-            traceback.print_exc()
             time.sleep(10)
 
 

@@ -424,59 +424,61 @@ if page == "🚀 Crypto (BTC)":
             st.info("⚠️ delta_executor not available — chart disabled.")
 
     with col_lab:
-        st.markdown('<div class="section-title">⚙️ Strategy Lab (Live Settings)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">⚙️ Magical Line Selling Lab</div>', unsafe_allow_html=True)
 
         _mode_val    = db.get_param('trade_mode', 'LIVE') or 'LIVE'
-        _tf_val      = db.get_param('candle_timeframe', '5m') or '5m'
         _lots_val    = int(db.get_param('crypto_trade_size', '1') or '1')
-        _strikes_val = int(db.get_param('num_strikes', '1') or '1')
-        _expiry_val  = int(db.get_param('expiry_threshold', '3') or '3')
         _sl_val      = int(float(db.get_param('sl_percent', '40') or '40'))
         _tp_val      = int(float(db.get_param('tp_percent', '100') or '100'))
-        _offset_raw  = int(db.get_param('strike_offset', '0') or '0')
-        _period_val  = int(float(db.get_param('st_period', '10') or '10'))
-        _mult_val    = float(db.get_param('st_multiplier', '1.5') or '1.5')
+        _magical_line = db.get_param('magical_line', '0')
+        _strike_val  = db.get_param('strike_selection', 'ATM') or 'ATM'
+        _expiry_val  = db.get_param('expiry_selection', 'Next Day') or 'Next Day'
         _capital_val = int(float(db.get_param('estimated_capital', '240') or '240'))
 
-        _tf_options  = ["5m", "15m", "1h", "4h"]
-        _tf_idx      = _tf_options.index(_tf_val) if _tf_val in _tf_options else 0
-        _offset_opts = ["ATM (0)", "OTM +1", "OTM +2"]
+        st.markdown(f"""
+        <div style="background: rgba(99,102,241,0.1); padding: 15px; border-radius: 10px; border: 1px solid rgba(99,102,241,0.3); margin-bottom: 20px;">
+            <div class="kpi-label" style="color: #6366f1;">Current Magical Line</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: #e2e8f0;">${float(_magical_line):,.2f}</div>
+            <div style="font-size: 0.7rem; color: #64748b; margin-top: 5px;">Price captured at 6:00 PM IST</div>
+        </div>
+        """, unsafe_allow_html=True)
 
+        _strike_options = ["ITM 4", "ITM 3", "ITM 2", "ITM 1", "ATM", "OTM 1", "OTM 2", "OTM 3", "OTM 4", "OTM 5"]
+        _expiry_options = ["0 DTE", "Next Day", "3 Days", "7 Days", "Monthly"]
+        
         s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
                               index=1 if _mode_val == "LIVE" else 0, key="s_mode")
-        s_tf   = st.selectbox("Candle Timeframe", _tf_options, index=_tf_idx, key="s_tf")
-        s_lots = st.slider("Lot Size (Contracts)", 1, 50, max(1, _lots_val), key="s_lots")
-        s_strikes = st.slider("Number of Strike Prices", 1, 5, max(1, _strikes_val), key="s_strikes",
-                              help="Take multiple strikes at once")
-        s_expiry = st.slider("Min Expiry Days", 0, 14, max(0, _expiry_val), key="s_expiry")
+        
+        col_stk, col_exp = st.columns(2)
+        with col_stk:
+            s_strike = st.selectbox("Strike Selection", _strike_options, 
+                                    index=_strike_options.index(_strike_val) if _strike_val in _strike_options else 4, 
+                                    key="s_strike")
+        with col_exp:
+            s_expiry = st.selectbox("Expiry Selection", _expiry_options, 
+                                    index=_expiry_options.index(_expiry_val) if _expiry_val in _expiry_options else 1, 
+                                    key="s_expiry")
 
-        col_sl, col_tp = st.columns(2)
+        s_lots = st.slider("Lot Size (Contracts)", 1, 100, max(1, _lots_val), key="s_lots")
+        
+        col_sl, col_cap = st.columns(2)
         with col_sl:
-            s_sl = st.number_input("Stop Loss %", 10, 90, max(10, min(90, _sl_val)), step=5, key="s_sl")
-        with col_tp:
-            s_tp = st.number_input("Take Profit %", 20, 500, max(20, min(500, _tp_val)), step=10, key="s_tp")
+            s_sl = st.number_input("Stop Loss %", 5, 90, max(5, min(90, _sl_val)), step=5, key="s_sl")
+        with col_cap:
+            s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
+                                        max(50, min(10000, _capital_val)), step=10, key="s_cap")
 
-        s_offset  = st.selectbox("Strike Selection", _offset_opts, index=min(_offset_raw, 2), key="s_offset")
-        s_period  = st.number_input("Supertrend Period", 5, 30, max(5, min(30, _period_val)), key="s_period")
-        s_mult    = st.number_input("Supertrend Multiplier", 0.5, 5.0,
-                                    max(0.5, min(5.0, _mult_val)), step=0.1, key="s_mult")
-        s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
-                                    max(50, min(10000, _capital_val)), step=10, key="s_cap")
-
-        if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
+        if st.button("💾 SAVE MAGICAL SETTINGS", key="save_strategy"):
             try:
                 db.set_param('trade_mode',        s_mode)
-                db.set_param('candle_timeframe',  s_tf)
                 db.set_param('crypto_trade_size', str(s_lots))
-                db.set_param('num_strikes',       str(s_strikes))
-                db.set_param('expiry_threshold',  str(s_expiry))
+                db.set_param('strike_selection',  s_strike)
+                db.set_param('expiry_selection',  s_expiry)
                 db.set_param('sl_percent',        str(s_sl))
-                db.set_param('tp_percent',        str(s_tp))
-                db.set_param('strike_offset',     str(0 if "ATM" in s_offset else (1 if "+1" in s_offset else 2)))
-                db.set_param('st_period',         str(s_period))
-                db.set_param('st_multiplier',     str(s_mult))
                 db.set_param('estimated_capital', str(s_capital))
-                st.success("✅ All settings saved! Bot will use these on next cycle.")
+                st.success("✅ Magical settings saved!")
+                time.sleep(1)
+                st.rerun()
             except Exception as e:
                 st.error(f"Save failed: {e}")
 

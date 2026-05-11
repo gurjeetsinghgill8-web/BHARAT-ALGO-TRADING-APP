@@ -162,78 +162,82 @@ def filter_options_by_expiry(options, days_threshold=3):
             continue
     return valid_options
 
-def find_atm_strike(spot_price, options_list, direction, offset=0):
+def find_atm_strike(spot_price, options_list, direction, strike_selection="ATM"):
     """
-    Lego Block 3: Strike Selection (Strike Picker)
-    Finds the strike price with min difference from spot, plus an optional OTM offset.
-    offset=0: ATM
-    offset=1: 1-strike OTM
+    Finds the strike price based on selection: ITM 1-4, ATM, or OTM 1-5.
     """
     if not options_list: return None
     
-    # 1. Sort all by proximity to spot (ATM candidate is index 0)
-    options_list.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
+    # 1. Sort all by strike price
+    options_list.sort(key=lambda x: float(x.get('strike_price', 0)))
+    strikes = [float(o.get('strike_price', 0)) for o in options_list]
     
-    if offset == 0:
-        return options_list[0]
+    # 2. Find ATM index (closest to spot)
+    import bisect
+    idx = bisect.bisect_left(strikes, spot_price)
     
-    # 2. Filter for OTM strikes
-    # For CALL: Strike > Spot
-    # For PUT: Strike < Spot
-    otm_options = []
-    if direction == "BUY": # Call
-        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) > spot_price]
-    else: # Put
-        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) < spot_price]
+    # Ensure idx is within bounds and pick the closer one
+    if idx >= len(strikes): idx = len(strikes) - 1
+    elif idx > 0 and abs(strikes[idx-1] - spot_price) < abs(strikes[idx] - spot_price):
+        idx -= 1
+    
+    # 3. Handle selection
+    # target_type = options_list[0].get('contract_type', '') # 'call_options' or 'put_options'
+    is_call = options_list[0].get('contract_type') == 'call_options'
+    
+    if strike_selection == "ATM":
+        target_idx = idx
+    elif "ITM" in strike_selection:
+        offset = int(strike_selection.split()[-1])
+        # For CALL, ITM is lower strikes. For PUT, ITM is higher strikes.
+        target_idx = idx - offset if is_call else idx + offset
+    elif "OTM" in strike_selection:
+        offset = int(strike_selection.split()[-1])
+        # For CALL, OTM is higher strikes. For PUT, OTM is lower strikes.
+        target_idx = idx + offset if is_call else idx - offset
+    else:
+        target_idx = idx
         
-    if not otm_options:
-        return options_list[0] # Fallback to ATM if no OTM found
-        
-    # 3. Sort OTM options by proximity to spot and pick the requested offset
-    otm_options.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    target_idx = offset - 1 # offset 1 is index 0 of OTM list
-    if target_idx < len(otm_options):
-        return otm_options[target_idx]
-    
-    return otm_options[-1] # Pick furthest OTM if requested offset is out of bounds
+    # Bounds check
+    target_idx = max(0, min(len(options_list) - 1, target_idx))
+    return options_list[target_idx]
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Scanning {direction} options for {asset} (Gill Supertrend Rule)...")
+    log_crypto(f"Scanning {direction} options for {asset}...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
         return None
     
-    target_type = 'call_options' if direction == "BUY" else 'put_options'
+    # SIGNAL MAPPING (Option Selling logic)
+    # BUY Signal -> Bullish -> Sell Put
+    # SELL Signal -> Bearish -> Sell Call
+    target_type = 'put_options' if direction == "BUY" else 'call_options'
     
     # 1. Filter for type and liquidity
     all_typed_options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
     
     if not all_typed_options:
-        log_crypto(f"No liquid {target_type} found at all.")
+        log_crypto(f"No liquid {target_type} found.")
         return None
 
-    # 2. Expiry Rule: Smart Expiry (Lego Block 2)
-    # We pick expiries based on the threshold (default 3 days) to avoid theta decay.
+    # 2. Expiry Rule: Next Day or selection from DB
     today = datetime.date.today()
-    threshold = int(db.get_param('expiry_threshold', '3'))
-    min_expiry_dt = today + datetime.timedelta(days=threshold)
-    min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
+    expiry_sel = db.get_param('expiry_selection', 'Next Day')
     
-    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] >= min_expiry_str])))
+    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
     
-    if not valid_expiries:
-        log_crypto(f"No expiries found after {min_expiry_str}! Falling back to nearest available.")
-        valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
+    if not valid_expiries: return None
     
-    if not valid_expiries:
-        log_crypto("No valid future expiries found!")
-        return None
+    if expiry_sel == "0 DTE":
+        best_expiry = valid_expiries[0]
+    elif expiry_sel == "Next Day" and len(valid_expiries) > 1:
+        best_expiry = valid_expiries[1]
+    else:
+        best_expiry = valid_expiries[0]
         
-    best_expiry = valid_expiries[0] 
-    log_crypto(f"Selected Expiry: {best_expiry} (3-Day Rule applied)")
+    log_crypto(f"Selected Expiry: {best_expiry}")
     
     # 3. Filter for options with that specific expiry
     near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
@@ -244,14 +248,11 @@ def find_gill_crypto_option(asset, direction):
         spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
         if spot_price > 0: break
     
-    if spot_price == 0:
-        log_crypto("Could not determine spot price.")
-        return None
+    if spot_price == 0: return None
     
-    # 5. Strike Selection: ATM or 1-strike OTM
-    # offset=0 is ATM, offset=1 is 1-strike OTM
-    offset = int(db.get_param('strike_offset', '1')) # Defaulting to 1 (slight OTM) per user request
-    best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
+    # 5. Strike Selection
+    strike_selection = db.get_param('strike_selection', 'ATM')
+    best_opt = find_atm_strike(spot_price, near_options, direction, strike_selection=strike_selection)
     
     if not best_opt: return None
 
