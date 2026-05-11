@@ -26,29 +26,29 @@ def run_janitor():
     # 1. Sync Reality from Exchange
     delta_executor.sync_delta_position()
 
-    # 2. Get Current Signal (from configured timeframe)
-    asset = "BTC"
-    timeframe = db.get_param("candle_timeframe", "5m")
-    signal = logic.get_supertrend_signal(asset, timeframe=timeframe)
-    db.set_param("signal_target", signal)
+    # 2. Get Magical Signal
+    magical_line = float(db.get_param("magical_line", "0"))
+    if magical_line == 0: return
+    
+    try:
+        df, _ = delta_executor.fetch_delta_candles("BTC", "1m", limit=1)
+        if df.empty: return
+        ltp = float(df['close'].iloc[-1])
+        signal = "BUY" if ltp > magical_line else "SELL"
+    except: return
 
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
 
-    # CASE: SIGNAL SELL BUT CALL OPEN
-    if signal == "SELL" and call_active:
-        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
+    # CASE: SIGNAL SELL (Bearish) BUT PUT OPEN (Bullish)
+    if signal == "SELL" and put_active:
+        log_terminal("JANITOR FLIP: Closing PUT to prepare for SELL Call entry.", "ALERT")
         delta_executor.square_off_crypto()
 
-    # CASE: SIGNAL BUY BUT PUT OPEN
-    elif signal == "BUY" and put_active:
-        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
-        delta_executor.square_off_crypto()
-
-    # CASE: SIGNAL WAIT BUT ANYTHING OPEN
-    elif signal == "WAIT" and (call_active or put_active):
-        log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
+    # CASE: SIGNAL BUY (Bullish) BUT CALL OPEN (Bearish)
+    elif signal == "BUY" and call_active:
+        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL Put entry.", "ALERT")
         delta_executor.square_off_crypto()
 
     # QUANTITY GUARD: Prevent over-trading
