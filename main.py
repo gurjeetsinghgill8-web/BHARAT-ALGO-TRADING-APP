@@ -72,17 +72,25 @@ def run_crypto_magical():
     # Trend Reversal Flip
     if active_any:
         pos_type = "BUY" if active_put != "NONE" else "SELL"
+        
+        # --- SELF-CHECK (Emergency Directive) ---
+        log_terminal(f"🤖 Self-Check: I hold {pos_type}, LTP is ${ltp:,.2f}, Anchor is ${magical_line:,.2f}.", "INFO")
+        
         if signal != pos_type:
             # --- 5-MINUTE CANDLE LOCK (Directive 2) ---
             last_trade_time = float(config.get_param("last_trade_time", "0"))
-            if (time.time() - last_trade_time) < 300:
-                log_terminal(f"⏳ FLIP LOCKED: Waiting for 5-min candle to close. ({int(300 - (time.time() - last_trade_time))}s left)", "INFO")
+            elapsed = time.time() - last_trade_time
+            if elapsed < 300:
+                log_terminal(f"⏳ FLIP LOCKED: Waiting for 5-min candle to close. ({int(300 - elapsed)}s left)", "INFO")
                 return
 
-            log_terminal("🔄 TREND FLIP: Price crossed Anchor. Squaring off.", "ALERT")
+            log_terminal(f"🔄 TREND FLIP triggered: {pos_type} -> {signal}. Squaring off.", "ALERT")
             delta_executor.square_off_crypto()
             config.set_param("last_trade_time", str(time.time())) # Start cooldown after flip
             return
+        else:
+            # log_terminal("✅ Trend matches position. Continuing to hold.", "INFO")
+            pass
 
     # Fresh Entry
     if not active_any:

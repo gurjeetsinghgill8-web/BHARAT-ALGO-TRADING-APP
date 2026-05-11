@@ -15,7 +15,26 @@ def allowed_gai_family():
     return socket.AF_INET
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
-# --- ROBUST FETCHERS (V3 Stable) ---
+# --- V3 COMPATIBILITY HELPERS ---
+def fetch_btc_spot():
+    """V3 Alias for current BTC price."""
+    df, _ = fetch_delta_candles("BTC", "1m", limit=1)
+    if not df.empty:
+        return float(df['close'].iloc[-1])
+    return 0
+
+def get_current_position():
+    """V3 Alias for getting active position as a dict. Fixes P- prefix bug."""
+    sync_delta_position()
+    call = db.get_param("active_call_symbol", "NONE")
+    put = db.get_param("active_put_symbol", "NONE")
+    
+    # Emergency Fix: Delta symbols like P-BTC-81800... start with P-
+    if put != "NONE" and put.upper().startswith("P-"):
+        return {'type': 'PUT', 'symbol': put}
+    if call != "NONE":
+        return {'type': 'CALL', 'symbol': call}
+    return None
 def fetch_delta_candles(symbol, resolution="1m", limit=100):
     symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
     end_ts = int(time.time())
@@ -170,7 +189,16 @@ def square_off_crypto(target_pid=None):
         except: pass
     db.set_param("active_call_symbol", "NONE"); db.set_param("active_put_symbol", "NONE"); db.set_param("crypto_active_symbol", "NONE")
 
-def execute_crypto_trade(asset, direction):
+def execute_crypto_trade(asset, direction=None):
+    # Support for V3-style calls: execute_crypto_trade("SELL_CALL")
+    if direction is None:
+        direction = asset
+        asset = "BTC"
+    
+    # Map V3 strings to V4 directions
+    if direction == "SELL_CALL": direction = "SELL"
+    elif direction == "SELL_PUT": direction = "BUY"
+
     if db.get_param('trade_mode', 'PAPER') != "LIVE":
         log_terminal(f"PAPER ENTRY: {direction}", "TRADE"); return
     

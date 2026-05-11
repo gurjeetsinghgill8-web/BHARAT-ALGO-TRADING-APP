@@ -43,21 +43,33 @@ with col_lab:
     
     _mode = db.get_param('trade_mode', 'LIVE')
     _lots = int(db.get_param('crypto_trade_size', '1') or '1')
-    _sl   = int(db.get_param('sl_percent', '25') or '25')
+    _sl   = int(db.get_param('stop_loss_percentage', '25') or '25')
     _stk  = db.get_param('strike_selection', 'ATM')
+    _man  = float(db.get_param('manual_magical_line', '0.0') or '0.0')
     
     s_mode = st.selectbox("Mode", ["PAPER", "LIVE"], index=1 if _mode=="LIVE" else 0)
-    s_lots = st.slider("Lots", 1, 100, _lots)
-    s_sl   = st.number_input("Stop Loss (%)", 5, 90, _sl)
     
-    _stk_opts = ["ITM 4", "ITM 3", "ITM 2", "ITM 1", "ATM", "OTM 1", "OTM 2", "OTM 3"]
-    s_stk = st.selectbox("Strike Selection", _stk_opts, index=_stk_opts.index(_stk) if _stk in _stk_opts else 4)
+    # 2. Lot Size Input (Number Input instead of Slider)
+    s_lots = st.number_input("Lots", min_value=1, value=_lots, step=1)
+    
+    # 3. Dynamic Stop-Loss Input
+    s_sl   = st.number_input("Stop Loss (%)", min_value=1, max_value=100, value=_sl, step=1)
+    
+    # 1. Strike Selection Upgrade
+    _stk_opts = ["ITM 5", "ITM 4", "ITM 3", "ITM 2", "ITM 1", "ATM", "OTM 1", "OTM 2", "OTM 3", "OTM 4", "OTM 5"]
+    s_stk = st.selectbox("Strike Selection", _stk_opts, index=_stk_opts.index(_stk) if _stk in _stk_opts else 5)
+
+    # 4. Manual Magical Line (Anchor)
+    s_manual_anchor = st.number_input("Manual Magical Line Override", value=_man, step=0.1, 
+                                     help="Keep 0 to let the bot auto-fetch the 6 PM candle. Enter a price to force a manual anchor")
 
     if st.button("💾 SAVE SETTINGS"):
         db.set_param('trade_mode', s_mode)
         db.set_param('crypto_trade_size', str(s_lots))
-        db.set_param('sl_percent', str(s_sl))
+        db.set_param('stop_loss_percentage', str(s_sl))
+        db.set_param('sl_percent', str(s_sl)) # Internal SL use
         db.set_param('strike_selection', s_stk)
+        db.set_param('manual_magical_line', str(s_manual_anchor))
         st.success("Settings Saved!")
         time.sleep(1)
         st.rerun()
