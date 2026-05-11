@@ -428,7 +428,7 @@ if page == "🚀 Crypto (BTC)":
 
         _mode_val    = db.get_param('trade_mode', 'LIVE') or 'LIVE'
         _lots_val    = int(db.get_param('crypto_trade_size', '1') or '1')
-        _sl_val      = int(float(db.get_param('sl_percent', '40') or '40'))
+        _sl_val      = int(float(db.get_param('sl_percent', '25') or '25'))
         _tp_val      = int(float(db.get_param('tp_percent', '100') or '100'))
         _magical_line = db.get_param('magical_line', '0')
         _strike_val  = db.get_param('strike_selection', 'ATM') or 'ATM'

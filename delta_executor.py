@@ -591,11 +591,21 @@ def square_off_crypto(target_pid=None):
                     log_terminal(f"⚠️ Size=0 for {pid}, skipping.", "WARN")
                     continue
 
+                # Determine exit side based on current position
+                raw_size = 0
+                for p in r_pos.json().get('result', []):
+                    if str(p.get('product_id')) == str(pid):
+                        raw_size = float(p.get('size', 0))
+                        break
+                
+                exit_side = "buy" if raw_size < 0 else "sell"
+                size = abs(raw_size)
+
                 # CRITICAL FIX: size must be INTEGER for Delta Exchange
                 payload_dict = {
                     "product_id": int(pid),
-                    "size": int(size),  # Must be int, not float!
-                    "side": "sell",
+                    "size": int(size),
+                    "side": exit_side,
                     "order_type": "market_order",
                     "reduce_only": True
                 }
@@ -775,7 +785,7 @@ def execute_crypto_trade(asset, direction):
             payload_dict = {
                 "product_id": int(pid),
                 "size": int(qty),
-                "side": "buy",
+                "side": "sell",
                 "order_type": "market_order"
             }
             import json

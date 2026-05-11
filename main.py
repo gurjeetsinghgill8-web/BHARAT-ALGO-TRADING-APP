@@ -89,7 +89,7 @@ def check_sl_tp():
     if mode != "LIVE":
         return
 
-    sl_pct = float(db.get_param('sl_percent', '40'))   # default 40%
+    sl_pct = float(db.get_param('sl_percent', '25'))   # default 25%
     tp_pct = float(db.get_param('tp_percent', '100'))  # default 100%
 
     for asset_sym in ["BTC", "ETH"]:
