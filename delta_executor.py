@@ -34,30 +34,43 @@ def fetch_premium(symbol):
     return 0
 
 def get_current_position():
-    """V3 Alias for getting active position as a dict. Fixes P- prefix bug and adds entry_price."""
-    sync_delta_position()
-    
     try:
+        # Fetch open positions from Delta API
         path = "/v2/positions"
         query = "?underlying_asset_symbol=BTC"
         headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
-        if resp.status_code == 200:
-            for position in resp.json().get('result', []):
-                size = abs(float(position.get('size', 0)))
-                if size > 0:
-                    entry_price = float(position.get('avg_entry_price') or 0)
-                    
-                    # EXACT LOGIC INJECTION START
-                    symbol_upper = str(position['symbol']).upper()
-                    if symbol_upper.startswith('P-') or '-P-' in symbol_upper:
-                        pos_type = 'PUT'
-                    else:
-                        pos_type = 'CALL'
-                    # EXACT LOGIC INJECTION END
-                        
-                    return {'type': pos_type, 'symbol': position['symbol'], 'entry_price': entry_price}
-    except: pass
+        
+        if resp.status_code != 200:
+            return None
+            
+        positions = resp.json().get('result', [])
+        if not positions: return None
+        
+        for pos in positions:
+            # Filter for active positions (size != 0)
+            size = float(pos.get('size', 0))
+            if abs(size) == 0: continue
+            
+            # Extract symbol from product or top-level (Delta API returns product object)
+            symbol = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
+            
+            if symbol.startswith('P-') or '-P-' in symbol:
+                return {
+                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                    'type': 'PUT',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': int(abs(size))
+                }
+            elif symbol.startswith('C-') or '-C-' in symbol:
+                return {
+                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                    'type': 'CALL',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': int(abs(size))
+                }
+    except Exception as e:
+        print(f"[Position Fetch Error] {e}")
     return None
 def fetch_delta_candles(symbol, resolution="1m", limit=100):
     symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
