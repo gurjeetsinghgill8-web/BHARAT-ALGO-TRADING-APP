@@ -110,41 +110,25 @@ def fetch_open_positions():
 def get_current_position():
     try:
         positions = fetch_open_positions()
-        if not positions: 
-            return None
-            
+        if not positions: return None
+        
         for pos in positions:
-            # Extract size safely
-            size_raw = pos.get('size') or pos.get('quantity') or pos.get('total_position') or 0
-            size = abs(float(size_raw))
-            if size <= 0.001: 
-                continue
-            
-            # Robust Symbol Extraction (Delta API varies)
-            raw_sym = (
+            size = abs(float(pos.get('size', 0) or pos.get('quantity', 0) or 0))
+            if size <= 0.001: continue
+
+            # Robust symbol extraction across Delta API versions
+            sym_raw = (
                 pos.get('symbol') or 
                 pos.get('instrument_name') or 
-                pos.get('product', {}).get('symbol') or 
-                pos.get('underlying_symbol', '') + "-" + str(pos.get('strike_price', ''))
+                pos.get('product', {}).get('symbol')
             )
-            if not raw_sym: 
-                continue
-            sym = str(raw_sym).upper().strip()
+            if not sym_raw: continue
+            sym = str(sym_raw).upper().strip()
             
             if sym.startswith('P-') or '-P-' in sym:
-                return {
-                    'symbol': raw_sym,
-                    'type': 'PUT',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': size
-                }
+                return {'symbol': sym_raw, 'type': 'PUT', 'entry_price': float(pos.get('avg_entry_price', 0) or 0), 'quantity': size}
             elif sym.startswith('C-') or '-C-' in sym:
-                return {
-                    'symbol': raw_sym,
-                    'type': 'CALL',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': size
-                }
+                return {'symbol': sym_raw, 'type': 'CALL', 'entry_price': float(pos.get('avg_entry_price', 0) or 0), 'quantity': size}
     except Exception as e:
         print(f"[Pos Parse Error] {e}")
     return None
@@ -223,13 +207,10 @@ def filter_options_by_expiry(options, days_threshold=3):
             continue
     return valid_options
 
-def find_atm_strike(spot_price, options_list, direction, strike_selection=None):
-    if not options_list or spot_price <= 0: 
-        return None
-        
+def find_atm_strike(spot_price, options_list, direction, strike_selection=None, **kwargs):
+    if not options_list or spot_price <= 0: return None
     options_list = sorted(options_list, key=lambda x: float(x.get('strike_price', 0)))
     
-    # Find exact ATM index
     atm_idx = 0
     min_diff = float('inf')
     for i, opt in enumerate(options_list):
@@ -238,24 +219,16 @@ def find_atm_strike(spot_price, options_list, direction, strike_selection=None):
             min_diff = diff
             atm_idx = i
             
-    # Read user preference from DB (Default: OTM 2)
-    strike_pref = db.get_param("strike_selection", "OTM 2").upper()
+    strike_pref = (strike_selection or db.get_param("strike_selection", "OTM 2")).upper()
     offset = 0
     if "OTM 1" in strike_pref: offset = 1
     elif "OTM 2" in strike_pref: offset = 2
     elif "OTM 3" in strike_pref: offset = 3
     elif "ITM 1" in strike_pref: offset = -1
-    # ATM = 0
-    
-    # DIRECTIONAL LOGIC FOR SELLING
-    # SELL CALL -> Bearish -> Want OTM (Strike > LTP)
-    # SELL PUT -> Bullish -> Want OTM (Strike < LTP)
-    if "CALL" in direction: 
-        target_idx = atm_idx + offset
-    else: 
-        target_idx = atm_idx - offset
-        
-    # Safe boundary check
+
+    if "CALL" in str(direction).upper(): target_idx = atm_idx + offset
+    else: target_idx = atm_idx - offset
+
     target_idx = max(0, min(len(options_list) - 1, target_idx))
     return options_list[target_idx]
 
