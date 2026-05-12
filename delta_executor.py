@@ -607,37 +607,44 @@ def square_off_crypto(target_pid=None):
                     headers=get_delta_auth_headers("GET", "/v2/positions", query_string=query),
                     timeout=10
                 )
+                # AUTO-DETECT position direction:
+                # raw_size > 0 = LONG (bought option)  → close with SELL
+                # raw_size < 0 = SHORT (sold option)   → close with BUY
+                raw_size = 0
+                position_side = "unknown"
                 if r_pos.status_code == 200:
                     for p in r_pos.json().get('result', []):
                         this_pid = str(p.get('product_id') or p.get('id') or "")
                         if this_pid == pid:
-                            size = abs(float(p.get('size', 0)))
+                            raw_size = float(p.get('size', 0))
                             break
-                
-                # Also try ETH if not found
-                if size == 0:
-                    query2 = "?underlying_asset_symbol=ETH"
-                    r_pos2 = requests.get(
-                        f"https://api.india.delta.exchange/v2/positions{query2}",
-                        headers=get_delta_auth_headers("GET", "/v2/positions", query_string=query2),
-                        timeout=10
-                    )
-                    if r_pos2.status_code == 200:
-                        for p in r_pos2.json().get('result', []):
-                            this_pid = str(p.get('product_id') or p.get('id') or "")
-                            if this_pid == pid:
-                                size = abs(float(p.get('size', 0)))
-                                break
+                if raw_size == 0:
+                    # Try ETH
+                    for p in r_pos2.json().get('result', []) if r_pos2 and r_pos2.status_code == 200 else []:
+                        this_pid = str(p.get('product_id') or p.get('id') or "")
+                        if this_pid == pid:
+                            raw_size = float(p.get('size', 0))
+                            break
 
-                if size == 0:
+                abs_size = abs(raw_size)
+                if abs_size == 0:
                     log_terminal(f"⚠️ Size=0 for {pid}, skipping.", "WARN")
                     continue
 
-                # OPTION SELLING EXIT: We sold the option, so to close we BUY BACK
+                # Direction-aware close
+                if raw_size > 0:
+                    close_side = "sell"   # LONG position → sell to close
+                    position_side = "LONG"
+                else:
+                    close_side = "buy"    # SHORT position → buy back to close
+                    position_side = "SHORT"
+
+                log_terminal(f"📍 Position {pid}: {position_side} (size={raw_size}) → closing with {close_side.upper()}", "INFO")
+
                 payload_dict = {
                     "product_id": int(pid),
-                    "size": int(size),
-                    "side": "buy",          # BUY BACK to close our short position
+                    "size": int(abs_size),
+                    "side": close_side,
                     "order_type": "market_order",
                     "reduce_only": True
                 }

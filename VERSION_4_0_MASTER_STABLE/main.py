@@ -218,11 +218,13 @@ def run_janitor():
         record_trade_action("Flip PUT→CALL")
 
     elif signal == "WAIT" and (call_active or put_active):
-        if is_in_cooldown():
-            return
-        log_terminal("🛑 JANITOR: No anchor set. Closing all for safety.", "ALERT")
-        delta_executor.square_off_crypto()
-        record_trade_action("No anchor — closed all")
+        # WAIT = no anchor set yet (before 6 PM IST)
+        # DO NOT CLOSE positions — just hold and wait for anchor
+        log_terminal(
+            "⏳ JANITOR WAIT: No anchor set yet. "
+            "Holding position until 6 PM IST or manual anchor is set.", "INFO"
+        )
+        return  # HOLD — never disturb existing position without a clear signal
 
     # QUANTITY GUARD
     try:
@@ -372,31 +374,39 @@ def run_crypto_sar():
         return
 
     # Fresh entry only when screen is empty
-    if not active_any and signal in ["BUY", "SELL"]:
-        if is_in_cooldown():
+    if not active_any:
+        if signal == "WAIT":
+            log_terminal(
+                f"⏳ WAITING: Anchor={anchor:,.0f} — "
+                "Set anchor manually on dashboard or wait for 6 PM IST auto-anchor.", "INFO"
+            )
             return
 
-        option_type = "PUT (SELL)" if signal == "SELL" else "CALL (SELL)"
-        direction   = "ABOVE" if signal == "SELL" else "BELOW"
+        if signal in ["BUY", "SELL"]:
+            if is_in_cooldown():
+                return
 
-        log_terminal(
-            f"🎯 MAGIC LINE ENTRY: {option_type} | "
-            f"LTP={ltp:,.0f} {direction} Anchor={anchor:,.0f}", "TRADE"
-        )
-        send_telegram_msg(
-            f"🚀 MAGIC LINE ENTRY\n"
-            f"Action : SELL {option_type}\n"
-            f"LTP    : {ltp:,.0f}\n"
-            f"Anchor : {anchor:,.0f} ({anchor_type})\n"
-            f"Rule   : LTP {direction} Magic Line"
-        )
+            option_type = "PUT (SELL)" if signal == "SELL" else "CALL (SELL)"
+            direction   = "ABOVE" if signal == "SELL" else "BELOW"
 
-        num_strikes = int(db.get_param('num_strikes', '1'))
-        for i in range(num_strikes):
-            delta_executor.execute_crypto_trade("BTC", signal)
-            if num_strikes > 1:
-                time.sleep(1)
-        record_trade_action(f"Fresh entry SELL {option_type}")
+            log_terminal(
+                f"🎯 MAGIC LINE ENTRY: {option_type} | "
+                f"LTP={ltp:,.0f} {direction} Anchor={anchor:,.0f}", "TRADE"
+            )
+            send_telegram_msg(
+                f"🚀 MAGIC LINE ENTRY\n"
+                f"Action : SELL {option_type}\n"
+                f"LTP    : {ltp:,.0f}\n"
+                f"Anchor : {anchor:,.0f} ({anchor_type})\n"
+                f"Rule   : LTP {direction} Magic Line"
+            )
+
+            num_strikes = int(db.get_param('num_strikes', '1'))
+            for i in range(num_strikes):
+                delta_executor.execute_crypto_trade("BTC", signal)
+                if num_strikes > 1:
+                    time.sleep(1)
+            record_trade_action(f"Fresh entry SELL {option_type}")
 
 
 # ============================================================
