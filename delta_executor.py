@@ -663,112 +663,48 @@ def get_dynamic_quantity(option_price):
     return manual_lots
 
 def execute_crypto_trade(direction=None):
-    import time, signal, traceback
-    log_terminal(f"🔍 [EXEC] START: {direction}", "TRADE")
     try:
-        # Step 1: Balance
-        log_terminal("🔍 [EXEC] Step 1/6: Fetching balance...", "DEBUG")
+        log_terminal(f"🔍 [EXEC] START: {direction}", "TRADE")
         balance = fetch_wallet_balance()
         log_terminal(f"💰 [EXEC] Balance: ${balance:.2f}", "DEBUG")
-        
-        effective_balance = balance if MIN_BALANCE_OVERRIDE <= 0 else MIN_BALANCE_OVERRIDE
-        if effective_balance < 1.0:
-            msg = f"⚠️ BLOCKED: Balance ${effective_balance:.2f} < $1.0"
-            log_terminal(msg, "WARN"); send_telegram_msg(msg); return
-
-        # Step 2: Mode check
-        log_terminal("🔍 [EXEC] Step 2/6: Checking trade mode...", "DEBUG")
+        if balance < 1.0:
+            msg = f"⚠️ BLOCKED: Balance ${balance:.2f} < $1.0"; log_terminal(msg, "WARN"); send_telegram_msg(msg); return
         if db.get_param('trade_mode', 'PAPER') != "LIVE":
             log_terminal("📝 [EXEC] PAPER MODE: Skipping", "INFO"); return
-
-        # Step 3: Find option
-        log_terminal("🔍 [EXEC] Step 3/6: Fetching option chain...", "DEBUG")
         opt = find_gill_crypto_option("BTC", direction)
         if not opt:
-            msg = f"❌ BLOCKED: No valid option found for {direction}"
-            log_terminal(msg, "ERROR"); send_telegram_msg(msg); return
+            msg = f"❌ NO OPTION FOUND for {direction}"; log_terminal(msg, "ERROR"); send_telegram_msg(msg); return
         log_terminal(f"🎯 [EXEC] Option: {opt['symbol']} (PID:{opt['product_id']})", "DEBUG")
-
-        # Step 4: Build payload
-        log_terminal("🔍 [EXEC] Step 4/6: Building order payload...", "DEBUG")
-        payload = json.dumps({
-            "product_id": int(opt['product_id']),
-            "size": int(db.get_param('crypto_trade_size', '1')),
-            "side": "sell",
-            "order_type": "market_order"
-        })
+        payload = json.dumps({"product_id": int(opt['product_id']), "size": int(db.get_param('crypto_trade_size', '1')), "side": "sell", "order_type": "market_order"})
         headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-
-        # Step 5: API call with timeout
-        log_terminal("🔍 [EXEC] Step 5/6: Sending API request (10s timeout)...", "DEBUG")
+        log_terminal("📡 [EXEC] Sending API request (10s timeout)...", "DEBUG")
         resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=headers, data=payload, timeout=10)
-
-        # Step 6: Handle response
-        log_terminal(f"🔍 [EXEC] Step 6/6: API response code: {resp.status_code}", "DEBUG")
+        log_terminal(f"🔍 [EXEC] API Response: {resp.status_code}", "DEBUG")
         if resp.status_code in [200, 201]:
-            msg = f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}"
-            log_terminal(msg, "TRADE"); send_telegram_msg(msg); sync_delta_position()
+            msg = f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}"; log_terminal(msg, "TRADE"); send_telegram_msg(msg); sync_delta_position()
         else:
             err = resp.text.lower()
-            if "insufficientmargin" in err:
-                msg = f"🚨 MARGIN ERROR: Need ~$10-$15. Balance: ${balance:.2f}"
-            else:
-                msg = f"❌ API REJECTED ({resp.status_code}): {resp.text}"
+            msg = f"🚨 MARGIN ERROR: Need ~$10-$15. Balance: ${balance:.2f}" if "insufficientmargin" in err else f"❌ API REJECTED ({resp.status_code}): {resp.text}"
             log_terminal(msg, "ERROR"); send_telegram_msg(msg)
-
     except requests.exceptions.Timeout:
-        msg = "❌ NETWORK TIMEOUT: Delta API did not respond in 10s"
-        log_terminal(msg, "ERROR"); send_telegram_msg(msg)
-    except requests.exceptions.ConnectionError:
-        msg = "❌ CONNECTION FAILED: Check VPS internet or Delta API status"
-        log_terminal(msg, "ERROR"); send_telegram_msg(msg)
+        msg = "❌ NETWORK TIMEOUT: Delta API did not respond"; log_terminal(msg, "ERROR"); send_telegram_msg(msg)
     except Exception as e:
-        msg = f"❌ EXEC CRASH: {str(e)}"
-        log_terminal(msg, "ERROR"); log_terminal(traceback.format_exc(), "ERROR"); send_telegram_msg(msg)
+        import traceback; msg = f"❌ EXEC CRASH: {str(e)}"; log_terminal(msg, "ERROR"); log_terminal(traceback.format_exc(), "ERROR"); send_telegram_msg(msg)
     log_terminal("✅ [EXEC] Function completed", "DEBUG")
 
 def fetch_wallet_balance():
-    """Fetch USDT balance from Delta Exchange with FULL DEBUG LOGGING"""
     try:
         path = "/v2/wallet/balances"
         headers = get_delta_auth_headers("GET", path)
         resp = requests.get(f"https://api.india.delta.exchange{path}", headers=headers, timeout=10)
-        
-        # LOG RAW RESPONSE FOR DEBUGGING
-        log_terminal(f"💰 [BALANCE API] Status: {resp.status_code}", "DEBUG")
-        log_terminal(f"💰 [BALANCE API] Raw Response: {resp.text[:500]}", "DEBUG")
-        
-        if resp.status_code != 200:
-            log_terminal(f"⚠️ [BALANCE] API Error: {resp.status_code} - {resp.text}", "WARN")
-            return 0.0
-            
-        result = resp.json().get('result', [])
-        if not result:
-            log_terminal("⚠️ [BALANCE] Empty result array from API", "WARN")
-            return 0.0
-            
-        # Search for USDT/USD balance with multi-key fallback
-        for item in result:
+        log_terminal(f"💰 [BALANCE API] Status: {resp.status_code} | Raw: {resp.text[:300]}", "DEBUG")
+        if resp.status_code != 200: return 0.0
+        for item in resp.json().get('result', []):
             asset = str(item.get('asset_symbol') or item.get('currency') or '').upper()
             if asset in ['USDT', 'USD', 'USDⓈ']:
-                # Try multiple possible balance keys (Delta API varies)
-                balance = (
-                    float(item.get('balance') or item.get('available_balance') or item.get('total_balance') or item.get('available') or 0)
-                )
-                log_terminal(f"✅ [BALANCE] Found {asset}: ${balance:.2f}", "DEBUG")
+                balance = float(item.get('balance') or item.get('available_balance') or item.get('total_balance') or 0)
+                log_terminal(f"✅ [BALANCE] {asset}: ${balance:.2f}", "DEBUG")
                 return balance
-                
-        log_terminal("⚠️ [BALANCE] USDT/USD not found in response", "WARN")
-        return 0.0
-        
-    except requests.exceptions.Timeout:
-        log_terminal("❌ [BALANCE] API Timeout", "ERROR")
-        return 0.0
-    except requests.exceptions.ConnectionError:
-        log_terminal("❌ [BALANCE] Connection Failed", "ERROR")
         return 0.0
     except Exception as e:
-        import traceback
-        log_terminal(f"❌ [BALANCE] Crash: {str(e)}", "ERROR")
-        log_terminal(traceback.format_exc(), "ERROR")
-        return 0.0
+        log_terminal(f"❌ [BALANCE] Crash: {str(e)}", "ERROR"); return 0.0

@@ -13,21 +13,17 @@ import traceback
 import json
 from utils import log_terminal, send_telegram_msg
 
-# 🔐 SINGLE-INSTANCE GUARD
-import os, sys, socket
+# 🔐 SINGLE-INSTANCE GUARD (V5.0)
+import os, sys, atexit
 LOCK_FILE = "/tmp/bharat_algo.lock"
-def acquire_lock():
-    if os.path.exists(LOCK_FILE):
-        try:
-            with open(LOCK_FILE, 'r') as f:
-                old_pid = int(f.read().strip())
-            os.kill(old_pid, 0)  # Check if process exists
-            print(f"[GUARD] Another instance (PID {old_pid}) is running. Exiting."); sys.exit(0)
-        except (ProcessLookupError, ValueError):
-            os.remove(LOCK_FILE)  # Stale lock
-    with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
-    import atexit; atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
-acquire_lock()
+if os.path.exists(LOCK_FILE):
+    try:
+        with open(LOCK_FILE, 'r') as f: old_pid = int(f.read().strip())
+        os.kill(old_pid, 0)
+        print(f"[GUARD] Another instance (PID {old_pid}) running. Exiting."); sys.exit(0)
+    except (ProcessLookupError, ValueError): os.remove(LOCK_FILE)
+with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
+atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
 
 # --- FORCE IPv4 GLOBALLY ---
 import requests.packages.urllib3.util.connection as urllib3_cn
@@ -193,77 +189,36 @@ def run_crypto_sar():
 # ============================================================
 def main_loop():
     import time
-    log_terminal("🧱 V4.0 CORE + SURGICAL PATCHES ACTIVE", "START")
-    last_heartbeat = 0
-    last_action_time = 0
-    COOLDOWN_SEC = 300
-
+    log_terminal("🧱 V5.0 FINAL: Consolidated Logic Active", "START")
+    last_heartbeat = 0; last_action_time = 0; COOLDOWN_SEC = 300
     while True:
         try:
             now = time.time()
-            
-            # 🔄 Remote sync flag
             if db.get_param("force_sync_flag", "0") == "1":
-                delta_executor.sync_delta_position()
-                send_telegram_msg("🔄 *REMOTE SYNC COMPLETE*")
-                db.set_param("force_sync_flag", "0")
-                last_action_time = time.time()
-                time.sleep(5)
-                continue
-
-            # 💓 Heartbeat with contextual status
+                delta_executor.sync_delta_position(); send_telegram_msg("🔄 *REMOTE SYNC COMPLETE*")
+                db.set_param("force_sync_flag", "0"); last_action_time = time.time(); time.sleep(5); continue
             if now - last_heartbeat >= 300:
-                ltp = float(delta_executor.fetch_btc_spot())
-                pos = delta_executor.get_current_position()
+                ltp = float(delta_executor.fetch_btc_spot()); pos = delta_executor.get_current_position()
                 anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
                 status = "✅ Trend Aligned | Holding" if pos else "⏳ No Trade | Waiting for Signal"
                 pulse = f"💓 VISION PULSE\n📊 LTP: ${ltp}\n🎯 Anchor: ${anchor}\n📦 {status}"
-                log_terminal(pulse, "INFO")
-                send_telegram_msg(pulse)
-                last_heartbeat = now
-
-            # 🛑 Cooldown check
-            if now - last_action_time < COOLDOWN_SEC:
-                time.sleep(10)
-                continue
-
-            # 🔄 Sync reality & fetch data (TYPE-SAFE)
-            delta_executor.sync_delta_position()
-            pos = delta_executor.get_current_position()
-            ltp = float(delta_executor.fetch_btc_spot())
-            anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-
-            if anchor <= 0 or ltp <= 0:
-                time.sleep(10)
-                continue
-
-            # 🧠 CORE DECISION ENGINE (V4.0 logic + Blank-Screen fix)
+                log_terminal(pulse, "INFO"); send_telegram_msg(pulse); last_heartbeat = now
+            if now - last_action_time < COOLDOWN_SEC: time.sleep(10); continue
+            delta_executor.sync_delta_position(); pos = delta_executor.get_current_position()
+            ltp = float(delta_executor.fetch_btc_spot()); anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
+            if anchor <= 0 or ltp <= 0: time.sleep(10); continue
             if pos:
-                # TRADE EXISTS
-                holding_put = (pos['type'] == 'PUT')
-                is_bullish = ltp > anchor
-                if (holding_put and is_bullish) or (not holding_put and not is_bullish):
-                    log_terminal(f"✅ HOLD: {pos['type']} matches trend", "INFO")
-                else:
-                    log_terminal(f"🔄 FLIP: Closing {pos['type']}", "ALERT")
-                    delta_executor.square_off_crypto()
-                    last_action_time = time.time()
-                    time.sleep(5)
-                    continue
+                holding_put = (pos['type'] == 'PUT'); is_bullish = ltp > anchor
+                if (holding_put and is_bullish) or (not holding_put and not is_bullish): log_terminal(f"✅ HOLD: {pos['type']} matches trend", "INFO")
+                else: log_terminal(f"🔄 FLIP: Closing {pos['type']}", "ALERT"); delta_executor.square_off_crypto(); last_action_time = time.time(); time.sleep(5); continue
             else:
-                # 🟢 BLANK SCREEN = INSTANT ENTRY (No DB block)
                 log_terminal("🟢 NO OPEN TRADE -> EXECUTING FRESH ENTRY", "TRADE")
-                if ltp > anchor:
-                    delta_executor.execute_crypto_trade("SELL_PUT")
-                elif ltp < anchor:
-                    delta_executor.execute_crypto_trade("SELL_CALL")
+                if ltp > anchor: delta_executor.execute_crypto_trade("SELL_PUT")
+                elif ltp < anchor: delta_executor.execute_crypto_trade("SELL_CALL")
                 last_action_time = time.time()
-
             check_sl_tp()
         except Exception as e:
-            log_terminal(f"❌ Loop Error: {str(e)}", "ERROR")
-            import traceback; log_terminal(traceback.format_exc(), "ERROR")
-            last_action_time = time.time()
+            log_terminal(f"❌ Loop Error: {str(e)}", "ERROR"); import traceback; log_terminal(traceback.format_exc(), "ERROR"); last_action_time = time.time()
         time.sleep(10)
 
 def main():
