@@ -1,21 +1,20 @@
 import streamlit as st
+st.set_page_config(layout="wide", page_title="BHARAT ALGO DASHBOARD")
+st.markdown("""
+<style>
+    .stApp { background-color: #0f172a !important; color: #ffffff !important; }
+    .stTextInput > div > div > input, .stNumberInput > div > div > input, .stSelectbox > div > div > select { background-color: #1e293b !important; color: #ffffff !important; border: 1px solid #334155 !important; }
+    .stButton > button { background-color: #10b981 !important; color: #000000 !important; font-weight: bold !important; }
+    h1, h2, h3, p, label, div[data-testid="stMarkdownContainer"], span { color: #ffffff !important; }
+    section[data-testid="stSidebar"] { background-color: #0f172a !important; }
+</style>
+""", unsafe_allow_html=True)
 import pandas as pd
 import time
 import datetime
 import db
 import delta_executor
 
-st.set_page_config(page_title="BHARAT ALGO - STABLE V3", layout="wide", initial_sidebar_state="collapsed")
-
-# --- UI STYLING ---
-st.markdown("""
-    <style>
-    .main { background-color: #0f172a; color: #e2e8f0; }
-    .stSelectbox, .stSlider, .stNumberInput { background-color: #1e293b !important; }
-    .section-title { font-size: 1.2rem; font-weight: 700; color: #6366f1; margin-bottom: 1rem; }
-    .metric-card { background-color: #1e293b; padding: 1rem; border-radius: 0.5rem; border: 1px solid #334155; }
-    </style>
-""", unsafe_allow_html=True)
 
 # --- HEADER ---
 col_h1, col_h2 = st.columns([3, 1])
@@ -72,6 +71,11 @@ with col_lab:
         db.set_param('manual_magical_line', str(s_manual_anchor))
         st.success("Settings Locked!")
         time.sleep(1)
+        st.rerun()
+
+    if st.button("🔄 Force Refresh & Sync", type="primary"):
+        db.set_param("force_sync_flag", "1")
+        st.success("✅ Sync request sent to bot. Telegram alert incoming...")
         st.rerun()
 
 with col_risk:

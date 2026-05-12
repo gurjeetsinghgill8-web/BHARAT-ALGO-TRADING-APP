@@ -110,45 +110,19 @@ def fetch_open_positions():
 def get_current_position():
     try:
         positions = fetch_open_positions()
-        if not positions:
-            return None
-
+        if not positions: return None
         for pos in positions:
-            # Safe size extraction
             size = abs(float(pos.get('size', 0) or pos.get('quantity', 0) or 0))
-            if size <= 0.0001:
-                continue
-
-            # Extract symbol from ALL known Delta API paths
-            sym_raw = (
-                pos.get('symbol') or
-                pos.get('instrument_symbol') or
-                pos.get('instrument_name') or
-                (pos.get('product', {}).get('symbol') if pos.get('product') else None) or
-                ""
-            )
-            if not sym_raw:
-                continue
-
+            if size <= 0.0001: continue
+            sym_raw = (pos.get('symbol') or pos.get('instrument_symbol') or pos.get('instrument_name') or (pos.get('product', {}).get('symbol') if isinstance(pos.get('product'), dict) else None) or "")
+            if not sym_raw: continue
             sym = str(sym_raw).upper().strip()
-            print(f"[DEBUG PARSER] Checking symbol: {sym} | Size: {size}")
-
             if sym.startswith('P-') or '-P-' in sym or sym.startswith('P_') or '-P_' in sym:
-                return {
-                    'symbol': sym_raw,
-                    'type': 'PUT',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0),
-                    'quantity': size
-                }
+                return {'symbol': sym_raw, 'type': 'PUT', 'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0), 'quantity': size}
             elif sym.startswith('C-') or '-C-' in sym or sym.startswith('C_') or '-C_' in sym:
-                return {
-                    'symbol': sym_raw,
-                    'type': 'CALL',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0),
-                    'quantity': size
-                }
+                return {'symbol': sym_raw, 'type': 'CALL', 'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0), 'quantity': size}
     except Exception as e:
-        import traceback; print(f"[CRITICAL POS ERROR] {e}\n{traceback.format_exc()}")
+        import traceback; print(f"[POS ERROR] {e}\n{traceback.format_exc()}")
     return None
 
 def fetch_btc_spot():
@@ -227,93 +201,47 @@ def filter_options_by_expiry(options, days_threshold=3):
 
 def find_atm_strike(spot_price, options_list, direction, strike_selection=None, **kwargs):
     if not options_list or spot_price <= 0: return None
-    options_list = sorted(options_list, key=lambda x: float(x.get('strike_price', 0)))
-    
+    options_list = sorted(options_list, key=lambda x: float(x.get('strike', 0)))
     atm_idx = 0
     min_diff = float('inf')
     for i, opt in enumerate(options_list):
-        diff = abs(float(opt['strike_price']) - spot_price)
+        diff = abs(float(opt['strike']) - spot_price)
         if diff < min_diff:
             min_diff = diff
             atm_idx = i
-            
     strike_pref = (strike_selection or db.get_param("strike_selection", "OTM 2")).upper()
     offset = 0
     if "OTM 1" in strike_pref: offset = 1
     elif "OTM 2" in strike_pref: offset = 2
     elif "OTM 3" in strike_pref: offset = 3
     elif "ITM 1" in strike_pref: offset = -1
-
     if "CALL" in str(direction).upper(): target_idx = atm_idx + offset
     else: target_idx = atm_idx - offset
-
     target_idx = max(0, min(len(options_list) - 1, target_idx))
     return options_list[target_idx]
 
 def find_gill_crypto_option(asset, direction):
-    from main import send_telegram_msg
-    log_crypto(f"Scanning {direction} options for {asset} (Gill Supertrend Rule)...")
     chain = fetch_delta_option_chain(asset)
-    if not chain:
-        log_crypto("Chain is empty!")
-        return None
-    
-    target_type = 'call_options' if direction == "BUY" else 'put_options'
-    
-    # 1. Filter for type and liquidity
-    all_typed_options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
-    
-    if not all_typed_options:
-        log_crypto(f"No liquid {target_type} found at all.")
-        return None
-
-    # 2. Expiry Rule: Smart Expiry (Lego Block 2)
-    # We pick expiries based on the threshold (default 3 days) to avoid theta decay.
-    today = datetime.date.today()
-    threshold = int(db.get_param('expiry_threshold', '3'))
-    min_expiry_dt = today + datetime.timedelta(days=threshold)
-    min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
-    
-    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] >= min_expiry_str])))
-    
-    if not valid_expiries:
-        log_crypto(f"No expiries found after {min_expiry_str}! Falling back to nearest available.")
-        valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
-    
-    if not valid_expiries:
-        log_crypto("No valid future expiries found!")
-        return None
-        
-    best_expiry = valid_expiries[0] 
-    log_crypto(f"Selected Expiry: {best_expiry} (3-Day Rule applied)")
-    
-    # 3. Filter for options with that specific expiry
-    near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
-    
-    # 4. Get Spot Price
-    spot_price = 0
-    for o in near_options:
-        spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
-        if spot_price > 0: break
-    
-    if spot_price == 0:
-        log_crypto("Could not determine spot price.")
-        return None
-    
-    # 5. Strike Selection: ATM or 1-strike OTM
-    # offset=0 is ATM, offset=1 is 1-strike OTM
-    offset = int(db.get_param('strike_offset', '1')) # Defaulting to 1 (slight OTM) per user request
-    best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
-    
-    if not best_opt: return None
-
-    return (
-        best_opt['symbol'], 
-        float(best_opt['mark_price']), 
-        float(best_opt['strike_price']), 
-        best_opt['expiry_date'], 
-        best_opt['product_id']
-    )
+    if not chain: return None
+    try: target_dte = int(db.get_param("expiry_selection", "0"))
+    except: target_dte = 0
+    def get_dte(exp_str):
+        try:
+            exp_date = datetime.datetime.strptime(str(exp_str).split('T')[0], "%Y-%m-%d").date()
+            return (exp_date - datetime.date.today()).days
+        except: return 999
+    filtered = [o for o in chain if get_dte(o.get('expiry')) == target_dte or (target_dte == 0 and get_dte(o.get('expiry')) <= 1)]
+    if not filtered:
+        valid = sorted([o for o in chain if get_dte(o.get('expiry')) >= 0], key=lambda x: get_dte(x.get('expiry')))
+        if not valid: return None
+        nearest_dte = get_dte(valid[0].get('expiry'))
+        filtered = [o for o in valid if get_dte(o.get('expiry')) == nearest_dte]
+    target_type = 'call_options' if "CALL" in direction.upper() else 'put_options'
+    typed = [o for o in filtered if o.get('type') == target_type and float(o.get('mark_price', 0)) > 0]
+    if not typed: return None
+    spot_price = float(typed[0].get('spot_price') or db.get_param("magical_line", 81000))
+    strike_sel = db.get_param("strike_selection", "OTM 2")
+    return find_atm_strike(spot_price, typed, direction, strike_selection=strike_sel)
 
 def sync_delta_position():
     """Syncs local DB with actual Delta Exchange positions. Tracks CALL and PUT separately."""
