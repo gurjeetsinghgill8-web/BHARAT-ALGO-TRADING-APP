@@ -110,27 +110,45 @@ def fetch_open_positions():
 def get_current_position():
     try:
         positions = fetch_open_positions()
-        if not positions: return None
-        
-        for pos in positions:
-            size = abs(float(pos.get('size', 0) or pos.get('quantity', 0) or 0))
-            if size <= 0.001: continue
+        if not positions:
+            return None
 
-            # Robust symbol extraction across Delta API versions
+        for pos in positions:
+            # Safe size extraction
+            size = abs(float(pos.get('size', 0) or pos.get('quantity', 0) or 0))
+            if size <= 0.0001:
+                continue
+
+            # Extract symbol from ALL known Delta API paths
             sym_raw = (
-                pos.get('symbol') or 
-                pos.get('instrument_name') or 
-                pos.get('product', {}).get('symbol')
+                pos.get('symbol') or
+                pos.get('instrument_symbol') or
+                pos.get('instrument_name') or
+                (pos.get('product', {}).get('symbol') if pos.get('product') else None) or
+                ""
             )
-            if not sym_raw: continue
+            if not sym_raw:
+                continue
+
             sym = str(sym_raw).upper().strip()
-            
-            if sym.startswith('P-') or '-P-' in sym:
-                return {'symbol': sym_raw, 'type': 'PUT', 'entry_price': float(pos.get('avg_entry_price', 0) or 0), 'quantity': size}
-            elif sym.startswith('C-') or '-C-' in sym:
-                return {'symbol': sym_raw, 'type': 'CALL', 'entry_price': float(pos.get('avg_entry_price', 0) or 0), 'quantity': size}
+            print(f"[DEBUG PARSER] Checking symbol: {sym} | Size: {size}")
+
+            if sym.startswith('P-') or '-P-' in sym or sym.startswith('P_') or '-P_' in sym:
+                return {
+                    'symbol': sym_raw,
+                    'type': 'PUT',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0),
+                    'quantity': size
+                }
+            elif sym.startswith('C-') or '-C-' in sym or sym.startswith('C_') or '-C_' in sym:
+                return {
+                    'symbol': sym_raw,
+                    'type': 'CALL',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or pos.get('entry_price', 0) or 0),
+                    'quantity': size
+                }
     except Exception as e:
-        print(f"[Pos Parse Error] {e}")
+        import traceback; print(f"[CRITICAL POS ERROR] {e}\n{traceback.format_exc()}")
     return None
 
 def fetch_btc_spot():

@@ -244,7 +244,14 @@ def main_loop():
                         time.sleep(5)
                         continue
                 else:
-                    # 🚀 ENTRY LOGIC (SELL ONLY)
+                    # 🛑 HARD DOUBLE-ENTRY SAFETY CHECK
+                    active_db = db.get_param("crypto_active_symbol", "NONE")
+                    if active_db != "NONE" and active_db:
+                        log_terminal(f"⚠️ SAFETY BLOCK: DB shows active position ({active_db}). Parser missed it. BLOCKING NEW ENTRY.", "ERROR")
+                        last_action_time = time.time()
+                        time.sleep(10)
+                        continue
+
                     if ltp > current_anchor:
                         log_terminal("📈 BULLISH: SELL PUT ENTRY TRIGGERED", "TRADE")
                         delta_executor.execute_crypto_trade("SELL_PUT")
