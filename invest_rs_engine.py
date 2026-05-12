@@ -1,158 +1,387 @@
 """
-invest_rs_engine.py — BHARAT ALGOVERSE v4.5 | BSE Sectoral RS Engine
-=====================================================================
-Calculates Relative Strength (RS) across 70+ BSE Detailed Industries.
-Uses Stock-Group Averaging to simulate official BSE Sectoral Indices.
+invest_rs_engine.py — BHARAT ALGOVERSE v3.0 | RS LegoMaster Engine
+====================================================================
+Module 3: Investment Analysis — Relative Strength Based System
+Inspired by: Weinstein, Minervini, CAN SLIM adapted for Indian NSE
+
+LEGO BLOCKS:
+  1. Market Pulse     → Nifty 50 RSI(14) + Market Mode
+  2. Sector Scanner   → RS-55 ranking of all NSE sectors vs Nifty
+  3. Cap Classifier   → Large / Mid / Small cap tagging
+  4. RS Engine        → 55-day Relative Strength per sector & stock
+  5. Strength Ranker  → Sort sectors → rank stocks within sectors
+  6. Allocation Calc  → Suggested % allocation per stock/sector
+  7. Emerging Detector→ Quarterly/Yearly sector leaders & laggards
+
+DB Namespace: invest_*   ← NEVER mix with nifty_* or crypto_*
+Data Source  : yfinance (free, no subscription)
 """
 
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta
-import pandas_ta as ta
-import os
+import pytz
+import db
 from utils import log_terminal
 
+IST = pytz.timezone("Asia/Kolkata")
+
 # ============================================================
-# 🏢 BSE DETAILED SECTOR MAP (70+ INDUSTRIES)
+# NSE SECTOR INDEX MAP  (yfinance tickers)
 # ============================================================
-# Mapping of 70+ BSE-style sectors to their major constituent stocks.
-# These will be used to calculate "Synthetic Sector RS".
-BSE_SECTOR_MAP = {
-    "Abrasives": ["GRINDWELL.NS", "CARBORUNIV.NS"],
-    "Aerospace & Defence": ["HAL.NS", "BEL.NS", "BDL.NS", "MAZDOCK.NS", "GRSE.NS", "BEML.NS"],
-    "Agrochemicals": ["UPL.NS", "PIIND.NS", "SUMICHEM.NS", "RALLIS.NS", "SHARDACROP.NS"],
-    "Air Transport Service": ["INDIGO.NS", "SPICEJET.NS"],
-    "Aluminium & Aluminium Products": ["HINDALCO.NS", "NATIONALUM.NS"],
-    "Auto Components & Equipments": ["MOTHERSON.NS", "UNO_MINDA.NS", "SONACOMS.NS", "ENDURANCE.NS", "CIEINDIA.NS"],
-    "Automobiles": ["MARUTI.NS", "TATAMOTORS.NS", "M&M.NS", "EICHERMOT.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS"],
-    "Banks - Private": ["HDFCBANK.NS", "ICICIBANK.NS", "AXISBANK.NS", "KOTAKBANK.NS", "INDUSINDBK.NS", "FEDERALBNK.NS"],
-    "Banks - PSU": ["SBIN.NS", "BANKBARODA.NS", "CANBK.NS", "UNIONBANK.NS", "PNB.NS", "IOB.NS", "UCOBANK.NS"],
-    "Beverages": ["VBL.NS", "UBL.NS", "UNITDSPR.NS"],
-    "BPO / KPO": ["GENPACT.NS", "WNS.NS", "FIRSTSOURCE.NS"],
-    "Breweries & Distilleries": ["RADICO.NS", "SULA.NS", "GLOBOFFS.NS"],
-    "Cement & Cement Products": ["ULTRACEMCO.NS", "GRASIM.NS", "AMBUJACEM.NS", "ACC.NS", "DALBHARAT.NS", "JKCEMENT.NS"],
-    "Chemicals - Speciality": ["AARTIIND.NS", "VINATIORGA.NS", "DEEPAKNTR.NS", "SRF.NS", "NAVINFLUOR.NS", "ATUL.NS"],
-    "Chemicals - Basic": ["TATACHEM.NS", "GUJALKALI.NS", "DCW.NS"],
-    "Coal": ["COALINDIA.NS"],
-    "Construction & Engineering": ["LT.NS", "KEC.NS", "KALPATPOWR.NS", "ASHOKA.NS", "PNCINFRA.NS"],
-    "Consumer Durables": ["TITAN.NS", "HAVELLS.NS", "VOLTAS.NS", "CROMPTON.NS", "DIXON.NS", "WHIRLPOOL.NS"],
-    "Consumer Food": ["NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS", "VBL.NS", "ITC.NS"],
-    "Data Infrastructure": ["DATAINFRA.NS", "BHEL.NS", "STERTOOLS.NS"],
-    "Diversified Retail": ["DMART.NS", "TRENT.NS", "ABFRL.NS", "V2RETAIL.NS"],
-    "E-Commerce / Digital": ["ZOMATO.NS", "NYKAA.NS", "POLICYBZR.NS", "DELHIVERY.NS", "PAYTM.NS"],
-    "Electrical Equipment": ["ABB.NS", "SIEMENS.NS", "CGPOWER.NS", "SUZLON.NS", "THERMAX.NS"],
-    "Fertilizers": ["COROMANDEL.NS", "CHAMBLFERT.NS", "GNFC.NS", "FACT.NS", "RCF.NS"],
-    "Footwear": ["RELAXO.NS", "BATAINDIA.NS", "CAMPUS.NS", "METROBRAND.NS"],
-    "Gas Utility": ["GAIL.NS", "IGL.NS", "MGL.NS", "GUJGASLTD.NS"],
-    "Healthcare Services": ["APOLLOHOSP.NS", "MAXHEALTH.NS", "FORTIS.NS", "GLOBAL.NS", "METROPOLIS.NS"],
-    "Hotels & Resorts": ["INDHOTEL.NS", "EIHOTEL.NS", "CHALET.NS", "LEMON_TREE.NS"],
-    "Household Products": ["HINDUNILVR.NS", "GODREJCP.NS", "DABUR.NS", "MARICO.NS", "COLPAL.NS"],
-    "Housing Finance": ["HDFC.NS", "LICHSGFIN.NS", "HUDCO.NS", "PNBHOUSING.NS", "CANFINHOME.NS"],
-    "Industrial Products": ["CUMMINSIND.NS", "BHARATFORG.NS", "SKFINDIA.NS", "TIMKEN.NS", "AIAENG.NS"],
-    "Insurance": ["HDFCLIFE.NS", "SBILIFE.NS", "ICICIPRULI.NS", "LICI.NS", "GICRE.NS"],
-    "IT - Software": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "LTIM.NS", "TECHM.NS", "PERSISTENT.NS"],
-    "IT - Services": ["MPHASIS.NS", "COFORGE.NS", "TATAELXSI.NS", "KPITTECH.NS", "CYIENT.NS"],
-    "Logistics": ["CONCOR.NS", "DELHIVERY.NS", "GATEWAY.NS", "TCI.NS", "AEGISLOG.NS"],
-    "Media & Entertainment": ["SUNTV.NS", "ZEEL.NS", "PVRINOX.NS", "TV18BRDCST.NS"],
-    "Metals - Ferrous": ["TATASTEEL.NS", "JSWSTEEL.NS", "JINDALSTEL.NS", "SAIL.NS", "NMDC.NS"],
-    "Mining": ["VEDL.NS", "HINDZINC.NS", "NMDC.NS"],
-    "NBFC": ["BAJFINANCE.NS", "BAJAJFINSV.NS", "CHOLAFIN.NS", "SHRIRAMFIN.NS", "MUTHOOTFIN.NS", "M&MFIN.NS"],
-    "Oil & Gas - Refining": ["RELIANCE.NS", "BPCL.NS", "IOC.NS", "HPCL.NS", "MRPL.NS"],
-    "Packaging": ["POLYPLEX.NS", "Uフレックス.NS", "ESSELPRO.NS"],
-    "Paint": ["ASIANPAINT.NS", "BERGEPAINT.NS", "KANSAINER.NS", "INDIGOPNTS.NS"],
-    "Paper & Paper Products": ["JKPAPER.NS", "WESTPCP.NS", "TNPL.NS"],
-    "Personal Care": ["HINDUNILVR.NS", "GODREJCP.NS", "DABUR.NS", "COLPAL.NS", "EMAMILTD.NS"],
-    "Pharmaceuticals": ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS", "TORNTPHARM.NS", "ALKEM.NS", "MANKIND.NS"],
-    "Power - Generation": ["NTPC.NS", "TATAPOWER.NS", "ADANIPOWER.NS", "JSWENERGY.NS", "NHPC.NS", "SJVN.NS"],
-    "Power - Transmission": ["POWERGRID.NS", "ADANITRANS.NS"],
-    "Real Estate": ["DLF.NS", "LODHA.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PHOENIXLTD.NS", "PRESTIGE.NS"],
-    "Shipbuilding": ["COCHINSHIP.NS", "MAZDOCK.NS", "GRSE.NS"],
-    "Steel": ["TATASTEEL.NS", "JSWSTEEL.NS", "JINDALSTEL.NS", "SAIL.NS"],
-    "Telecom - Services": ["BHARTIARTL.NS", "IDEA.NS"],
-    "Telecom - Equipment": ["HFCL.NS", "ITI.NS"],
-    "Textiles": ["PAGEIND.NS", "TRIDENT.NS", "RAYMOND.NS", "WELSPUNIND.NS", "KPRMILL.NS"],
-    "Tyres": ["MRF.NS", "APOLLOTYRE.NS", "BALKRISIND.NS", "CEATLTD.NS", "JKTYRE.NS"],
+SECTOR_INDICES = {
+    "Nifty Auto":       "^CNXAUTO",
+    "Nifty Bank":       "^NSEBANK",
+    "Nifty IT":         "^CNXIT",
+    "Nifty Pharma":     "^CNXPHARMA",
+    "Nifty FMCG":       "^CNXFMCG",
+    "Nifty Metal":      "^CNXMETAL",
+    "Nifty Realty":     "^CNXREALTY",
+    "Nifty Energy":     "^CNXENERGY",
+    "Nifty Infra":      "^CNXINFRA",
+    "Nifty Media":      "^CNXMEDIA",
+    "Nifty PSU Bank":   "^CNXPSUBANK",
+    "Nifty Midcap 100": "^CNXMIDCAP",
+    "Nifty Smallcap":   "^CNXSMALLCAP",
+    "Nifty PSE":        "^CNXPSE",
+    "Nifty MNC":        "^CNXMNC",
+    "Nifty Service":    "^CNXSERVICE",
+    "Nifty Commodities":"^CNXCOMMODITIES",
+    "Nifty Consumption":"^CNXCONSUMPTION",
+    "Nifty Finance":    "^CNXFINANCE",
+    "Nifty CPSE":       "^CNXCPSE",
+}
+
+# ============================================================
+# TOP STOCKS BY SECTOR (Large/Mid/Small Cap, .NS suffix)
+# ============================================================
+SECTOR_STOCKS = {
+    "Nifty Auto":    [
+        ("TATAMOTORS.NS","Large"), ("M&M.NS","Large"), ("MARUTI.NS","Large"),
+        ("BAJAJ-AUTO.NS","Large"), ("EICHERMOT.NS","Large"), ("HEROMOTOCO.NS","Large"),
+        ("BOSCHLTD.NS","Mid"),    ("MOTHERSON.NS","Mid"), ("BALKRISIND.NS","Mid"),
+    ],
+    "Nifty Bank":    [
+        ("HDFCBANK.NS","Large"), ("ICICIBANK.NS","Large"), ("KOTAKBANK.NS","Large"),
+        ("AXISBANK.NS","Large"), ("INDUSINDBK.NS","Large"),
+        ("FEDERALBNK.NS","Mid"), ("BANDHANBNK.NS","Mid"), ("IDFCFIRSTB.NS","Mid"),
+    ],
+    "Nifty IT":      [
+        ("TCS.NS","Large"), ("INFY.NS","Large"), ("HCLTECH.NS","Large"),
+        ("WIPRO.NS","Large"), ("TECHM.NS","Large"),
+        ("LTIM.NS","Mid"), ("MPHASIS.NS","Mid"), ("PERSISTENT.NS","Mid"),
+    ],
+    "Nifty Pharma":  [
+        ("SUNPHARMA.NS","Large"), ("DRREDDY.NS","Large"), ("CIPLA.NS","Large"),
+        ("DIVISLAB.NS","Large"), ("AUROPHARMA.NS","Mid"), ("ALKEM.NS","Mid"),
+        ("IPCALAB.NS","Mid"), ("NATCOPHARM.NS","Small"),
+    ],
+    "Nifty FMCG":    [
+        ("HINDUNILVR.NS","Large"), ("ITC.NS","Large"), ("NESTLEIND.NS","Large"),
+        ("BRITANNIA.NS","Large"), ("DABUR.NS","Large"),
+        ("MARICO.NS","Mid"), ("GODREJCP.NS","Mid"),
+    ],
+    "Nifty Metal":   [
+        ("TATASTEEL.NS","Large"), ("JSWSTEEL.NS","Large"), ("HINDALCO.NS","Large"),
+        ("VEDL.NS","Large"), ("SAIL.NS","Large"),
+        ("NATIONALUM.NS","Mid"), ("RATNAMANI.NS","Mid"),
+    ],
+    "Nifty Realty":  [
+        ("DLF.NS","Large"), ("GODREJPROP.NS","Large"), ("PRESTIGE.NS","Mid"),
+        ("OBEROIRLTY.NS","Mid"), ("PHOENIXLTD.NS","Mid"), ("BRIGADE.NS","Mid"),
+        ("SUNTECK.NS","Small"),
+    ],
+    "Nifty Energy":  [
+        ("RELIANCE.NS","Large"), ("ONGC.NS","Large"), ("NTPC.NS","Large"),
+        ("POWERGRID.NS","Large"), ("ADANIGREEN.NS","Large"),
+        ("CESC.NS","Mid"), ("TORNTPOWER.NS","Mid"),
+    ],
+    "Nifty PSU Bank":[
+        ("SBIN.NS","Large"), ("BANKBARODA.NS","Large"), ("CANBK.NS","Large"),
+        ("PNB.NS","Large"), ("UNIONBANK.NS","Mid"), ("INDIANB.NS","Mid"),
+    ],
+    "Nifty Infra":   [
+        ("LT.NS","Large"), ("ADANIPORTS.NS","Large"), ("IRFC.NS","Large"),
+        ("RVNL.NS","Mid"), ("IRCON.NS","Mid"), ("NBCC.NS","Mid"),
+        ("KEC.NS","Mid"), ("KALPATPOWR.NS","Small"),
+    ],
+    "Nifty Finance": [
+        ("BAJFINANCE.NS","Large"), ("BAJAJFINSV.NS","Large"), ("HDFCAMC.NS","Large"),
+        ("LICIHSGFIN.NS","Large"), ("MUTHOOTFIN.NS","Mid"), ("CHOLAFIN.NS","Mid"),
+        ("M&MFIN.NS","Mid"),
+    ],
+    "Nifty Media":   [
+        ("ZEEL.NS","Mid"), ("SUNTV.NS","Mid"), ("NETWORK18.NS","Mid"),
+        ("PVR.NS","Small"), ("INOXLEISUR.NS","Small"),
+    ],
+    "Nifty Midcap 100":[
+        ("CAMS.NS","Mid"), ("ANGELONE.NS","Mid"), ("POLICYBZR.NS","Mid"),
+        ("PAYTM.NS","Mid"), ("NYKAA.NS","Mid"),
+    ],
 }
 
 NIFTY_TICKER = "^NSEI"
-RS_PERIOD    = 55   # 3 months approx
-RS_PERIOD_LONG = 125 # 6 months
-RSI_PERIOD   = 14
+RS_PERIOD    = 55   # Primary RS period (days)
+RSI_PERIOD   = 14   # RSI for Nifty pulse
 
-def get_data(ticker, period_days=150):
-    """Fetches historical data with caching."""
+
+# ============================================================
+# LEGO 1: Market Pulse — Nifty RSI
+# ============================================================
+def _calc_rsi(series: pd.Series, period: int = 14) -> float:
+    """Wilder's RSI."""
+    delta = series.diff()
+    gain  = delta.clip(lower=0)
+    loss  = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    rs  = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    return round(float(rsi.iloc[-1]), 2)
+
+
+def get_market_pulse() -> dict:
+    """
+    Returns Nifty RSI + market mode.
+    mode: 'AGGRESSIVE' (RSI>50) or 'DEFENSIVE' (RSI<=50)
+    """
     try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=period_days)
-        data = yf.download(ticker, start=start_date, end=end_date, interval="1d", progress=False)
-        return data if not data.empty else None
+        data = yf.download(NIFTY_TICKER, period="3mo", interval="1d",
+                           progress=False, auto_adjust=True)
+        if data.empty or len(data) < RSI_PERIOD + 5:
+            return {"rsi": 0, "mode": "UNKNOWN", "close": 0, "error": "Insufficient data"}
+
+        close = data["Close"].dropna().squeeze()
+        rsi   = _calc_rsi(close, RSI_PERIOD)
+        last  = float(close.iloc[-1])
+        mode  = "AGGRESSIVE" if rsi > 50 else "DEFENSIVE"
+        log_terminal(f"[INVEST] Nifty RSI: {rsi} → {mode}", "INFO")
+        db.set_param("invest_nifty_rsi",  str(rsi))
+        db.set_param("invest_market_mode", mode)
+        return {"rsi": rsi, "mode": mode, "close": round(last, 2), "error": None}
     except Exception as e:
-        return None
+        log_terminal(f"[INVEST] Market pulse error: {e}", "ERROR")
+        return {"rsi": 0, "mode": "UNKNOWN", "close": 0, "error": str(e)}
 
-def calc_rs(ticker, benchmark="^NSEI", period=55):
-    """Calculates Relative Strength (RS) ratio."""
+
+# ============================================================
+# LEGO 2: RS Engine — Relative Strength Calculation
+# ============================================================
+def calc_rs(ticker: str, benchmark: str = NIFTY_TICKER,
+            period: int = RS_PERIOD) -> float | None:
+    """
+    RS = (Ticker_Today / Ticker_N_days_ago)
+         / (Benchmark_Today / Benchmark_N_days_ago)
+    RS > 1.0 → Outperforming benchmark
+    """
     try:
-        t_data = get_data(ticker, period + 10)
-        b_data = get_data(benchmark, period + 10)
-        
-        if t_data is None or b_data is None or len(t_data) < period or len(b_data) < period:
+        lookback = f"{period + 20}d"
+        df = yf.download([ticker, benchmark], period=lookback, interval="1d",
+                         progress=False, auto_adjust=True)["Close"]
+        if df.empty or ticker not in df.columns or benchmark not in df.columns:
             return None
-            
-        t_ret = (t_data['Close'].iloc[-1] / t_data['Close'].iloc[-period]) - 1
-        b_ret = (b_data['Close'].iloc[-1] / b_data['Close'].iloc[-period]) - 1
-        
-        # RS = (1 + Stock Return) / (1 + Benchmark Return)
-        rs = (1 + t_ret) / (1 + b_ret)
-        return float(rs)
-    except Exception:
+        df = df.dropna()
+        if len(df) < period + 2:
+            return None
+        stock_rs = float(df[ticker].iloc[-1]) / float(df[ticker].iloc[-period])
+        nifty_rs = float(df[benchmark].iloc[-1]) / float(df[benchmark].iloc[-period])
+        if nifty_rs == 0:
+            return None
+        rs = round(stock_rs / nifty_rs, 4)
+        return rs
+    except Exception as e:
+        log_terminal(f"[INVEST] RS calc error {ticker}: {e}", "ERROR")
         return None
 
-def scan_bse_sectors(period=55):
-    """Scans all 70+ BSE sectors using stock-group averaging."""
-    log_terminal(f"[RS-ENGINE] Scanning {len(BSE_SECTOR_MAP)} BSE Sectors...", "INFO")
+
+# ============================================================
+# LEGO 3: Sector Scanner — Rank all sectors by RS-55
+# ============================================================
+def scan_sectors(period: int = RS_PERIOD) -> list[dict]:
+    """
+    Returns list of sectors sorted by RS descending.
+    Each: {name, ticker, rs, vs_nifty_pct, outperforming}
+    """
     results = []
-    
-    for sector, stocks in BSE_SECTOR_MAP.items():
-        rs_values = []
-        for s in stocks:
-            rs = calc_rs(s, NIFTY_TICKER, period)
-            if rs: rs_values.append(rs)
-        
-        if rs_values:
-            avg_rs = np.mean(rs_values)
-            results.append({
-                "sector": sector,
-                "rs": avg_rs,
-                "vs_nifty_pct": (avg_rs - 1) * 100,
-                "outperforming": avg_rs > 1.0,
-                "confidence": len(rs_values) / len(stocks) # How many stocks had data
-            })
-            
-    # Sort by RS descending
+    for name, ticker in SECTOR_INDICES.items():
+        rs = calc_rs(ticker, NIFTY_TICKER, period)
+        if rs is None:
+            continue
+        results.append({
+            "sector":        name,
+            "ticker":        ticker,
+            "rs":            rs,
+            "vs_nifty_pct":  round((rs - 1.0) * 100, 2),
+            "outperforming": rs > 1.0,
+        })
+
     results.sort(key=lambda x: x["rs"], reverse=True)
-    
-    # Assign Rank
-    for i, res in enumerate(results, 1):
-        res["rank"] = i
-        
+
+    # Add rank
+    for i, r in enumerate(results, 1):
+        r["rank"] = i
+
+    log_terminal(f"[INVEST] Scanned {len(results)} sectors.", "INFO")
     return results
 
-# Alias for backward compatibility
-scan_sectors = scan_bse_sectors
 
-def get_market_pulse():
-    """Gets Nifty RSI and Market Mode."""
-    try:
-        data = get_data(NIFTY_TICKER, 50)
-        if data is not None:
-            rsi = ta.rsi(data['Close'], length=RSI_PERIOD).iloc[-1]
-            mode = "AGGRESSIVE" if rsi > 50 else "DEFENSIVE"
-            return {"rsi": round(rsi, 1), "mode": mode, "close": data['Close'].iloc[-1]}
-    except:
-        pass
-    return {"rsi": 50.0, "mode": "NEUTRAL", "close": 0.0}
+# ============================================================
+# LEGO 4: Stock RS within Sector — ranked list
+# ============================================================
+def scan_stocks_in_sector(sector_name: str,
+                           period: int = RS_PERIOD) -> list[dict]:
+    """
+    Returns top stocks in a sector ranked by RS-55.
+    Each: {symbol, cap, rs, vs_nifty_pct}
+    """
+    stocks = SECTOR_STOCKS.get(sector_name, [])
+    if not stocks:
+        return []
 
-if __name__ == "__main__":
-    sectors = scan_bse_sectors()
-    print(pd.DataFrame(sectors).head(10))
+    results = []
+    for symbol, cap in stocks:
+        rs = calc_rs(symbol, NIFTY_TICKER, period)
+        if rs is None:
+            continue
+        results.append({
+            "symbol":       symbol.replace(".NS", ""),
+            "ticker":       symbol,
+            "cap":          cap,
+            "sector":       sector_name,
+            "rs":           rs,
+            "vs_nifty_pct": round((rs - 1.0) * 100, 2),
+            "outperforming": rs > 1.0,
+        })
+
+    # Sort: by RS desc, large caps preferred
+    cap_order = {"Large": 0, "Mid": 1, "Small": 2}
+    results.sort(key=lambda x: (-x["rs"], cap_order.get(x["cap"], 3)))
+
+    for i, r in enumerate(results, 1):
+        r["rank"] = i
+
+    return results
+
+
+# ============================================================
+# LEGO 5: Allocation Calculator
+# ============================================================
+def calc_allocation(top_sectors: list[dict],
+                    top_stocks_by_sector: dict) -> dict:
+    """
+    Allocates capital % based on sector RS strength.
+    Rule:
+      - Top sector gets highest weight proportional to RS
+      - Within sector: Large > Mid > Small cap
+      - Max single stock: 25% | Min: 5%
+    Returns: {sector → [{symbol, alloc_%}]}
+    """
+    if not top_sectors:
+        return {}
+
+    # Sector weights proportional to RS
+    total_rs   = sum(s["rs"] for s in top_sectors)
+    alloc_out  = {}
+
+    for s in top_sectors:
+        sector_pct = round((s["rs"] / total_rs) * 100, 1)
+        stocks     = top_stocks_by_sector.get(s["sector"], [])
+        if not stocks:
+            continue
+
+        # Within sector: proportional to stock RS
+        stock_total_rs = sum(st["rs"] for st in stocks)
+        stock_allocs   = []
+        for st in stocks:
+            raw_pct  = (st["rs"] / stock_total_rs) * sector_pct if stock_total_rs else 0
+            clipped  = max(5.0, min(25.0, round(raw_pct, 1)))
+            stock_allocs.append({**st, "alloc_pct": clipped})
+
+        alloc_out[s["sector"]] = {
+            "sector_pct":  sector_pct,
+            "stocks":      stock_allocs,
+        }
+
+    return alloc_out
+
+
+# ============================================================
+# LEGO 6: Emerging vs Weak Sectors (Quarterly / Yearly)
+# ============================================================
+def detect_emerging_weak(top_n: int = 3) -> dict:
+    """
+    Compares sector performance over last 90d (quarter) and 365d (year).
+    Returns emerging (top gainers) and weak (bottom) sectors.
+    """
+    results = []
+    for name, ticker in SECTOR_INDICES.items():
+        try:
+            df = yf.download(ticker, period="13mo", interval="1d",
+                             progress=False, auto_adjust=True)["Close"].dropna().squeeze()
+            if len(df) < 60:
+                continue
+
+            # Returns
+            ret_90d  = round((float(df.iloc[-1]) / float(df.iloc[-90])  - 1) * 100, 2) if len(df) >= 90  else None
+            ret_365d = round((float(df.iloc[-1]) / float(df.iloc[-250]) - 1) * 100, 2) if len(df) >= 250 else None
+            results.append({"sector": name, "ret_90d": ret_90d, "ret_365d": ret_365d})
+        except Exception:
+            continue
+
+    valid = [r for r in results if r["ret_90d"] is not None]
+    valid.sort(key=lambda x: x["ret_90d"], reverse=True)
+
+    return {
+        "emerging_quarter": valid[:top_n],
+        "weak_quarter":     valid[-top_n:],
+        "all":              valid,
+    }
+
+
+# ============================================================
+# LEGO 7: Full Daily Scan (Master Function)
+# ============================================================
+def run_full_daily_scan(top_sectors_n: int = 5,
+                        top_stocks_n:  int = 3,
+                        rs_period:     int = RS_PERIOD) -> dict:
+    """
+    Runs the complete RS LegoMaster daily scan.
+    Returns a structured dict with everything for the report.
+    """
+    log_terminal("[INVEST] Starting full RS daily scan...", "INFO")
+
+    # 1. Market Pulse
+    pulse = get_market_pulse()
+
+    # 2. Sector Scan
+    all_sectors = scan_sectors(rs_period)
+    strong_sectors = [s for s in all_sectors if s["outperforming"]][:top_sectors_n]
+
+    # 3. Stock scan for top sectors
+    top_stocks_by_sector = {}
+    for sec in strong_sectors:
+        stocks = scan_stocks_in_sector(sec["sector"], rs_period)
+        top_stocks_by_sector[sec["sector"]] = stocks[:top_stocks_n]
+
+    # 4. Allocation
+    allocation = calc_allocation(strong_sectors, top_stocks_by_sector)
+
+    # 5. Emerging / Weak
+    emerg_weak = detect_emerging_weak(top_n=3)
+
+    # 6. Save summary to DB
+    db.set_param("invest_last_scan_dt", datetime.now(IST).strftime("%Y-%m-%d %H:%M"))
+    db.set_param("invest_top_sectors",  str([s["sector"] for s in strong_sectors]))
+
+    log_terminal("[INVEST] Daily scan complete.", "INFO")
+    return {
+        "pulse":       pulse,
+        "all_sectors": all_sectors,
+        "top_sectors": strong_sectors,
+        "top_stocks":  top_stocks_by_sector,
+        "allocation":  allocation,
+        "emerg_weak":  emerg_weak,
+        "scan_dt":     datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"),
+        "rs_period":   rs_period,
+    }

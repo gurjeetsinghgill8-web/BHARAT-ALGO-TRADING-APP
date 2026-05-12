@@ -13,18 +13,6 @@ import traceback
 import json
 from utils import log_terminal, send_telegram_msg
 
-# 🔐 SINGLE-INSTANCE GUARD (V5.0)
-import os, sys, atexit
-LOCK_FILE = "/tmp/bharat_algo.lock"
-if os.path.exists(LOCK_FILE):
-    try:
-        with open(LOCK_FILE, 'r') as f: old_pid = int(f.read().strip())
-        os.kill(old_pid, 0)
-        print(f"[GUARD] Another instance (PID {old_pid}) running. Exiting."); sys.exit(0)
-    except (ProcessLookupError, ValueError): os.remove(LOCK_FILE)
-with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
-atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
-
 # --- FORCE IPv4 GLOBALLY ---
 import requests.packages.urllib3.util.connection as urllib3_cn
 def allowed_gai_family():
@@ -35,16 +23,33 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 # JANITOR: Syncs reality, enforces Clean Slate, guards quantity
 # ============================================================
 def run_janitor():
-    """LEGACY JANITOR - NOW STRICTLY READ-ONLY SYNC"""
-    try:
-        delta_executor.sync_delta_position()
-        asset = "BTC"
-        timeframe = db.get_param("candle_timeframe", "5m")
-        signal = logic.get_supertrend_signal(asset, timeframe=timeframe) if hasattr(logic, 'get_supertrend_signal') else "WAIT"
-        db.set_param("signal_target", signal)
-        # NO TRADES. NO FLIPS. ONLY SYNC.
-    except Exception as e:
-        log_terminal(f"⚠️ Janitor Sync Warning: {str(e)}", "ERROR")
+    # 1. Sync Reality from Exchange
+    delta_executor.sync_delta_position()
+
+    # 2. Get Current Signal (from configured timeframe)
+    asset = "BTC"
+    timeframe = db.get_param("candle_timeframe", "5m")
+    signal = logic.get_supertrend_signal(asset, timeframe=timeframe)
+    db.set_param("signal_target", signal)
+
+    # 3. Get DB Reality
+    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
+    put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
+
+    # CASE: SIGNAL SELL BUT CALL OPEN
+    if signal == "SELL" and call_active:
+        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
+        delta_executor.square_off_crypto()
+
+    # CASE: SIGNAL BUY BUT PUT OPEN
+    elif signal == "BUY" and put_active:
+        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
+        delta_executor.square_off_crypto()
+
+    # CASE: SIGNAL WAIT BUT ANYTHING OPEN
+    elif signal == "WAIT" and (call_active or put_active):
+        log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
+        delta_executor.square_off_crypto()
 
     # QUANTITY GUARD: Prevent over-trading
     try:
@@ -187,40 +192,6 @@ def run_crypto_sar():
 # ============================================================
 # MAIN
 # ============================================================
-def main_loop():
-    import time
-    log_terminal("🧱 V5.0 FINAL: Consolidated Logic Active", "START")
-    last_heartbeat = 0; last_action_time = 0; COOLDOWN_SEC = 300
-    while True:
-        try:
-            now = time.time()
-            if db.get_param("force_sync_flag", "0") == "1":
-                delta_executor.sync_delta_position(); send_telegram_msg("🔄 *REMOTE SYNC COMPLETE*")
-                db.set_param("force_sync_flag", "0"); last_action_time = time.time(); time.sleep(5); continue
-            if now - last_heartbeat >= 300:
-                ltp = float(delta_executor.fetch_btc_spot()); pos = delta_executor.get_current_position()
-                anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-                status = "✅ Trend Aligned | Holding" if pos else "⏳ No Trade | Waiting for Signal"
-                pulse = f"💓 VISION PULSE\n📊 LTP: ${ltp}\n🎯 Anchor: ${anchor}\n📦 {status}"
-                log_terminal(pulse, "INFO"); send_telegram_msg(pulse); last_heartbeat = now
-            if now - last_action_time < COOLDOWN_SEC: time.sleep(10); continue
-            delta_executor.sync_delta_position(); pos = delta_executor.get_current_position()
-            ltp = float(delta_executor.fetch_btc_spot()); anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-            if anchor <= 0 or ltp <= 0: time.sleep(10); continue
-            if pos:
-                holding_put = (pos['type'] == 'PUT'); is_bullish = ltp > anchor
-                if (holding_put and is_bullish) or (not holding_put and not is_bullish): log_terminal(f"✅ HOLD: {pos['type']} matches trend", "INFO")
-                else: log_terminal(f"🔄 FLIP: Closing {pos['type']}", "ALERT"); delta_executor.square_off_crypto(); last_action_time = time.time(); time.sleep(5); continue
-            else:
-                log_terminal("🟢 NO OPEN TRADE -> EXECUTING FRESH ENTRY", "TRADE")
-                if ltp > anchor: delta_executor.execute_crypto_trade("SELL_PUT")
-                elif ltp < anchor: delta_executor.execute_crypto_trade("SELL_CALL")
-                last_action_time = time.time()
-            check_sl_tp()
-        except Exception as e:
-            log_terminal(f"❌ Loop Error: {str(e)}", "ERROR"); import traceback; log_terminal(traceback.format_exc(), "ERROR"); last_action_time = time.time()
-        time.sleep(10)
-
 def main():
     # --- BULLETPROOF SINGLETON ---
     try:
@@ -243,15 +214,53 @@ def main():
     if not db.load_secrets():
         sys.exit(1)
 
-    # --- DEFAULT PARAMS ---
+    # --- DEFAULT PARAMS (only if not already set by dashboard) ---
+    if not db.get_param('st_period'):        db.set_param('st_period', '10')
+    if not db.get_param('st_multiplier'):    db.set_param('st_multiplier', '1.5')
     if not db.get_param('crypto_trade_size'): db.set_param('crypto_trade_size', '1')
     if not db.get_param('sl_percent'):       db.set_param('sl_percent', '40')
     if not db.get_param('tp_percent'):       db.set_param('tp_percent', '100')
+    if not db.get_param('candle_timeframe'): db.set_param('candle_timeframe', '5m')
+    if not db.get_param('num_strikes'):      db.set_param('num_strikes', '1')
 
     log_terminal("Bharat AlgoVerse v3.0 - Full Auto Mode Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% | Clean Slate: ON")
+    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% + Auto-Reinvest | Clean Slate: ON")
 
-    main_loop()
+    print("🛡️ SCANNING FOR ORPHANED TRADES...")
+    delta_executor.reconcile_bracket_orders()
+
+    last_pulse = 0
+
+    while True:
+        try:
+            run_janitor()
+            run_crypto_sar()
+            check_sl_tp()            # <-- In-code SL/TP monitor
+            delta_executor.reconcile_bracket_orders()
+
+            # Telegram Pulse every 30 mins
+            if time.time() - last_pulse > 1800:
+                timeframe = db.get_param("candle_timeframe", "5m")
+                signal    = logic.get_supertrend_signal("BTC", timeframe=timeframe)
+                active    = db.get_param('crypto_active_symbol', 'NONE')
+                upnl      = db.get_param('unrealized_pnl', '0')
+                send_telegram_msg(
+                    f"✅ BHARAT PULSE v3.0\n"
+                    f"Signal: {signal} | Active: {active}\n"
+                    f"Live PnL: ${upnl}\n"
+                    f"Timeframe: {timeframe}"
+                )
+                last_pulse = time.time()
+
+            time.sleep(15)
+
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Main Loop Error: {e}")
+            traceback.print_exc()
+            time.sleep(10)
+
 
 if __name__ == "__main__":
     try:
