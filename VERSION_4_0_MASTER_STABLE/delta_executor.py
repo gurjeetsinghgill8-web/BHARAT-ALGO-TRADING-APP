@@ -164,39 +164,55 @@ def filter_options_by_expiry(options, days_threshold=3):
 
 def find_atm_strike(spot_price, options_list, direction, offset=0):
     """
-    Lego Block 3: Strike Selection (Strike Picker)
-    Finds the strike price with min difference from spot, plus an optional OTM offset.
-    offset=0: ATM
-    offset=1: 1-strike OTM
+    STEP 0 — OTM STRIKE ENFORCEMENT (V5.2 LEGO BRICK)
+    ===================================================
+    For OPTION SELLING strategy:
+      - SELL PUT  (SELL signal) → OTM PUT  = Strike BELOW spot (Strike < Spot)
+      - SELL CALL (BUY signal)  → OTM CALL = Strike ABOVE spot (Strike > Spot)
+
+    offset=0 : ATM  (NOT recommended for selling)
+    offset=1 : 1-strike OTM  ← Minimum safe level
+    offset=2 : 2-strikes OTM ← More conservative
+    offset=3+: Deep OTM      ← Very conservative
+
+    RULE: We NEVER allow ATM or ITM for option selling.
+    If offset=0 is received, it is automatically upgraded to offset=1.
     """
     if not options_list: return None
-    
+
+    # --- SAFETY RULE: Minimum OTM-1 for Selling ---
+    # offset=0 means ATM which is dangerous for selling. Force to OTM-1.
+    if offset == 0:
+        print("[OTM GUARD] offset=0 (ATM) is NOT safe for selling. Upgrading to OTM-1 automatically.")
+        offset = 1
+
     # 1. Sort all by proximity to spot (ATM candidate is index 0)
     options_list.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    if offset == 0:
-        return options_list[0]
-    
-    # 2. Filter for OTM strikes
-    # For CALL: Strike > Spot
-    # For PUT: Strike < Spot
+
+    # 2. Filter for TRUE OTM strikes based on direction
+    # SELL signal → We sell PUT → OTM PUT has Strike BELOW spot
+    # BUY signal  → We sell CALL → OTM CALL has Strike ABOVE spot
     otm_options = []
-    if direction == "BUY": # Call
+    if direction == "BUY":  # Selling a CALL → Strike must be ABOVE spot
         otm_options = [o for o in options_list if float(o.get('strike_price', 0)) > spot_price]
-    else: # Put
+    else:  # direction == "SELL" → Selling a PUT → Strike must be BELOW spot
         otm_options = [o for o in options_list if float(o.get('strike_price', 0)) < spot_price]
-        
+
     if not otm_options:
-        return options_list[0] # Fallback to ATM if no OTM found
-        
-    # 3. Sort OTM options by proximity to spot and pick the requested offset
+        # Emergency fallback: if absolutely no OTM found, use the closest available
+        print(f"[OTM GUARD] WARNING: No OTM options found for direction={direction}! Falling back to nearest.")
+        return options_list[0]
+
+    # 3. Sort OTM list by proximity to spot (closest OTM first)
     otm_options.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    target_idx = offset - 1 # offset 1 is index 0 of OTM list
+
+    # 4. Pick based on offset (offset=1 → index 0 of OTM list)
+    target_idx = offset - 1
     if target_idx < len(otm_options):
         return otm_options[target_idx]
-    
-    return otm_options[-1] # Pick furthest OTM if requested offset is out of bounds
+
+    # If requested offset is beyond available strikes, use deepest OTM
+    return otm_options[-1]
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
@@ -248,18 +264,45 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("Could not determine spot price.")
         return None
     
-    # 5. Strike Selection: ATM or 1-strike OTM
-    # offset=0 is ATM, offset=1 is 1-strike OTM
-    offset = int(db.get_param('strike_offset', '1')) # Defaulting to 1 (slight OTM) per user request
+    # 5. Strike Selection (STEP 0 — OTM ENFORCEMENT)
+    # offset=0 → BLOCKED (auto-upgraded to OTM-1 by find_atm_strike)
+    # offset=1 → 1-strike OTM (default safe minimum)
+    # offset=2 → 2-strikes OTM (more conservative)
+    offset = int(db.get_param('strike_offset', '1'))  # Default: OTM-1
     best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
-    
+
     if not best_opt: return None
 
+    selected_strike = float(best_opt['strike_price'])
+    selected_premium = float(best_opt['mark_price'])
+    option_type = "PUT" if direction == "SELL" else "CALL"
+    otm_status = "OTM" if (
+        (direction == "SELL" and selected_strike < spot_price) or
+        (direction == "BUY"  and selected_strike > spot_price)
+    ) else "ATM/ITM"
+
+    # Log the strike selection diagnostic
+    log_crypto(
+        f"STRIKE SELECTED: {best_opt['symbol']} | "
+        f"Type: {option_type} | Strike: {selected_strike} | "
+        f"Spot: {spot_price} | Status: {otm_status} | "
+        f"Premium: {selected_premium} | Offset: {offset}"
+    )
+    send_telegram_msg(
+        f"🎯 STRIKE SCANNER\n"
+        f"Option  : {option_type} ({otm_status})\n"
+        f"Symbol  : {best_opt['symbol']}\n"
+        f"Strike  : {selected_strike:,.0f} (Spot: {spot_price:,.0f})\n"
+        f"Premium : {selected_premium}\n"
+        f"Expiry  : {best_opt['expiry_date']}\n"
+        f"OTM Lvl : {offset}"
+    )
+
     return (
-        best_opt['symbol'], 
-        float(best_opt['mark_price']), 
-        float(best_opt['strike_price']), 
-        best_opt['expiry_date'], 
+        best_opt['symbol'],
+        selected_premium,
+        selected_strike,
+        best_opt['expiry_date'],
         best_opt['product_id']
     )
 
