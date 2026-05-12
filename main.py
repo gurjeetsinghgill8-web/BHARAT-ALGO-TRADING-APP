@@ -177,20 +177,21 @@ def run_crypto_sar():
 # ============================================================
 def main_loop():
     import time
-    log_terminal("🧱 BRICK #1.8: DTE Filter, High-Contrast UI & Contextual Sync ACTIVE", "START")
+    log_terminal("🧱 BRICK #1.9: TYPE-SAFE FIX ACTIVE", "START")
     last_heartbeat = 0
     last_action_time = 0
     COOLDOWN_SEC = 300
     while True:
         try:
             now = time.time()
+            # 🔄 DASHBOARD FORCE SYNC
             try:
                 if db.get_param("force_sync_flag", "0") == "1":
                     log_terminal("📡 REMOTE SYNC TRIGGERED", "ALERT")
                     delta_executor.sync_delta_position()
                     pos = delta_executor.get_current_position()
-                    ltp = delta_executor.fetch_btc_spot()
-                    anchor = db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0)
+                    ltp = float(delta_executor.fetch_btc_spot())
+                    anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
                     send_telegram_msg(f"🔄 *REMOTE SYNC COMPLETE*\nLTP: ${ltp} | Anchor: ${anchor}\nPosition: {pos['type'] if pos else 'CLEARED'}\nSystem Healthy ✅")
                     db.set_param("force_sync_flag", "0")
                     last_action_time = time.time()
@@ -198,10 +199,11 @@ def main_loop():
                     continue
             except: pass
             
+            # 💓 CONTEXTUAL HEARTBEAT
             if now - last_heartbeat >= 300:
-                ltp = delta_executor.fetch_btc_spot()
+                ltp = float(delta_executor.fetch_btc_spot())
                 pos = delta_executor.get_current_position()
-                anchor = db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0)
+                anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
                 if pos:
                     holding_put = (pos['type'] == 'PUT')
                     is_bullish = ltp > anchor
@@ -213,15 +215,17 @@ def main_loop():
                 send_telegram_msg(pulse)
                 last_heartbeat = now
                 
+            # 🛑 COOLDOWN
             if now - last_action_time < COOLDOWN_SEC:
                 time.sleep(10)
                 continue
                 
             run_janitor()
             pos = delta_executor.get_current_position()
-            ltp = delta_executor.fetch_btc_spot()
-            anchor = db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0)
+            ltp = float(delta_executor.fetch_btc_spot())
+            anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
             
+            # 📐 TRADING LOGIC
             if anchor > 0 and ltp > 0:
                 if pos:
                     holding_put = (pos['type'] == 'PUT')
