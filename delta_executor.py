@@ -223,41 +223,41 @@ def filter_options_by_expiry(options, days_threshold=3):
             continue
     return valid_options
 
-def find_atm_strike(spot_price, options_list, direction, offset=0):
-    """
-    Lego Block 3: Strike Selection (Strike Picker)
-    Finds the strike price with min difference from spot, plus an optional OTM offset.
-    offset=0: ATM
-    offset=1: 1-strike OTM
-    """
-    if not options_list: return None
-    
-    # 1. Sort all by proximity to spot (ATM candidate is index 0)
-    options_list.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    if offset == 0:
-        return options_list[0]
-    
-    # 2. Filter for OTM strikes
-    # For CALL: Strike > Spot
-    # For PUT: Strike < Spot
-    otm_options = []
-    if direction == "BUY": # Call
-        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) > spot_price]
-    else: # Put
-        otm_options = [o for o in options_list if float(o.get('strike_price', 0)) < spot_price]
+def find_atm_strike(spot_price, options_list, direction, strike_selection=None):
+    if not options_list or spot_price <= 0: 
+        return None
         
-    if not otm_options:
-        return options_list[0] # Fallback to ATM if no OTM found
+    options_list = sorted(options_list, key=lambda x: float(x.get('strike_price', 0)))
+    
+    # Find exact ATM index
+    atm_idx = 0
+    min_diff = float('inf')
+    for i, opt in enumerate(options_list):
+        diff = abs(float(opt['strike_price']) - spot_price)
+        if diff < min_diff:
+            min_diff = diff
+            atm_idx = i
+            
+    # Read user preference from DB (Default: OTM 2)
+    strike_pref = db.get_param("strike_selection", "OTM 2").upper()
+    offset = 0
+    if "OTM 1" in strike_pref: offset = 1
+    elif "OTM 2" in strike_pref: offset = 2
+    elif "OTM 3" in strike_pref: offset = 3
+    elif "ITM 1" in strike_pref: offset = -1
+    # ATM = 0
+    
+    # DIRECTIONAL LOGIC FOR SELLING
+    # SELL CALL -> Bearish -> Want OTM (Strike > LTP)
+    # SELL PUT -> Bullish -> Want OTM (Strike < LTP)
+    if "CALL" in direction: 
+        target_idx = atm_idx + offset
+    else: 
+        target_idx = atm_idx - offset
         
-    # 3. Sort OTM options by proximity to spot and pick the requested offset
-    otm_options.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - spot_price))
-    
-    target_idx = offset - 1 # offset 1 is index 0 of OTM list
-    if target_idx < len(otm_options):
-        return otm_options[target_idx]
-    
-    return otm_options[-1] # Pick furthest OTM if requested offset is out of bounds
+    # Safe boundary check
+    target_idx = max(0, min(len(options_list) - 1, target_idx))
+    return options_list[target_idx]
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
