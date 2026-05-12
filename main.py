@@ -192,6 +192,79 @@ def run_crypto_sar():
 # ============================================================
 # MAIN
 # ============================================================
+def main_loop():
+    import time
+    log_terminal("🧱 BRICK #1: Vision & Anti-Spam Loaded", "START")
+    
+    last_heartbeat = 0
+    last_action_time = 0
+    COOLDOWN_SEC = 300  # 5-Minute Global Lock
+    
+    while True:
+        try:
+            # 📡 VISION HEARTBEAT (Every 5 Mins)
+            now = time.time()
+            if now - last_heartbeat >= 300:
+                ltp = delta_executor.fetch_btc_spot()
+                pos = delta_executor.get_current_position()
+                anchor = db.get_param("manual_magical_line", 0)
+                if anchor == 0 or anchor == "0": anchor = db.get_param("magical_line", 0)
+                status = pos['type'] if pos else "NO ACTIVE TRADE"
+                pulse = f"💓 VISION PULSE\nLTP: ${ltp} | Anchor: ${anchor} | Position: {status}"
+                log_terminal(pulse, "INFO")
+                send_telegram_msg(pulse)
+                last_heartbeat = now
+
+            # 🛑 COOLDOWN CHECK
+            if now - last_action_time < COOLDOWN_SEC:
+                time.sleep(10)
+                continue
+
+            run_janitor()
+            pos = delta_executor.get_current_position()
+            ltp = delta_executor.fetch_btc_spot()
+            anchor = db.get_param("manual_magical_line", 0)
+            if anchor == 0 or anchor == "0": anchor = db.get_param("magical_line", 0)
+
+            if float(anchor or 0) > 0 and float(ltp or 0) > 0:
+                anchor = float(anchor)
+                ltp = float(ltp)
+                # 🧱 HOLD RULE (Do Nothing if Trend Matches Position)
+                if pos:
+                    holding_put = pos['type'] == 'PUT'
+                    holding_call = pos['type'] == 'CALL'
+                    is_bullish = ltp > anchor
+                    is_bearish = ltp < anchor
+
+                    if (holding_put and is_bullish) or (holding_call and is_bearish):
+                        log_terminal(f"🛡️ HOLD: Position {pos['type']} matches trend. Waiting.", "DEBUG")
+                        time.sleep(10)
+                        continue
+                    elif (holding_put and is_bearish) or (holding_call and is_bullish):
+                        # ✅ FLIP LOGIC
+                        log_terminal(f"🔄 FLIP DETECTED: Closing {pos['type']}...", "ALERT")
+                        delta_executor.square_off_crypto()
+                        last_action_time = time.time()
+                        time.sleep(3)
+                        run_janitor()  # Sync before new entry
+                        continue
+
+                # 🚀 ENTRY LOGIC (Only if no position)
+                else:
+                    if ltp > anchor:
+                        log_terminal("📈 BULLISH: Entering SELL PUT", "TRADE")
+                        delta_executor.execute_crypto_trade("SELL_PUT")
+                    elif ltp < anchor:
+                        log_terminal("📉 BEARISH: Entering SELL CALL", "TRADE")
+                        delta_executor.execute_crypto_trade("SELL_CALL")
+                    last_action_time = time.time()
+
+            check_sl_tp()
+        except Exception as e:
+            log_terminal(f"❌ Loop Error: {str(e)}", "ERROR")
+            import traceback; log_terminal(traceback.format_exc(), "ERROR")
+        time.sleep(10)
+
 def main():
     # --- BULLETPROOF SINGLETON ---
     try:
@@ -214,53 +287,15 @@ def main():
     if not db.load_secrets():
         sys.exit(1)
 
-    # --- DEFAULT PARAMS (only if not already set by dashboard) ---
-    if not db.get_param('st_period'):        db.set_param('st_period', '10')
-    if not db.get_param('st_multiplier'):    db.set_param('st_multiplier', '1.5')
+    # --- DEFAULT PARAMS ---
     if not db.get_param('crypto_trade_size'): db.set_param('crypto_trade_size', '1')
     if not db.get_param('sl_percent'):       db.set_param('sl_percent', '40')
     if not db.get_param('tp_percent'):       db.set_param('tp_percent', '100')
-    if not db.get_param('candle_timeframe'): db.set_param('candle_timeframe', '5m')
-    if not db.get_param('num_strikes'):      db.set_param('num_strikes', '1')
 
     log_terminal("Bharat AlgoVerse v3.0 - Full Auto Mode Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% + Auto-Reinvest | Clean Slate: ON")
+    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% | Clean Slate: ON")
 
-    print("🛡️ SCANNING FOR ORPHANED TRADES...")
-    delta_executor.reconcile_bracket_orders()
-
-    last_pulse = 0
-
-    while True:
-        try:
-            run_janitor()
-            run_crypto_sar()
-            check_sl_tp()            # <-- In-code SL/TP monitor
-            delta_executor.reconcile_bracket_orders()
-
-            # Telegram Pulse every 30 mins
-            if time.time() - last_pulse > 1800:
-                timeframe = db.get_param("candle_timeframe", "5m")
-                signal    = logic.get_supertrend_signal("BTC", timeframe=timeframe)
-                active    = db.get_param('crypto_active_symbol', 'NONE')
-                upnl      = db.get_param('unrealized_pnl', '0')
-                send_telegram_msg(
-                    f"✅ BHARAT PULSE v3.0\n"
-                    f"Signal: {signal} | Active: {active}\n"
-                    f"Live PnL: ${upnl}\n"
-                    f"Timeframe: {timeframe}"
-                )
-                last_pulse = time.time()
-
-            time.sleep(15)
-
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            print(f"Main Loop Error: {e}")
-            traceback.print_exc()
-            time.sleep(10)
-
+    main_loop()
 
 if __name__ == "__main__":
     try:

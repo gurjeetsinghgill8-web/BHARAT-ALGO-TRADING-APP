@@ -95,6 +95,53 @@ def get_delta_auth_headers(method, path, payload="", query_string=""):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BHARAT-ALGO-V2'
     }
 
+def fetch_open_positions():
+    """Helper to fetch raw positions from Delta API."""
+    try:
+        path = "/v2/positions"
+        query = "?underlying_asset_symbol=BTC"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get('result', [])
+    except: pass
+    return []
+
+def get_current_position():
+    try:
+        positions = fetch_open_positions()
+        if not positions: return None
+        for pos in positions:
+            size = abs(float(pos.get('size', 0) or 0))
+            if size == 0: continue
+            
+            sym = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
+            # ✅ LEGO FIX: Correct Delta Parsing
+            if sym.startswith('P-') or '-P-' in sym:
+                return {
+                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                    'type': 'PUT',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': int(size)
+                }
+            elif sym.startswith('C-') or '-C-' in sym:
+                return {
+                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                    'type': 'CALL',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': int(size)
+                }
+    except Exception as e:
+        print(f"[Pos Error] {e}")
+    return None
+
+def fetch_btc_spot():
+    """V3 Alias for current BTC price."""
+    df, _ = fetch_delta_candles("BTC", "1m", limit=1)
+    if not df.empty:
+        return float(df['close'].iloc[-1])
+    return 0
+
 def get_next_friday_expiry():
     today = datetime.date.today()
     days_until_friday = (4 - today.weekday()) % 7
@@ -679,89 +726,39 @@ def get_dynamic_quantity(option_price):
     manual_lots = int(db.get_param('crypto_trade_size', '1'))
     return manual_lots
 
-def execute_crypto_trade(asset, direction):
+def execute_crypto_trade(asset, direction=None):
     """
     Executes a trade based on signal.
-    Does NOT block if previous position is still closing.
+    Upgraded for LEGO BRICK #1: Supports SELL_PUT and SELL_CALL commands.
     """
+    if direction is None:
+        direction = asset
+        asset = "BTC"
+    
     from main import log_terminal, send_telegram_msg
     mode = db.get_param('trade_mode', 'PAPER')
     
-    api_key = db.get_param('delta_api_key', '')
-    if not api_key:
-        send_telegram_msg("❌ CRITICAL: API Key missing in DB!")
-        return
-
-    log_crypto(f"SIGNAL RECEIVED: {direction} {asset}")
+    # Map command names to V4 internal logic
+    # SELL_PUT -> Bullish -> Buy Put (in buying engine)
+    # SELL_CALL -> Bearish -> Buy Call (in buying engine)
+    internal_direction = "BUY" if "CALL" in direction else "SELL"
     
-    # 1. Update Target Signal in DB (for Janitor to handle exits)
-    db.set_param("signal_target", direction)
+    log_crypto(f"SIGNAL RECEIVED: {direction} ({internal_direction})")
     
-    # 2. FAIL-SAFE SYNC: If we can't see the screen, we don't trade!
+    # 2. FAIL-SAFE SYNC
     if not sync_delta_position():
-        log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed. Aborting entry to prevent over-trading!", "ERROR")
+        log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed.", "ERROR")
         return
         
-    # 2.1 PENDING ORDER SAFETY
-    if db.get_param("order_pending", "NO") == "YES":
-        log_terminal("⏳ PENDING ORDER DETECTED: Waiting for previous order to fill/cancel before new trade.", "INFO")
-        return
-
-    # 2.2 LOCAL TRADE LOCK SAFETY (Double-Entry Prevention)
+    # 2.2 LOCAL TRADE LOCK SAFETY
     if db.get_param("local_trade_active", "NO") == "YES":
-        # Check if API also sees it. If API says NONE but Local says YES, we trust Local for 2 minutes (API Lag)
-        # unless we are sure it was a failure.
-        log_terminal("🛡️ LOCAL LOCK ACTIVE: System believes a trade is already running. Blocking new entry.", "ALERT")
+        log_terminal("🛡️ LOCAL LOCK ACTIVE", "ALERT")
         return
 
-    # 2.3 TOTAL LOT GUARD
-    sync_delta_position()
-    manual_lots = int(db.get_param('crypto_trade_size', '3'))
-    # Calculate total size across all positions
-    total_open_size = 0
-    # Re-fetch positions to be absolutely sure
-    try:
-        path = "/v2/positions"
-        url = f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC"
-        headers = get_delta_auth_headers("GET", path, query_string="?underlying_asset_symbol=BTC")
-        r = requests.get(url, headers=headers, timeout=5)
-        if r.status_code == 200:
-            for p in r.json().get('result', []):
-                total_open_size += abs(float(p.get('size', 0)))
-    except: pass
-    
-    if total_open_size >= manual_lots:
-        log_terminal(f"🛑 CAPACITY FULL: Current Size {total_open_size} >= Target {manual_lots}. No more entries allowed.", "ALERT")
-        db.set_param("local_trade_active", "YES") # Sync local lock
-        return
-
-    # 2.5 CLEAN SLATE RULE: Close EVERYTHING before a new entry
-    # This is an absolute rule per Dr. Saab.
-    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
-    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
-
-    if (direction == "BUY" and has_put) or (direction == "SELL" and has_call) or (has_call and has_put):
-        log_terminal("🧹 CLEAN SLATE: Closing all existing positions before fresh entry...", "TRADE")
-        square_off_crypto() # Closes everything
-        time.sleep(2) # Wait for execution
-        sync_delta_position()
-
-    # Re-check status after clean slate
-    has_call = db.get_param("active_call_symbol", "NONE") != "NONE"
-    has_put = db.get_param("active_put_symbol", "NONE") != "NONE"
-
-    if direction == "BUY" and has_call:
-        log_terminal(f"STAY: Already have CALL active. Holding.", "INFO")
-        return
-    
-    if direction == "SELL" and has_put:
-        log_terminal(f"STAY: Already have PUT active. Holding.", "INFO")
-        return
-
-    # 3. Find Best Option to Open
-    opt = find_gill_crypto_option(asset, direction)
+    # 3. Find Best Option
+    opt = find_gill_crypto_option(asset, internal_direction)
     if not opt: 
-        log_terminal(f"ERROR: Could not find suitable {direction} option.", "ERROR")
+        log_terminal(f"ERROR: No option found for {direction}", "ERROR")
         return
         
     symbol, price, strike, expiry, pid = opt
@@ -779,29 +776,21 @@ def execute_crypto_trade(asset, direction):
             }
             import json
             payload = json.dumps(payload_dict)
-            
             headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code in [200, 201]:
                 log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
-                print(f"[DEBUG] Entry Payload: {payload}")
-                print(f"[DEBUG] Entry Response: {resp.text}")
-                # ACTIVATE LOCAL LOCK IMMEDIATELY
                 db.set_param("local_trade_active", "YES")
-                
-                # Brief wait before sync to allow exchange to update
                 time.sleep(1)
                 sync_delta_position()
             else:
-                log_terminal(f"LIVE ENTRY FAILED: {resp.status_code} - {resp.text[:100]}", "ERROR")
+                log_terminal(f"LIVE ENTRY FAILED: {resp.text[:100]}", "ERROR")
         except Exception as e:
             log_terminal(f"ENTRY EXCEPTION: {e}", "ERROR")
     else:
-        # Paper Trade
         log_terminal(f"PAPER ENTRY: {symbol} @ {price}", "TRADE")
-        # Update DB for paper trade
-        if direction == "BUY":
+        if internal_direction == "BUY":
             db.set_param("active_call_symbol", symbol)
             db.set_param("active_call_pid", str(pid))
         else:
