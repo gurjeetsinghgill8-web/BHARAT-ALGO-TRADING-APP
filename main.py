@@ -177,80 +177,78 @@ def run_crypto_sar():
 # ============================================================
 def main_loop():
     import time
-    log_terminal("🧱 BRICK #1.9: TYPE-SAFE FIX ACTIVE", "START")
+    log_terminal("🧱 BRICK #1.12: ZERO-IDLE & TRUE STATE LOGIC ACTIVE", "START")
     last_heartbeat = 0
     last_action_time = 0
     COOLDOWN_SEC = 300
+
     while True:
         try:
             now = time.time()
-            # 🔄 DASHBOARD FORCE SYNC
-            try:
-                if db.get_param("force_sync_flag", "0") == "1":
-                    log_terminal("📡 REMOTE SYNC TRIGGERED", "ALERT")
-                    delta_executor.sync_delta_position()
-                    pos = delta_executor.get_current_position()
-                    ltp = float(delta_executor.fetch_btc_spot())
-                    anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-                    send_telegram_msg(f"🔄 *REMOTE SYNC COMPLETE*\nLTP: ${ltp} | Anchor: ${anchor}\nPosition: {pos['type'] if pos else 'CLEARED'}\nSystem Healthy ✅")
-                    db.set_param("force_sync_flag", "0")
-                    last_action_time = time.time()
-                    time.sleep(5)
-                    continue
-            except: pass
-            
-            # 💓 CONTEXTUAL HEARTBEAT
+
+            # 🔄 REMOTE SYNC CHECK
+            if db.get_param("force_sync_flag", "0") == "1":
+                log_terminal("📡 REMOTE SYNC & STATE RESET TRIGGERED", "ALERT")
+                delta_executor.sync_delta_position()
+                db.set_param("last_trade_time", "0")
+                send_telegram_msg("🔄 *REMOTE SYNC COMPLETE*\nBot Ready for Next Signal ✅")
+                db.set_param("force_sync_flag", "0")
+                last_action_time = time.time()
+                time.sleep(5)
+                continue
+
+            # 💓 HEARTBEAT
             if now - last_heartbeat >= 300:
                 ltp = float(delta_executor.fetch_btc_spot())
                 pos = delta_executor.get_current_position()
                 anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-                if pos:
-                    holding_put = (pos['type'] == 'PUT')
-                    is_bullish = ltp > anchor
-                    status = f"✅ Trend Continue | {pos['type']} Running Properly | No Active Intervention Needed" if (holding_put and is_bullish) or (not holding_put and not is_bullish) else f"⚠️ Trend Shift Detected | {pos['type']} Under Pressure | Monitoring Closely"
-                else:
-                    status = "⏳ Market Aligning | Waiting for Clean Signal | No Active Trade"
+                status = "✅ Trend Aligned | Holding Position" if pos else "⏳ No Trade Open | Waiting for Signal"
                 pulse = f"💓 VISION PULSE\n📊 LTP: ${ltp}\n🎯 Anchor: ${anchor}\n📦 {status}"
                 log_terminal(pulse, "INFO")
                 send_telegram_msg(pulse)
                 last_heartbeat = now
-                
-            # 🛑 COOLDOWN
+
+            # 🛑 COOLDOWN CHECK (ONLY AFTER ENTRY/FLIP)
             if now - last_action_time < COOLDOWN_SEC:
                 time.sleep(10)
                 continue
-                
-            run_janitor()
+
+            # 🔄 SYNC EXCHANGE REALITY & FETCH DATA
+            delta_executor.sync_delta_position()
             pos = delta_executor.get_current_position()
             ltp = float(delta_executor.fetch_btc_spot())
             anchor = float(db.get_param("manual_magical_line", 0) or db.get_param("magical_line", 0))
-            
-            # 📐 TRADING LOGIC
-            if anchor > 0 and ltp > 0:
-                if pos:
-                    holding_put = (pos['type'] == 'PUT')
-                    is_bullish = ltp > anchor
-                    if (holding_put and is_bullish) or (not holding_put and not is_bullish):
-                        log_terminal(f"🛡️ HOLD: {pos['type']} matches trend. Cooling down...", "INFO")
-                    else:
-                        log_terminal(f"🔄 FLIP: Closing {pos['type']}...", "ALERT")
-                        delta_executor.square_off_crypto()
-                        last_action_time = time.time()
-                        time.sleep(5)
-                        continue
+
+            if anchor <= 0 or ltp <= 0:
+                time.sleep(10)
+                continue
+
+            # 🧠 CORE DECISION ENGINE
+            if pos:
+                # TRADE EXISTS
+                holding_put = (pos['type'] == 'PUT')
+                is_bullish = ltp > anchor
+                trend_matches = (holding_put and is_bullish) or (not holding_put and not is_bullish)
+
+                if trend_matches:
+                    log_terminal(f"✅ TREND ALIGNED | {pos['type']} matches Anchor. HOLDING. (Next check in 5m)", "INFO")
                 else:
-                    active_db = db.get_param("crypto_active_symbol", "NONE")
-                    if active_db != "NONE" and active_db:
-                        log_terminal(f"⚠️ SAFETY BLOCK: DB shows active position ({active_db}). Parser missed it. BLOCKING NEW ENTRY.", "ERROR")
-                        last_action_time = time.time()
-                        time.sleep(10)
-                        continue
-                        
-                    if ltp > anchor:
-                        delta_executor.execute_crypto_trade("SELL_PUT")
-                    elif ltp < anchor:
-                        delta_executor.execute_crypto_trade("SELL_CALL")
+                    log_terminal(f"🔄 TREND REVERSED | {pos['type']} against Anchor. EXECUTING FLIP...", "ALERT")
+                    delta_executor.square_off_crypto()
                     last_action_time = time.time()
+                    time.sleep(5)
+                    continue
+            else:
+                # NO TRADE EXISTS (Blank Screen / Manually Closed)
+                log_terminal(f"🟢 NO OPEN TRADE DETECTED. EXECUTING FRESH ENTRY...", "TRADE")
+                if ltp > anchor:
+                    log_terminal("📈 BULLISH -> EXECUTING SELL PUT", "TRADE")
+                    delta_executor.execute_crypto_trade("SELL_PUT")
+                elif ltp < anchor:
+                    log_terminal("📉 BEARISH -> EXECUTING SELL CALL", "TRADE")
+                    delta_executor.execute_crypto_trade("SELL_CALL")
+                last_action_time = time.time()
+
             check_sl_tp()
         except Exception as e:
             log_terminal(f"❌ Loop Error: {str(e)}", "ERROR")
