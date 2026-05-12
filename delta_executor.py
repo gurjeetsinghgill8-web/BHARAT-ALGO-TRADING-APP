@@ -661,27 +661,29 @@ def get_dynamic_quantity(option_price):
 
 def execute_crypto_trade(direction=None):
     try:
-        log_terminal(f"🔍 EXEC START: Requesting {direction}", "TRADE")
+        log_terminal(f"🔍 EXEC START: {direction}", "TRADE")
         
+        # Balance check (V4.0 style, lowered threshold)
         balance = fetch_wallet_balance()
-        log_terminal(f"💰 BALANCE CHECK: ${balance:.2f}", "DEBUG")
         if balance < 1.0:
-            log_terminal("⚠️ BLOCKED: Balance below $1.0 threshold", "WARN")
+            log_terminal(f"⚠️ BLOCKED: Balance ${balance:.2f} < $1.0", "WARN")
             return
             
+        # Paper/Live mode check
         if db.get_param('trade_mode', 'PAPER') != "LIVE":
-            log_terminal("📝 PAPER MODE: Trade skipped", "INFO")
+            log_terminal(f"📝 PAPER MODE: Skipping {direction}", "INFO")
             return
-            
-        log_terminal("📦 FETCHING OPTION CHAIN...", "DEBUG")
+        
+        # Find option (V4.0 logic)
         opt = find_gill_crypto_option("BTC", direction)
         if not opt:
-            msg = "❌ TRADE FAILED: No valid option found for current DTE/Strike"
+            msg = f"❌ NO OPTION FOUND for {direction}"
             log_terminal(msg, "ERROR")
             try: send_telegram_msg(msg)
             except: pass
             return
-            
+        
+        # Build order payload (V4.0 exact structure)
         payload = json.dumps({
             "product_id": int(opt['product_id']),
             "size": int(db.get_param('crypto_trade_size', '1')),
@@ -690,7 +692,7 @@ def execute_crypto_trade(direction=None):
         })
         headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
         
-        log_terminal("📡 SENDING ORDER TO DELTA API...", "DEBUG")
+        # Execute API call (V4.0 timeout + error handling)
         resp = requests.post(
             "https://api.india.delta.exchange/v2/orders",
             headers=headers,
@@ -702,24 +704,18 @@ def execute_crypto_trade(direction=None):
             log_terminal(f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}", "TRADE")
             sync_delta_position()
         else:
-            err_msg = f"❌ DELTA API REJECTED ({resp.status_code}): {resp.text}"
-            log_terminal(err_msg, "ERROR")
-            try: send_telegram_msg(err_msg)
+            err = resp.text.lower()
+            if "insufficientmargin" in err:
+                msg = f"🚨 MARGIN ERROR: Need ~$10-$15. Balance: ${balance:.2f}"
+            else:
+                msg = f"❌ API REJECTED ({resp.status_code}): {resp.text}"
+            log_terminal(msg, "ERROR")
+            try: send_telegram_msg(msg)
             except: pass
             
-    except requests.exceptions.Timeout:
-        msg = "❌ NETWORK TIMEOUT: Delta API did not respond in 10s"
-        log_terminal(msg, "ERROR")
-        try: send_telegram_msg(msg)
-        except: pass
-    except requests.exceptions.ConnectionError:
-        msg = "❌ CONNECTION FAILED: Check VPS internet or Delta API status"
-        log_terminal(msg, "ERROR")
-        try: send_telegram_msg(msg)
-        except: pass
     except Exception as e:
         import traceback
-        msg = f"❌ EXECUTION CRASH: {str(e)}"
+        msg = f"❌ EXEC CRASH: {str(e)}"
         log_terminal(msg, "ERROR")
         log_terminal(traceback.format_exc(), "ERROR")
         try: send_telegram_msg(msg)
