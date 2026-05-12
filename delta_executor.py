@@ -659,74 +659,69 @@ def get_dynamic_quantity(option_price):
     manual_lots = int(db.get_param('crypto_trade_size', '1'))
     return manual_lots
 
-def execute_crypto_trade(asset, direction=None):
-    """
-    Executes a trade based on signal.
-    Upgraded for LEGO BRICK #1: Supports SELL_PUT and SELL_CALL commands.
-    """
-    if direction is None:
-        direction = asset
-        asset = "BTC"
-    
-    from main import log_terminal, send_telegram_msg
-    mode = db.get_param('trade_mode', 'PAPER')
-    
-    # Map command names to V4 internal logic
-    # SELL_PUT -> Bullish -> Buy Put (in buying engine)
-    # SELL_CALL -> Bearish -> Buy Call (in buying engine)
-    internal_direction = "BUY" if "CALL" in direction else "SELL"
-    
-    log_crypto(f"SIGNAL RECEIVED: {direction} ({internal_direction})")
-    
-    # 2. FAIL-SAFE SYNC
-    if not sync_delta_position():
-        log_terminal("🛑 BLIND-FOLD SAFETY: Sync failed.", "ERROR")
-        return
+def execute_crypto_trade(direction=None):
+    try:
+        log_terminal(f"🔍 STEP 1/5: Trade request received -> {direction}", "DEBUG")
         
-    # 2.2 LOCAL TRADE LOCK SAFETY
-    if db.get_param("local_trade_active", "NO") == "YES":
-        log_terminal("🛡️ LOCAL LOCK ACTIVE", "ALERT")
-        return
-
-    # 3. Find Best Option
-    opt = find_gill_crypto_option(asset, internal_direction)
-    if not opt: 
-        log_terminal(f"ERROR: No option found for {direction}", "ERROR")
-        return
-        
-    symbol, price, strike, expiry, pid = opt
-    qty = get_dynamic_quantity(price)
-    
-    # 4. Execute Entry
-    if mode == "LIVE":
-        try:
-            url = "https://api.india.delta.exchange/v2/orders"
-            payload_dict = {
-                "product_id": int(pid),
-                "size": int(qty),
-                "side": "sell",      # EXPLICIT SELL FOR ENTRIES (Sell to Open)
-                "order_type": "market_order"
-            }
-            import json
-            payload = json.dumps(payload_dict)
-            headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-            resp = requests.post(url, headers=headers, data=payload, timeout=10)
+        balance = fetch_wallet_balance()
+        log_terminal(f"💰 STEP 2/5: Wallet balance fetched -> ${balance:.2f}", "DEBUG")
+        if balance < 1.0:
+            log_terminal("⚠️ BLOCKED: Balance below $1.0 threshold", "WARN")
+            return
             
-            if resp.status_code in [200, 201]:
-                log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
-                db.set_param("local_trade_active", "YES")
-                time.sleep(1)
-                sync_delta_position()
-            else:
-                log_terminal(f"LIVE ENTRY FAILED: {resp.text[:100]}", "ERROR")
-        except Exception as e:
-            log_terminal(f"ENTRY EXCEPTION: {e}", "ERROR")
-    else:
-        log_terminal(f"PAPER ENTRY: {symbol} @ {price}", "TRADE")
-        if internal_direction == "BUY":
-            db.set_param("active_call_symbol", symbol)
-            db.set_param("active_call_pid", str(pid))
+        if db.get_param('trade_mode', 'PAPER') != "LIVE":
+            log_terminal("📝 PAPER MODE: Execution skipped", "INFO")
+            return
+            
+        log_terminal("🔍 STEP 3/5: Fetching option chain & strike...", "DEBUG")
+        opt = find_gill_crypto_option("BTC", direction)
+        if not opt:
+            log_terminal("❌ BLOCKED: No valid option found for current DTE/Strike", "ERROR")
+            return
+        log_terminal(f"🎯 STEP 4/5: Option selected -> {opt['symbol']} (PID: {opt['product_id']})", "DEBUG")
+        
+        payload = json.dumps({
+            "product_id": int(opt['product_id']),
+            "size": int(db.get_param('crypto_trade_size', '1')),
+            "side": "sell",
+            "order_type": "market_order"
+        })
+        headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
+        
+        log_terminal("📡 STEP 5/5: Sending API request to Delta Exchange...", "DEBUG")
+        resp = requests.post(
+            "https://api.india.delta.exchange/v2/orders",
+            headers=headers,
+            data=payload,
+            timeout=15  # PREVENTS INFINITE HANG
+        )
+        
+        if resp.status_code in [200, 201]:
+            log_terminal(f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}", "TRADE")
+            sync_delta_position()
         else:
-            db.set_param("active_put_symbol", symbol)
-            db.set_param("active_put_pid", str(pid))
-        db.set_param("crypto_active_symbol", symbol)
+            log_terminal(f"❌ API REJECTED ({resp.status_code}): {resp.text}", "ERROR")
+            
+    except requests.exceptions.Timeout:
+        log_terminal("❌ NETWORK TIMEOUT: Delta API did not respond in 15s", "ERROR")
+    except requests.exceptions.ConnectionError:
+        log_terminal("❌ CONNECTION FAILED: Check internet/VPS network or Delta API status", "ERROR")
+    except Exception as e:
+        import traceback
+        log_terminal(f"❌ EXECUTION CRASH: {str(e)}", "ERROR")
+        log_terminal(traceback.format_exc(), "ERROR")
+
+def fetch_wallet_balance():
+    """Fetches USDT balance from Delta Exchange."""
+    try:
+        path = "/v2/wallet/balances"
+        query = "?asset_symbol=USDT"
+        headers = get_delta_auth_headers("GET", path, query_string=query)
+        resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            res = resp.json().get('result', [])
+            for r in res:
+                if r.get('asset_symbol') == 'USDT':
+                    return float(r.get('available_balance', 0))
+    except: pass
+    return 0.0
