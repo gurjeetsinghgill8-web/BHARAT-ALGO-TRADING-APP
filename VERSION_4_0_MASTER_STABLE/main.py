@@ -144,8 +144,14 @@ def run_crypto_magical():
     db.set_param("current_ltp", str(ltp))
     db.set_param("auto_anchor", str(magical_line))
 
-    # Signal: LTP vs Magical Line
-    signal = "BUY" if ltp > magical_line else "SELL"
+    # SIGNAL: LTP vs Magic Line
+    # ──────────────────────────────────────────────────────
+    # LTP > Anchor → Price ABOVE the magic line → SELL PUT
+    #   (Market is bullish, so we sell put — OTM below)
+    # LTP < Anchor → Price BELOW the magic line → SELL CALL
+    #   (Market is bearish, so we sell call — OTM above)
+    # ──────────────────────────────────────────────────────
+    signal = "SELL" if ltp > magical_line else "BUY"
     db.set_param("signal_target", signal)
 
     # Sync positions from exchange
@@ -163,11 +169,13 @@ def run_crypto_magical():
         db.set_param("crypto_active_symbol", "NONE")
 
     # ── DO NOTHING: Position matches signal → HOLD ──────────
-    if signal == "BUY" and active_call != "NONE":
-        log_terminal(f"✋ HOLD CALL: LTP {ltp:,.0f} > Anchor {magical_line:,.0f}", "INFO")
-        return
+    # signal=SELL → we want PUT short → if PUT active = HOLD
+    # signal=BUY  → we want CALL short → if CALL active = HOLD
     if signal == "SELL" and active_put != "NONE":
-        log_terminal(f"✋ HOLD PUT: LTP {ltp:,.0f} < Anchor {magical_line:,.0f}", "INFO")
+        log_terminal(f"✋ HOLD PUT SHORT: LTP {ltp:,.0f} > Anchor {magical_line:,.0f} → Selling PUT is correct", "INFO")
+        return
+    if signal == "BUY" and active_call != "NONE":
+        log_terminal(f"✋ HOLD CALL SHORT: LTP {ltp:,.0f} < Anchor {magical_line:,.0f} → Selling CALL is correct", "INFO")
         return
 
     # ── FLIP: Position is WRONG direction ───────────────────
@@ -194,15 +202,15 @@ def run_crypto_magical():
     if not active_any:
         if is_in_cooldown():
             return
-        opt_type = "PUT (SELL)" if signal == "SELL" else "CALL (SELL)"
-        direction = "ABOVE" if signal == "BUY" else "BELOW"
-        log_terminal(f"🎯 ENTRY: SELL {opt_type} | LTP {ltp:,.0f} {direction} Anchor {magical_line:,.0f}", "TRADE")
+        opt_type  = "PUT (SELL)" if signal == "SELL" else "CALL (SELL)"
+        ltp_pos   = "ABOVE" if signal == "SELL" else "BELOW"
+        log_terminal(f"🎯 ENTRY: SELL {opt_type} | LTP {ltp:,.0f} {ltp_pos} Anchor {magical_line:,.0f}", "TRADE")
         send_telegram_msg(
             f"🚀 MAGIC LINE ENTRY\n"
             f"Action : SELL {opt_type}\n"
             f"LTP    : {ltp:,.0f}\n"
             f"Anchor : {magical_line:,.0f} ({anchor_type})\n"
-            f"Rule   : LTP {direction} Anchor"
+            f"Rule   : LTP {ltp_pos} Anchor"
         )
         num_strikes = int(db.get_param('num_strikes', '1'))
         for i in range(num_strikes):
@@ -298,7 +306,7 @@ def main():
     if not db.get_param('crypto_trade_size'): db.set_param('crypto_trade_size', '1')
     if not db.get_param('sl_percent'):        db.set_param('sl_percent', '25')
     if not db.get_param('num_strikes'):       db.set_param('num_strikes', '1')
-    if not db.get_param('strike_offset'):     db.set_param('strike_offset', '1')
+    if not db.get_param('expiry_threshold'): db.set_param('expiry_threshold', '1')
     if not db.get_param('trade_mode'):        db.set_param('trade_mode', 'LIVE')
     if not db.get_param('crypto_algo_running'): db.set_param('crypto_algo_running', 'ON')
 
@@ -349,9 +357,9 @@ def main():
                 direction_hint = ""
                 if anchor_now > 0 and ltp_now > 0:
                     if ltp_now > anchor_now:
-                        direction_hint = f"LTP ABOVE anchor → SELL PUT"
+                        direction_hint = "LTP ABOVE anchor → SELL PUT"
                     else:
-                        direction_hint = f"LTP BELOW anchor → SELL CALL"
+                        direction_hint = "LTP BELOW anchor → SELL CALL"
 
                 send_telegram_msg(
                     f"BHARAT PULSE v5.2\n"

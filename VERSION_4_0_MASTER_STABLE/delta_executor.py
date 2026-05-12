@@ -231,10 +231,10 @@ def find_gill_crypto_option(asset, direction):
         log_crypto(f"No liquid {target_type} found at all.")
         return None
 
-    # 2. Expiry Rule: Smart Expiry (Lego Block 2)
-    # We pick expiries based on the threshold (default 3 days) to avoid theta decay.
+    # 2. Expiry Rule: Pick NEAREST available expiry (1-2 day options)
+    # User wants short expiry (next day / 2 days), NOT long expiry
     today = datetime.date.today()
-    threshold = int(db.get_param('expiry_threshold', '3'))
+    threshold = int(db.get_param('expiry_threshold', '1'))  # Default: 1 day min
     min_expiry_dt = today + datetime.timedelta(days=threshold)
     min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
     
@@ -248,8 +248,8 @@ def find_gill_crypto_option(asset, direction):
         log_crypto("No valid future expiries found!")
         return None
         
-    best_expiry = valid_expiries[0] 
-    log_crypto(f"Selected Expiry: {best_expiry} (3-Day Rule applied)")
+    best_expiry = valid_expiries[0]  # NEAREST expiry always
+    log_crypto(f"Selected Expiry: {best_expiry} (Nearest Rule — {threshold}d min)")
     
     # 3. Filter for options with that specific expiry
     near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
