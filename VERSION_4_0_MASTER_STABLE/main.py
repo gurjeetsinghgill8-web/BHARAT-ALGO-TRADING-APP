@@ -20,41 +20,140 @@ def allowed_gai_family():
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
 # ============================================================
+# STEP 7 — GLOBAL COOLDOWN LOCK (5-minute)
+# After ANY trade (entry/exit/flip), bot freezes for 300s
+# ============================================================
+_last_trade_time = 0   # Unix timestamp of last trade action
+
+def record_trade_action(reason=""):
+    """Call this after every entry, exit, or flip to start the cooldown."""
+    global _last_trade_time
+    _last_trade_time = time.time()
+    log_terminal(f"⏱️ COOLDOWN STARTED (5 min) — Reason: {reason}", "INFO")
+
+def is_in_cooldown():
+    """Returns True if still within 300-second cooldown window."""
+    elapsed = time.time() - _last_trade_time
+    if elapsed < 300:
+        remaining = int(300 - elapsed)
+        log_terminal(f"🧊 COOLDOWN ACTIVE: {remaining}s remaining. Skipping this cycle.", "INFO")
+        return True
+    return False
+
+# ============================================================
+# STEP 9 — LTP FETCHER (for heartbeat + reasoning alerts)
+# ============================================================
+def get_btc_ltp():
+    """Fetches live BTC spot price from Delta Exchange."""
+    try:
+        urls = [
+            "https://api.india.delta.exchange/v2/tickers/BTCUSDT",
+            "https://api.india.delta.exchange/v2/tickers/BTCUSD",
+        ]
+        for url in urls:
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200:
+                result = resp.json().get("result", {})
+                price = float(result.get("spot_price") or result.get("mark_price") or 0)
+                if price > 0:
+                    return price
+        # Fallback: try tickers list
+        resp = requests.get("https://api.india.delta.exchange/v2/tickers?underlying_asset_symbol=BTC", timeout=5)
+        if resp.status_code == 200:
+            for t in resp.json().get("result", []):
+                sp = float(t.get("spot_price") or t.get("underlying_price") or 0)
+                if sp > 0:
+                    return sp
+    except Exception as e:
+        print(f"[LTP FETCH ERROR] {e}")
+    return 0.0
+
+# ============================================================
 # JANITOR: Syncs reality, enforces Clean Slate, guards quantity
+# UPDATED: Step 6 DO NOTHING Rule + Step 8 True Flip Condition
 # ============================================================
 def run_janitor():
+    global _last_trade_time
+
     # 1. Sync Reality from Exchange
     delta_executor.sync_delta_position()
 
     # 2. Get Current Signal (from configured timeframe)
-    asset = "BTC"
+    asset     = "BTC"
     timeframe = db.get_param("candle_timeframe", "5m")
-    signal = logic.get_supertrend_signal(asset, timeframe=timeframe)
+    signal    = logic.get_supertrend_signal(asset, timeframe=timeframe)
     db.set_param("signal_target", signal)
 
     # 3. Get DB Reality
     call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
     put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
 
-    # CASE: SIGNAL SELL BUT CALL OPEN
+    # ──────────────────────────────────────────────────────
+    # STEP 6 — "DO NOTHING" RULE
+    # If position MATCHES the signal → HOLD, don't touch it
+    # ──────────────────────────────────────────────────────
+    # SELL signal = Market Bearish = We want PUT (selling PUT)
+    # BUY signal  = Market Bullish = We want CALL (selling CALL)
+
+    if signal == "SELL" and put_active:
+        log_terminal("✋ DO NOTHING: Signal=SELL, PUT active → HOLD. No action needed.", "INFO")
+        return  # STEP 6: Perfect match — do nothing
+
+    if signal == "BUY" and call_active:
+        log_terminal("✋ DO NOTHING: Signal=BUY, CALL active → HOLD. No action needed.", "INFO")
+        return  # STEP 6: Perfect match — do nothing
+
+    # ──────────────────────────────────────────────────────
+    # STEP 8 — TRUE FLIP CONDITION
+    # Only flip if: signal reversed AND 5 minutes have passed
+    # ──────────────────────────────────────────────────────
     if signal == "SELL" and call_active:
-        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
+        # Signal is SELL but we have a CALL — need to flip
+        if is_in_cooldown():
+            return  # Step 7+8: Wait for cooldown before flipping
+        ltp = get_btc_ltp()
+        anchor = float(db.get_param("manual_anchor", "0") or "0")
+        reason_str = f"LTP {ltp:,.0f} < Anchor {anchor:,.0f}" if anchor > 0 else "Supertrend SELL"
+        log_terminal(f"🔄 TRUE FLIP: Closing CALL → Opening PUT | Reason: {reason_str}", "ALERT")
+        send_telegram_msg(
+            f"🔄 FLIP TRIGGERED\n"
+            f"Closing : CALL\n"
+            f"Opening : PUT (SELL)\n"
+            f"Reason  : {reason_str}\n"
+            f"Cooldown: 5 min starts now"
+        )
         delta_executor.square_off_crypto()
+        record_trade_action("Flip CALL→PUT")
 
-    # CASE: SIGNAL BUY BUT PUT OPEN
     elif signal == "BUY" and put_active:
-        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
+        # Signal is BUY but we have a PUT — need to flip
+        if is_in_cooldown():
+            return  # Step 7+8: Wait for cooldown before flipping
+        ltp = get_btc_ltp()
+        anchor = float(db.get_param("manual_anchor", "0") or "0")
+        reason_str = f"LTP {ltp:,.0f} > Anchor {anchor:,.0f}" if anchor > 0 else "Supertrend BUY"
+        log_terminal(f"🔄 TRUE FLIP: Closing PUT → Opening CALL | Reason: {reason_str}", "ALERT")
+        send_telegram_msg(
+            f"🔄 FLIP TRIGGERED\n"
+            f"Closing : PUT\n"
+            f"Opening : CALL (BUY)\n"
+            f"Reason  : {reason_str}\n"
+            f"Cooldown: 5 min starts now"
+        )
         delta_executor.square_off_crypto()
+        record_trade_action("Flip PUT→CALL")
 
-    # CASE: SIGNAL WAIT BUT ANYTHING OPEN
     elif signal == "WAIT" and (call_active or put_active):
-        log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
+        if is_in_cooldown():
+            return
+        log_terminal("🛑 JANITOR: Signal is WAIT. Closing all trades after cooldown clear.", "ALERT")
         delta_executor.square_off_crypto()
+        record_trade_action("Signal=WAIT, closing all")
 
     # QUANTITY GUARD: Prevent over-trading
     try:
         manual_lots = int(db.get_param('crypto_trade_size', '1'))
-        total_size = 0
+        total_size  = 0
         for asset_sym in ["BTC", "ETH"]:
             path  = "/v2/positions"
             query = f"?underlying_asset_symbol={asset_sym}"
@@ -66,8 +165,9 @@ def run_janitor():
                     total_size += abs(float(p.get('size', 0)))
 
         if total_size > (manual_lots + 0.1):
-            log_terminal(f"🚨 QUANTITY OVERLOAD: {total_size} > {manual_lots}. Clearing screen...", "ALERT")
+            log_terminal(f"🚨 QUANTITY OVERLOAD: {total_size} > {manual_lots}. Clearing...", "ALERT")
             delta_executor.square_off_crypto()
+            record_trade_action("Quantity overload clear")
     except:
         pass
 
@@ -76,21 +176,24 @@ def run_janitor():
         log_terminal("🚨 ZOMBIE LOCK: Memory was stuck. Releasing lock now.", "ALERT")
         db.set_param("local_trade_active", "NO")
 
+
 # ============================================================
-# IN-CODE SL/TP MONITOR  (40% SL | 100% TP with Auto-Reinvest)
+# IN-CODE SL/TP MONITOR
+# STEP 11 — SL Spike Guard (zero-price protection)
 # ============================================================
 def check_sl_tp():
     """
-    Polls open positions every loop and triggers:
-    - Market EXIT if loss >= 40%   → Hard Stop Loss
-    - Market EXIT if profit >= 100% → Take Profit, then immediately re-enter same direction
+    Polls open positions and triggers:
+    - Market EXIT if loss >= SL%   → Hard Stop Loss
+    - Market EXIT if profit >= TP% → Take Profit + Auto-Reinvest
+    STEP 11: Only fires if BOTH entry_price > 0 AND current_premium > 0
     """
     mode = db.get_param('trade_mode', 'PAPER')
     if mode != "LIVE":
         return
 
-    sl_pct = float(db.get_param('sl_percent', '40'))   # default 40%
-    tp_pct = float(db.get_param('tp_percent', '100'))  # default 100%
+    sl_pct = float(db.get_param('sl_percent', '40'))
+    tp_pct = float(db.get_param('tp_percent', '100'))
 
     for asset_sym in ["BTC", "ETH"]:
         try:
@@ -108,11 +211,24 @@ def check_sl_tp():
                 if size == 0:
                     continue
 
-                upnl        = float(p.get('unrealized_pnl', 0))
-                entry_val   = float(p.get('entry_value', 1) or 1)
-                pid         = p.get('product_id')
-                symbol      = p.get('product', {}).get('symbol', str(pid))
-                pnl_pct     = (upnl / abs(entry_val)) * 100
+                upnl      = float(p.get('unrealized_pnl', 0))
+                entry_val = float(p.get('entry_value', 1) or 1)
+                pid       = p.get('product_id')
+                symbol    = p.get('product', {}).get('symbol', str(pid))
+                pnl_pct   = (upnl / abs(entry_val)) * 100
+
+                # ── STEP 11: SL Spike Guard ──────────────────
+                # Only act if both values are non-zero (real data)
+                avg_entry = float(p.get('avg_entry_price', 0) or 0)
+                mark_price = float(p.get('mark_price', 0) or 0)
+                if avg_entry <= 0 or mark_price <= 0:
+                    log_terminal(
+                        f"🛡️ SL SPIKE GUARD: Skipping {symbol} — "
+                        f"Entry={avg_entry}, Mark={mark_price} (API zero-price glitch)",
+                        "INFO"
+                    )
+                    continue
+                # ─────────────────────────────────────────────
 
                 print(f"[SL/TP] {symbol} | PnL: {upnl:.2f} USDT ({pnl_pct:.1f}%)")
                 db.set_param("unrealized_pnl", str(upnl))
@@ -120,28 +236,37 @@ def check_sl_tp():
                 # --- STOP LOSS HIT ---
                 if pnl_pct <= -sl_pct:
                     log_terminal(f"🚨 STOP LOSS HIT: {pnl_pct:.1f}% | Exiting {symbol}...", "ALERT")
-                    send_telegram_msg(f"🔴 STOP LOSS TRIGGERED: {symbol} | Loss: {pnl_pct:.1f}%")
+                    send_telegram_msg(
+                        f"🔴 STOP LOSS TRIGGERED\n"
+                        f"Symbol : {symbol}\n"
+                        f"Loss   : {pnl_pct:.1f}% (Limit: -{sl_pct}%)\n"
+                        f"Action : Market Exit NOW"
+                    )
                     delta_executor.square_off_crypto(target_pid=pid)
-                    return  # Janitor will handle next entry
+                    record_trade_action(f"SL hit {pnl_pct:.1f}%")
+                    return
 
                 # --- TAKE PROFIT HIT ---
                 if pnl_pct >= tp_pct:
                     log_terminal(f"💰 TAKE PROFIT HIT: {pnl_pct:.1f}% | Booking {symbol}...", "TRADE")
-                    send_telegram_msg(f"✅ TAKE PROFIT HIT: {symbol} | Profit: {pnl_pct:.1f}% 🎯")
-
-                    # 1. Exit the winning position
+                    send_telegram_msg(
+                        f"✅ TAKE PROFIT HIT\n"
+                        f"Symbol : {symbol}\n"
+                        f"Profit : {pnl_pct:.1f}% (Target: +{tp_pct}%)\n"
+                        f"Action : Booking & Re-entering"
+                    )
                     delta_executor.square_off_crypto(target_pid=pid)
                     time.sleep(2)
 
-                    # 2. AUTO-REINVEST: Immediately take same direction again
                     current_signal = db.get_param("signal_target", "WAIT")
                     if current_signal in ["BUY", "SELL"]:
                         log_terminal(f"♻️ AUTO-REINVEST: Re-entering {current_signal} after TP...", "TRADE")
-                        send_telegram_msg(f"♻️ AUTO-REINVEST: Taking fresh {current_signal} entry after TP!")
+                        send_telegram_msg(f"♻️ AUTO-REINVEST: Fresh {current_signal} entry after TP!")
                         time.sleep(1)
                         delta_executor.sync_delta_position()
-                        db.set_param("local_trade_active", "NO")  # Release lock for re-entry
+                        db.set_param("local_trade_active", "NO")
                         delta_executor.execute_crypto_trade("BTC", current_signal)
+                        record_trade_action(f"TP reinvest {current_signal}")
                     return
 
         except Exception as e:
@@ -150,6 +275,9 @@ def check_sl_tp():
 
 # ============================================================
 # MAIN EVALUATOR: Evaluates signal and places entries
+# STEP 6: DO NOTHING if position matches signal
+# STEP 7: Cooldown check before new entry
+# STEP 10: Reasoning-based alerts
 # ============================================================
 def run_crypto_sar():
     if db.get_param('crypto_algo_running', 'OFF') == 'OFF':
@@ -160,7 +288,6 @@ def run_crypto_sar():
     signal    = logic.get_supertrend_signal(asset, timeframe=timeframe)
     db.set_param("signal_target", signal)
 
-    # Sync with exchange
     delta_executor.sync_delta_position()
     active_call = db.get_param("active_call_symbol", "NONE")
     active_put  = db.get_param("active_put_symbol",  "NONE")
@@ -176,15 +303,46 @@ def run_crypto_sar():
     else:
         db.set_param("crypto_active_symbol", "NONE")
 
-    # ---- CLEAN SLATE RULE: No trade before screen is EMPTY ----
+    # ── STEP 6: DO NOTHING if current position matches signal ──
+    if signal == "SELL" and active_put != "NONE":
+        log_terminal(f"✋ DO NOTHING (SAR): PUT {active_put} held, Signal=SELL — holding.", "INFO")
+        return
+
+    if signal == "BUY" and active_call != "NONE":
+        log_terminal(f"✋ DO NOTHING (SAR): CALL {active_call} held, Signal=BUY — holding.", "INFO")
+        return
+
+    # ── Fresh entry only if screen is empty ────────────────────
     if not active_any:
         if signal in ["BUY", "SELL"]:
-            log_terminal(f"🎯 SIGNAL DETECTED: {signal}. Taking fresh entry.", "TRADE")
+            # STEP 7: Cooldown check before fresh entry
+            if is_in_cooldown():
+                return
+
+            # STEP 10: Reasoning-based alert
+            ltp    = get_btc_ltp()
+            anchor = float(db.get_param("manual_anchor", "0") or "0")
+            option_type = "PUT (SELL)" if signal == "SELL" else "CALL (BUY)"
+            if anchor > 0:
+                direction_reason = f"LTP {ltp:,.0f} {'<' if signal=='SELL' else '>'} Anchor {anchor:,.0f}"
+            else:
+                direction_reason = f"Supertrend signal = {signal}"
+
+            log_terminal(f"🎯 FRESH ENTRY: {option_type} | Reason: {direction_reason}", "TRADE")
+            send_telegram_msg(
+                f"🚀 ENTRY SIGNAL\n"
+                f"Action : SELL {option_type}\n"
+                f"Reason : {direction_reason}\n"
+                f"LTP    : {ltp:,.0f}\n"
+                f"TF     : {timeframe}"
+            )
+
             num_strikes = int(db.get_param('num_strikes', '1'))
             for i in range(num_strikes):
                 delta_executor.execute_crypto_trade(asset, signal)
                 if num_strikes > 1:
                     time.sleep(1)
+            record_trade_action(f"Fresh entry {signal}")
     else:
         crypto_roller.check_and_roll_crypto()
 
@@ -198,57 +356,94 @@ def main():
         lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         lock_socket.bind(('127.0.0.1', 47200))
     except socket.error:
-        print("🚨 BOT ALREADY RUNNING. EXITING.")
+        print("BOT ALREADY RUNNING. EXITING.")
         sys.exit(1)
 
     print("=" * 60)
-    print("     🚀 BHARAT ALGOVERSE v3.0 - FULL AUTO 🚀     ")
+    print("  BHARAT ALGOVERSE v5.2 - FULL AUTO")
     print("=" * 60)
-    print("  ✅ Clean Slate Enforcement: ON")
-    print("  ✅ Stop Loss @ 40%: ON")
-    print("  ✅ Take Profit @ 100% + Auto-Reinvest: ON")
-    print("  ✅ Multi-Strike Support: ON")
-    print("  ✅ Multi-Timeframe Support: ON")
+    print("  Step 0  : OTM Strike Enforcement   : ON")
+    print("  Step 6  : DO NOTHING Rule           : ON")
+    print("  Step 7  : 5-Min Global Cooldown     : ON")
+    print("  Step 8  : True Flip Condition       : ON")
+    print("  Step 9  : 5-Min Heartbeat           : ON")
+    print("  Step 10 : Reasoning-Based Alerts    : ON")
+    print("  Step 11 : SL Spike Guard            : ON")
     print("=" * 60)
 
     if not db.load_secrets():
         sys.exit(1)
 
     # --- DEFAULT PARAMS (only if not already set by dashboard) ---
-    if not db.get_param('st_period'):        db.set_param('st_period', '10')
-    if not db.get_param('st_multiplier'):    db.set_param('st_multiplier', '1.5')
+    if not db.get_param('st_period'):         db.set_param('st_period', '10')
+    if not db.get_param('st_multiplier'):     db.set_param('st_multiplier', '1.5')
     if not db.get_param('crypto_trade_size'): db.set_param('crypto_trade_size', '1')
-    if not db.get_param('sl_percent'):       db.set_param('sl_percent', '40')
-    if not db.get_param('tp_percent'):       db.set_param('tp_percent', '100')
-    if not db.get_param('candle_timeframe'): db.set_param('candle_timeframe', '5m')
-    if not db.get_param('num_strikes'):      db.set_param('num_strikes', '1')
+    if not db.get_param('sl_percent'):        db.set_param('sl_percent', '40')
+    if not db.get_param('tp_percent'):        db.set_param('tp_percent', '100')
+    if not db.get_param('candle_timeframe'):  db.set_param('candle_timeframe', '5m')
+    if not db.get_param('num_strikes'):       db.set_param('num_strikes', '1')
+    if not db.get_param('strike_offset'):     db.set_param('strike_offset', '1')
+    if not db.get_param('manual_anchor'):     db.set_param('manual_anchor', '0')
 
-    log_terminal("Bharat AlgoVerse v3.0 - Full Auto Mode Started.", "START")
-    send_telegram_msg("🚀 BHARAT ALGOVERSE v3.0 STARTED\n✅ SL: 40% | TP: 100% + Auto-Reinvest | Clean Slate: ON")
+    sl_pct = db.get_param('sl_percent', '40')
+    tp_pct = db.get_param('tp_percent', '100')
+    tf     = db.get_param('candle_timeframe', '5m')
 
-    print("🛡️ SCANNING FOR ORPHANED TRADES...")
+    log_terminal("Bharat AlgoVerse v5.2 - Full Auto Mode Started.", "START")
+    send_telegram_msg(
+        f"BHARAT ALGOVERSE v5.2 STARTED\n"
+        f"SL: {sl_pct}% | TP: {tp_pct}%\n"
+        f"Timeframe: {tf}\n"
+        f"DO NOTHING Rule: ON\n"
+        f"5-Min Cooldown: ON\n"
+        f"OTM Enforcement: ON"
+    )
+
+    print("SCANNING FOR ORPHANED TRADES...")
     delta_executor.reconcile_bracket_orders()
 
+    # STEP 9: 5-minute heartbeat (was 30 minutes before)
     last_pulse = 0
 
     while True:
         try:
             run_janitor()
             run_crypto_sar()
-            check_sl_tp()            # <-- In-code SL/TP monitor
+            check_sl_tp()
             delta_executor.reconcile_bracket_orders()
 
-            # Telegram Pulse every 30 mins
-            if time.time() - last_pulse > 1800:
-                timeframe = db.get_param("candle_timeframe", "5m")
-                signal    = logic.get_supertrend_signal("BTC", timeframe=timeframe)
-                active    = db.get_param('crypto_active_symbol', 'NONE')
-                upnl      = db.get_param('unrealized_pnl', '0')
+            # ── STEP 9: Telegram Heartbeat every 5 minutes ──────
+            if time.time() - last_pulse > 300:
+                timeframe  = db.get_param("candle_timeframe", "5m")
+                signal_now = logic.get_supertrend_signal("BTC", timeframe=timeframe)
+                active     = db.get_param('crypto_active_symbol', 'NONE')
+                upnl_val   = db.get_param('unrealized_pnl', '0')
+                anchor_val = db.get_param('manual_anchor', '0')
+                ltp_now    = get_btc_ltp()
+
+                # Build position status
+                call_sym = db.get_param('active_call_symbol', 'NONE')
+                put_sym  = db.get_param('active_put_symbol', 'NONE')
+                if call_sym != 'NONE':
+                    pos_str = f"CALL: {call_sym}"
+                elif put_sym != 'NONE':
+                    pos_str = f"PUT: {put_sym}"
+                else:
+                    pos_str = "NONE (Flat)"
+
+                # Cooldown status
+                cooldown_remaining = max(0, int(300 - (time.time() - _last_trade_time)))
+                cd_str = f"{cooldown_remaining}s" if cooldown_remaining > 0 else "Ready"
+
                 send_telegram_msg(
-                    f"✅ BHARAT PULSE v3.0\n"
-                    f"Signal: {signal} | Active: {active}\n"
-                    f"Live PnL: ${upnl}\n"
-                    f"Timeframe: {timeframe}"
+                    f"BHARAT PULSE v5.2\n"
+                    f"LTP     : {ltp_now:,.0f}\n"
+                    f"Anchor  : {float(anchor_val):,.0f} {'(Manual)' if float(anchor_val) > 0 else '(Auto)'}\n"
+                    f"Signal  : {signal_now}\n"
+                    f"Position: {pos_str}\n"
+                    f"PnL     : ${upnl_val}\n"
+                    f"TF      : {timeframe}\n"
+                    f"Cooldown: {cd_str}"
                 )
                 last_pulse = time.time()
 
@@ -267,7 +462,7 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print("=" * 60)
-        print("🚨 CRITICAL SYSTEM CRASH 🚨")
+        print("CRITICAL SYSTEM CRASH")
         traceback.print_exc()
         print("=" * 60)
         sys.exit(1)
