@@ -110,27 +110,36 @@ def fetch_open_positions():
 def get_current_position():
     try:
         positions = fetch_open_positions()
-        if not positions: return None
+        if not positions: 
+            return None
+            
+        # Filter only open, non-zero size positions
+        active = []
         for pos in positions:
             size = abs(float(pos.get('size', 0) or 0))
-            if size == 0: continue
-            
-            sym = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
-            # ✅ LEGO FIX: Correct Delta Parsing
-            if sym.startswith('P-') or '-P-' in sym:
-                return {
-                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
-                    'type': 'PUT',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': int(size)
-                }
-            elif sym.startswith('C-') or '-C-' in sym:
-                return {
-                    'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
-                    'type': 'CALL',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': int(size)
-                }
+            if size > 0:
+                active.append(pos)
+                
+        if not active: return None
+        
+        # Take the most recent/first active option position
+        pos = active[0]
+        sym = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
+        
+        if sym.startswith('P-') or '-P-' in sym:
+            return {
+                'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                'type': 'PUT',
+                'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                'quantity': int(abs(float(pos.get('size', 0) or 0)))
+            }
+        elif sym.startswith('C-') or '-C-' in sym:
+            return {
+                'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
+                'type': 'CALL',
+                'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                'quantity': int(abs(float(pos.get('size', 0) or 0)))
+            }
     except Exception as e:
         print(f"[Pos Error] {e}")
     return None

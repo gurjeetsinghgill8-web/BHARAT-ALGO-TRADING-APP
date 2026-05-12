@@ -194,16 +194,17 @@ def run_crypto_sar():
 # ============================================================
 def main_loop():
     import time
-    log_terminal("🧱 BRICK #1: Vision & Anti-Spam Loaded", "START")
+    log_terminal("🧱 BRICK #1.1: Cooldown & Sync Patch Loaded", "START")
     
     last_heartbeat = 0
     last_action_time = 0
-    COOLDOWN_SEC = 300  # 5-Minute Global Lock
+    COOLDOWN_SEC = 300  # STRICT 5-MIN LOCK
     
     while True:
         try:
-            # 📡 VISION HEARTBEAT (Every 5 Mins)
             now = time.time()
+            
+            # 📡 VISION HEARTBEAT (Every 5 Mins)
             if now - last_heartbeat >= 300:
                 ltp = delta_executor.fetch_btc_spot()
                 pos = delta_executor.get_current_position()
@@ -215,11 +216,12 @@ def main_loop():
                 send_telegram_msg(pulse)
                 last_heartbeat = now
 
-            # 🛑 COOLDOWN CHECK
+            # 🛑 STRICT COOLDOWN CHECK (BEFORE ANY JANITOR/TRADE ACTION)
             if now - last_action_time < COOLDOWN_SEC:
                 time.sleep(10)
                 continue
 
+            # 🧹 CLEAN SLATE SYNC
             run_janitor()
             pos = delta_executor.get_current_position()
             ltp = delta_executor.fetch_btc_spot()
@@ -229,40 +231,36 @@ def main_loop():
             if float(anchor or 0) > 0 and float(ltp or 0) > 0:
                 anchor = float(anchor)
                 ltp = float(ltp)
-                # 🧱 HOLD RULE (Do Nothing if Trend Matches Position)
                 if pos:
+                    # 🛡️ HOLD RULE
                     holding_put = pos['type'] == 'PUT'
                     holding_call = pos['type'] == 'CALL'
                     is_bullish = ltp > anchor
                     is_bearish = ltp < anchor
 
                     if (holding_put and is_bullish) or (holding_call and is_bearish):
-                        log_terminal(f"🛡️ HOLD: Position {pos['type']} matches trend. Waiting.", "DEBUG")
-                        time.sleep(10)
-                        continue
+                        log_terminal(f"🛡️ HOLD: {pos['type']} matches trend. Cooling down...", "DEBUG")
                     elif (holding_put and is_bearish) or (holding_call and is_bullish):
-                        # ✅ FLIP LOGIC
-                        log_terminal(f"🔄 FLIP DETECTED: Closing {pos['type']}...", "ALERT")
+                        log_terminal(f"🔄 FLIP: Closing {pos['type']} & waiting 5 min...", "ALERT")
                         delta_executor.square_off_crypto()
-                        last_action_time = time.time()
-                        time.sleep(3)
-                        run_janitor()  # Sync before new entry
+                        last_action_time = time.time()  # LOCK COOLDOWN
+                        time.sleep(5)
                         continue
-
-                # 🚀 ENTRY LOGIC (Only if no position)
                 else:
+                    # 🚀 ENTRY LOGIC
                     if ltp > anchor:
-                        log_terminal("📈 BULLISH: Entering SELL PUT", "TRADE")
+                        log_terminal("📈 BULLISH: SELL PUT ENTRY", "TRADE")
                         delta_executor.execute_crypto_trade("SELL_PUT")
                     elif ltp < anchor:
-                        log_terminal("📉 BEARISH: Entering SELL CALL", "TRADE")
+                        log_terminal("📉 BEARISH: SELL CALL ENTRY", "TRADE")
                         delta_executor.execute_crypto_trade("SELL_CALL")
-                    last_action_time = time.time()
+                    last_action_time = time.time()  # LOCK COOLDOWN
 
             check_sl_tp()
         except Exception as e:
             log_terminal(f"❌ Loop Error: {str(e)}", "ERROR")
             import traceback; log_terminal(traceback.format_exc(), "ERROR")
+            last_action_time = time.time()  # SAFETY COOLDOWN ON ERROR
         time.sleep(10)
 
 def main():
