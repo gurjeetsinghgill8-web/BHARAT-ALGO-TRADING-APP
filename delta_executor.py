@@ -15,6 +15,9 @@ def allowed_gai_family():
     return socket.AF_INET
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
+# 🔧 MANUAL BALANCE OVERRIDE (Set to >0 to bypass API balance check)
+MIN_BALANCE_OVERRIDE = 0.0  # Set to 20.0 if API fails but you know balance is $20+
+
 def fetch_delta_candles(symbol, resolution, limit=100):
     """Fetches OHLC data directly from Delta Exchange (Fixed with Start/End)."""
     # Try different symbol variations
@@ -667,8 +670,10 @@ def execute_crypto_trade(direction=None):
         log_terminal("🔍 [EXEC] Step 1/6: Fetching balance...", "DEBUG")
         balance = fetch_wallet_balance()
         log_terminal(f"💰 [EXEC] Balance: ${balance:.2f}", "DEBUG")
-        if balance < 1.0:
-            msg = f"⚠️ BLOCKED: Balance ${balance:.2f} < $1.0"
+        
+        effective_balance = balance if MIN_BALANCE_OVERRIDE <= 0 else MIN_BALANCE_OVERRIDE
+        if effective_balance < 1.0:
+            msg = f"⚠️ BLOCKED: Balance ${effective_balance:.2f} < $1.0"
             log_terminal(msg, "WARN"); send_telegram_msg(msg); return
 
         # Step 2: Mode check
@@ -723,16 +728,47 @@ def execute_crypto_trade(direction=None):
     log_terminal("✅ [EXEC] Function completed", "DEBUG")
 
 def fetch_wallet_balance():
-    """Fetches USDT balance from Delta Exchange."""
+    """Fetch USDT balance from Delta Exchange with FULL DEBUG LOGGING"""
     try:
         path = "/v2/wallet/balances"
-        query = "?asset_symbol=USDT"
-        headers = get_delta_auth_headers("GET", path, query_string=query)
-        resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
-        if resp.status_code == 200:
-            res = resp.json().get('result', [])
-            for r in res:
-                if r.get('asset_symbol') == 'USDT':
-                    return float(r.get('available_balance', 0))
-    except: pass
-    return 0.0
+        headers = get_delta_auth_headers("GET", path)
+        resp = requests.get(f"https://api.india.delta.exchange{path}", headers=headers, timeout=10)
+        
+        # LOG RAW RESPONSE FOR DEBUGGING
+        log_terminal(f"💰 [BALANCE API] Status: {resp.status_code}", "DEBUG")
+        log_terminal(f"💰 [BALANCE API] Raw Response: {resp.text[:500]}", "DEBUG")
+        
+        if resp.status_code != 200:
+            log_terminal(f"⚠️ [BALANCE] API Error: {resp.status_code} - {resp.text}", "WARN")
+            return 0.0
+            
+        result = resp.json().get('result', [])
+        if not result:
+            log_terminal("⚠️ [BALANCE] Empty result array from API", "WARN")
+            return 0.0
+            
+        # Search for USDT/USD balance with multi-key fallback
+        for item in result:
+            asset = str(item.get('asset_symbol') or item.get('currency') or '').upper()
+            if asset in ['USDT', 'USD', 'USDⓈ']:
+                # Try multiple possible balance keys (Delta API varies)
+                balance = (
+                    float(item.get('balance') or item.get('available_balance') or item.get('total_balance') or item.get('available') or 0)
+                )
+                log_terminal(f"✅ [BALANCE] Found {asset}: ${balance:.2f}", "DEBUG")
+                return balance
+                
+        log_terminal("⚠️ [BALANCE] USDT/USD not found in response", "WARN")
+        return 0.0
+        
+    except requests.exceptions.Timeout:
+        log_terminal("❌ [BALANCE] API Timeout", "ERROR")
+        return 0.0
+    except requests.exceptions.ConnectionError:
+        log_terminal("❌ [BALANCE] Connection Failed", "ERROR")
+        return 0.0
+    except Exception as e:
+        import traceback
+        log_terminal(f"❌ [BALANCE] Crash: {str(e)}", "ERROR")
+        log_terminal(traceback.format_exc(), "ERROR")
+        return 0.0
