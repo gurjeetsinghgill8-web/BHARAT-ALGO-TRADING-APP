@@ -633,11 +633,11 @@ def square_off_crypto(target_pid=None):
                     log_terminal(f"⚠️ Size=0 for {pid}, skipping.", "WARN")
                     continue
 
-                # CRITICAL FIX: size must be INTEGER for Delta Exchange
+                # OPTION SELLING EXIT: We sold the option, so to close we BUY BACK
                 payload_dict = {
                     "product_id": int(pid),
-                    "size": int(size),  # Must be int, not float!
-                    "side": "sell",
+                    "size": int(size),
+                    "side": "buy",          # BUY BACK to close our short position
                     "order_type": "market_order",
                     "reduce_only": True
                 }
@@ -817,7 +817,7 @@ def execute_crypto_trade(asset, direction):
             payload_dict = {
                 "product_id": int(pid),
                 "size": int(qty),
-                "side": "buy",
+                "side": "sell",         # OPTION SELLING: We SELL the premium (receive credit)
                 "order_type": "market_order"
             }
             import json
@@ -827,9 +827,9 @@ def execute_crypto_trade(asset, direction):
             resp = requests.post(url, headers=headers, data=payload, timeout=10)
             
             if resp.status_code in [200, 201]:
-                log_terminal(f"LIVE ENTRY SUCCESS: {symbol} @ {price}", "TRADE")
-                print(f"[DEBUG] Entry Payload: {payload}")
-                print(f"[DEBUG] Entry Response: {resp.text}")
+                log_terminal(f"SELL ENTRY SUCCESS (Option Selling): {symbol} @ premium {price}", "TRADE")
+                print(f"[DEBUG] Sell Entry Payload: {payload}")
+                print(f"[DEBUG] Sell Entry Response: {resp.text}")
                 # ACTIVATE LOCAL LOCK IMMEDIATELY
                 db.set_param("local_trade_active", "YES")
                 

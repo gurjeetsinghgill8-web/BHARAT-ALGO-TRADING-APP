@@ -190,6 +190,8 @@ call_active = db.get_param('active_call_symbol', 'NONE')
 put_active  = db.get_param('active_put_symbol',  'NONE')
 signal      = db.get_param('signal_target', 'WAIT')
 active_sym  = db.get_param('crypto_active_symbol', 'NONE')
+ltp_live    = float(db.get_param('current_ltp', '0') or '0')
+anchor_live = float(db.get_param('manual_anchor', '0') or db.get_param('auto_anchor', '0') or '0')
 
 try:
     upnl = float(db.get_param('unrealized_pnl', '0') or '0')
@@ -299,18 +301,27 @@ if page == "🚀 Crypto (BTC)":
     st.markdown("# 🚀 BHARAT ALGOVERSE v5.2")
 
     # Live PnL banner
-    upnl_col = "#10b981" if upnl >= 0 else "#f43f5e"
+    upnl_col    = "#10b981" if upnl >= 0 else "#f43f5e"
+    ltp_col     = "#f59e0b"
+    anchor_col  = "#6366f1"
+    above_below = "ABOVE" if ltp_live > anchor_live else "BELOW"
+    trade_hint  = "SELL PUT" if ltp_live > anchor_live else "SELL CALL"
+    hint_col    = "#10b981" if ltp_live > anchor_live else "#f43f5e"
+
     st.markdown(f"""
 <div class="pulse-bar">
   <div>
-    <div class="kpi-label">LIVE UNREALIZED PnL</div>
-    <span style="font-size:2rem;font-weight:700;color:{upnl_col};">${upnl:+.2f}</span>
-    <span style="color:#475569;margin-left:8px;">≈ ₹{upnl*85:+,.0f}</span>
+    <div class="kpi-label">MAGIC LINE STATUS</div>
+    <span style="font-size:1.4rem;font-weight:700;color:{ltp_col};">LTP: {ltp_live:,.0f}</span>
+    <span style="color:#475569;margin-left:10px;">|</span>
+    <span style="font-size:1.4rem;font-weight:700;color:{anchor_col};margin-left:10px;">Anchor: {anchor_live:,.0f}</span>
+    <br>
+    <span style="font-size:0.9rem;font-weight:600;color:{hint_col};">LTP is {above_below} line → {trade_hint}</span>
   </div>
   <div style="text-align:right;">
     <div class="kpi-label">ACTIVE POSITION</div>
     <div style="color:#e2e8f0;font-weight:600;font-size:0.95rem;">{active_sym}</div>
-    <div class="kpi-label" style="margin-top:4px;">SL: {db.get_param('sl_percent','40')}% | TP: {db.get_param('tp_percent','100')}%</div>
+    <div class="kpi-label" style="margin-top:4px;">SL: {db.get_param('sl_percent','25')}% premium rise | Live PnL: ${upnl:+.2f}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -424,160 +435,137 @@ if page == "🚀 Crypto (BTC)":
             st.info("⚠️ delta_executor not available — chart disabled.")
 
     with col_lab:
-        st.markdown('<div class="section-title">⚙️ Strategy Lab (V5.2 Live Settings)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">⚙️ Strategy Lab (V5.2 Magic Line)</div>', unsafe_allow_html=True)
 
         _mode_val    = db.get_param('trade_mode', 'LIVE') or 'LIVE'
-        _tf_val      = db.get_param('candle_timeframe', '5m') or '5m'
         _lots_val    = int(db.get_param('crypto_trade_size', '1') or '1')
         _strikes_val = int(db.get_param('num_strikes', '1') or '1')
         _expiry_val  = int(db.get_param('expiry_threshold', '3') or '3')
-        _sl_val      = int(float(db.get_param('sl_percent', '40') or '40'))
+        _sl_val      = int(float(db.get_param('sl_percent', '25') or '25'))
         _tp_val      = int(float(db.get_param('tp_percent', '100') or '100'))
         _offset_raw  = int(db.get_param('strike_offset', '1') or '1')
-        _period_val  = int(float(db.get_param('st_period', '10') or '10'))
-        _mult_val    = float(db.get_param('st_multiplier', '1.5') or '1.5')
         _capital_val = int(float(db.get_param('estimated_capital', '240') or '240'))
         _anchor_val  = float(db.get_param('manual_anchor', '0') or '0')
-
-        _tf_options  = ["5m", "15m", "1h", "4h"]
-        _tf_idx      = _tf_options.index(_tf_val) if _tf_val in _tf_options else 0
+        _auto_anchor = float(db.get_param('auto_anchor', '0') or '0')
 
         # STEP 1: Strike Selector (ITM/ATM/OTM full range)
         _strike_opts = [
-            "ITM-5 (Deep Inside)",
-            "ITM-4", "ITM-3", "ITM-2", "ITM-1",
+            "ITM-5 (Deep Inside)", "ITM-4", "ITM-3", "ITM-2", "ITM-1",
             "ATM (At The Money)",
-            "OTM+1 (1 step out)",
-            "OTM+2 (2 steps out)",
-            "OTM+3 (3 steps out)",
-            "OTM+4",
-            "OTM+5 (Deep Outside)",
+            "OTM+1 (1 step out)", "OTM+2 (2 steps out)",
+            "OTM+3 (3 steps out)", "OTM+4", "OTM+5 (Deep Outside)",
         ]
-        # Map offset integer to dropdown index: ITM-5=-5 ... ATM=0 ... OTM+5=5
-        # Stored as: -5 to +5. Default=1 (OTM+1)
-        _offset_to_idx = {-5: 0, -4: 1, -3: 2, -2: 3, -1: 4, 0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 10}
-        _idx_to_offset = {v: k for k, v in _offset_to_idx.items()}
-        _strike_idx = _offset_to_idx.get(_offset_raw, 6)  # Default OTM+1
+        _offset_to_idx = {-5:0,-4:1,-3:2,-2:3,-1:4,0:5,1:6,2:7,3:8,4:9,5:10}
+        _idx_to_offset = {v:k for k,v in _offset_to_idx.items()}
+        _strike_idx = _offset_to_idx.get(_offset_raw, 6)
 
-        s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
-                              index=1 if _mode_val == "LIVE" else 0, key="s_mode")
-        s_tf   = st.selectbox("Candle Timeframe", _tf_options, index=_tf_idx, key="s_tf")
+        # ── MAGIC LINE ANCHOR SECTION ─────────────────────
+        st.markdown('<div class="section-title">🎯 Magic Line (Anchor Price)</div>', unsafe_allow_html=True)
 
-        # STEP 2: Lot Size as number_input (NOT slider)
-        s_lots = st.number_input(
-            "Lot Size (Contracts) — Type exact value",
-            min_value=1, max_value=100,
-            value=max(1, _lots_val),
-            step=1, key="s_lots",
-            help="Type exact number of contracts. Min=1, Max=100."
-        )
-
-        s_strikes = st.number_input("Number of Strike Prices", 1, 5, max(1, _strikes_val),
-                                     step=1, key="s_strikes",
-                                     help="Take multiple strikes at once")
-        s_expiry  = st.number_input("Min Expiry Days", 0, 14, max(0, _expiry_val),
-                                     step=1, key="s_expiry")
-
-        # STEP 3: Dynamic SL% + TP% inputs
-        col_sl, col_tp = st.columns(2)
-        with col_sl:
-            s_sl = st.number_input(
-                "Stop Loss %", 5, 90,
-                max(5, min(90, _sl_val)),
-                step=5, key="s_sl",
-                help="15% = Conservative | 25% = Standard | 40% = Wide"
-            )
-        with col_tp:
-            s_tp = st.number_input(
-                "Take Profit %", 20, 500,
-                max(20, min(500, _tp_val)),
-                step=10, key="s_tp"
-            )
-
-        # STEP 1 (continued): Strike Dropdown
-        s_strike_sel = st.selectbox(
-            "Strike Selection (OTM Recommended for Selling)",
-            _strike_opts,
-            index=_strike_idx,
-            key="s_offset",
-            help="OTM+1 or OTM+2 is safest for option selling. NEVER use ITM."
-        )
-
-        # STEP 4: Manual Anchor Override
-        st.markdown('<div class="section-title">🎯 Manual Anchor Override</div>', unsafe_allow_html=True)
-        s_anchor = st.number_input(
-            "Manual Magical Line (0 = use Auto 6PM anchor)",
-            min_value=0.0,
-            max_value=200000.0,
-            value=_anchor_val,
-            step=100.0,
-            key="s_anchor",
-            help="Set your own anchor price. Bot will ignore auto-anchor and use this. Set 0 to use auto."
-        )
-        if s_anchor > 0:
+        if _auto_anchor > 0:
             st.markdown(
-                f'<span class="badge badge-amber">🎯 MANUAL ANCHOR: {s_anchor:,.0f}</span>',
+                f'<span class="badge badge-blue">🤖 Auto Anchor (6PM): {_auto_anchor:,.0f}</span>',
                 unsafe_allow_html=True
             )
         else:
             st.markdown(
-                '<span class="badge badge-blue">🤖 AUTO ANCHOR: 6:00 PM Candle Close</span>',
+                '<span class="badge badge-amber">⏳ Auto Anchor: Not set yet (set at 6 PM IST)</span>',
                 unsafe_allow_html=True
             )
 
-        s_period  = st.number_input("Supertrend Period", 5, 30, max(5, min(30, _period_val)), key="s_period")
-        s_mult    = st.number_input("Supertrend Multiplier", 0.5, 5.0,
-                                    max(0.5, min(5.0, _mult_val)), step=0.1, key="s_mult")
+        s_anchor = st.number_input(
+            "Manual Override (0 = use Auto 6PM anchor)",
+            min_value=0.0, max_value=200000.0,
+            value=_anchor_val, step=100.0, key="s_anchor",
+            help="Your custom anchor price. Set 0 to use the auto 6 PM anchor."
+        )
+        if s_anchor > 0:
+            st.markdown(
+                f'<span class="badge badge-amber">🎯 MANUAL ANCHOR ACTIVE: {s_anchor:,.0f}</span>',
+                unsafe_allow_html=True
+            )
+            st.caption("Logic: LTP > " + f"{s_anchor:,.0f} → SELL PUT | LTP < {s_anchor:,.0f} → SELL CALL")
+
+        st.divider()
+
+        s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
+                              index=1 if _mode_val == "LIVE" else 0, key="s_mode")
+
+        # STEP 2: Lot Size as number_input
+        s_lots = st.number_input(
+            "Lot Size (Contracts)",
+            min_value=1, max_value=100,
+            value=max(1, _lots_val), step=1, key="s_lots"
+        )
+        s_strikes = st.number_input("Number of Strike Prices", 1, 5,
+                                     max(1, _strikes_val), step=1, key="s_strikes")
+        s_expiry  = st.number_input("Min Expiry Days", 0, 14,
+                                     max(0, _expiry_val), step=1, key="s_expiry")
+
+        # STEP 3: SL/TP
+        col_sl, col_tp = st.columns(2)
+        with col_sl:
+            s_sl = st.number_input(
+                "Stop Loss % (Premium Rise)", 5, 90,
+                max(5, min(90, _sl_val)), step=5, key="s_sl",
+                help="SL fires if option premium rises this % above your sell price"
+            )
+        with col_tp:
+            s_tp = st.number_input(
+                "Take Profit % (Premium Drop)", 10, 100,
+                max(10, min(100, _tp_val)), step=5, key="s_tp",
+                help="TP fires if option premium drops this % (theta decay profit)"
+            )
+
+        # Strike Selection
+        s_strike_sel = st.selectbox(
+            "Strike Selection (OTM = Safer for Selling)",
+            _strike_opts, index=_strike_idx, key="s_offset",
+            help="OTM+1 or OTM+2 recommended. NEVER ITM for selling."
+        )
+
         s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
                                     max(50, min(10000, _capital_val)), step=10, key="s_cap")
 
-        # STEP 5: Risk Calculator (Real-time)
-        st.markdown('<div class="section-title">📊 Risk Calculator (Live Preview)</div>', unsafe_allow_html=True)
-        _current_premium = float(db.get_param('unrealized_pnl', '0') or '0')
-        # Approximate premium from active symbol or use a notional estimate
-        _est_premium_per_lot = 1800.0  # rough BTC option premium estimate
-        _max_loss_usdt  = _est_premium_per_lot * s_lots * (s_sl / 100)
-        _max_profit_usdt = _est_premium_per_lot * s_lots * (s_tp / 100)
-        _max_loss_inr   = _max_loss_usdt * 85
-        _max_profit_inr = _max_profit_usdt * 85
+        # STEP 5: Risk Calculator
+        st.markdown('<div class="section-title">📊 Risk Calculator</div>', unsafe_allow_html=True)
+        _est_prem = 1800.0
+        _max_loss_usdt   = _est_prem * s_lots * (s_sl / 100)
+        _max_profit_usdt = _est_prem * s_lots * (s_tp / 100)
         rc1, rc2 = st.columns(2)
         with rc1:
             st.markdown(f"""
 <div class="kpi-card">
-  <div class="kpi-label">🔴 Max Loss (if SL hits)</div>
+  <div class="kpi-label">🔴 Max Loss (SL at +{s_sl}%)</div>
   <div class="kpi-value red">${_max_loss_usdt:,.0f}</div>
-  <div class="kpi-sub">≈ ₹{_max_loss_inr:,.0f}</div>
+  <div class="kpi-sub">≈ ₹{_max_loss_usdt*85:,.0f}</div>
 </div>""", unsafe_allow_html=True)
         with rc2:
             st.markdown(f"""
 <div class="kpi-card">
-  <div class="kpi-label">🟢 Max Profit (if TP hits)</div>
+  <div class="kpi-label">🟢 Max Profit (TP at -{s_tp}%)</div>
   <div class="kpi-value green">${_max_profit_usdt:,.0f}</div>
-  <div class="kpi-sub">≈ ₹{_max_profit_inr:,.0f}</div>
+  <div class="kpi-sub">≈ ₹{_max_profit_usdt*85:,.0f}</div>
 </div>""", unsafe_allow_html=True)
-
-        st.caption("*Risk preview uses ~1800 USDT as estimated option premium per lot")
+        st.caption("*Estimate based on ~1800 USDT premium per lot")
 
         if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
             try:
                 new_offset = _idx_to_offset.get(_strike_opts.index(s_strike_sel), 1)
                 db.set_param('trade_mode',        s_mode)
-                db.set_param('candle_timeframe',  s_tf)
                 db.set_param('crypto_trade_size', str(s_lots))
                 db.set_param('num_strikes',       str(s_strikes))
                 db.set_param('expiry_threshold',  str(s_expiry))
                 db.set_param('sl_percent',        str(s_sl))
                 db.set_param('tp_percent',        str(s_tp))
                 db.set_param('strike_offset',     str(new_offset))
-                db.set_param('st_period',         str(s_period))
-                db.set_param('st_multiplier',     str(s_mult))
                 db.set_param('estimated_capital', str(s_capital))
                 db.set_param('manual_anchor',     str(s_anchor))
-                st.success("✅ All settings saved! Bot will use these on next cycle.")
+                st.success("✅ All settings saved!")
                 if s_anchor > 0:
-                    st.info(f"🎯 Manual Anchor set to {s_anchor:,.0f} — Auto-anchor disabled.")
+                    st.info(f"🎯 Manual Anchor = {s_anchor:,.0f} (Auto-anchor disabled)")
                 else:
-                    st.info("🤖 Auto Anchor active — 6:00 PM candle close will be used.")
+                    st.info("🤖 Auto Anchor active — will be set at 6:00 PM IST daily")
             except Exception as e:
                 st.error(f"Save failed: {e}")
 
