@@ -33,213 +33,74 @@ def fetch_premium(symbol):
     except: pass
     return 0
 
-def get_current_position():
+def fetch_open_positions():
+    """Helper to fetch raw positions from Delta API."""
     try:
-        # Fetch open positions from Delta API
         path = "/v2/positions"
         query = "?underlying_asset_symbol=BTC"
         headers = get_delta_auth_headers("GET", path, query_string=query)
         resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
-        
-        if resp.status_code != 200:
-            return None
-            
-        positions = resp.json().get('result', [])
+        if resp.status_code == 200:
+            return resp.json().get('result', [])
+    except: pass
+    return []
+
+def get_current_position():
+    try:
+        positions = fetch_open_positions()
         if not positions: return None
-        
         for pos in positions:
-            # Filter for active positions (size != 0)
-            size = float(pos.get('size', 0))
-            if abs(size) == 0: continue
+            size = abs(float(pos.get('size', 0)))
+            if size == 0: continue
             
-            # Extract symbol from product or top-level (Delta API returns product object)
-            symbol = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
-            
-            if symbol.startswith('P-') or '-P-' in symbol:
+            sym = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
+            if sym.startswith('P-') or '-P-' in sym:
                 return {
                     'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
                     'type': 'PUT',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': int(abs(size))
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0)
                 }
-            elif symbol.startswith('C-') or '-C-' in symbol:
+            elif sym.startswith('C-') or '-C-' in sym:
                 return {
                     'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
                     'type': 'CALL',
-                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                    'quantity': int(abs(size))
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0)
                 }
     except Exception as e:
-        print(f"[Position Fetch Error] {e}")
+        print(f"[Pos Error] {e}")
     return None
-def fetch_delta_candles(symbol, resolution="1m", limit=100):
-    symbol_variants = [f"{symbol}USDT", f"{symbol}USD", f"MARK:{symbol}USDT"]
-    end_ts = int(time.time())
-    start_ts = end_ts - (int(limit) * 300) 
-    
-    for sym in symbol_variants:
-        try:
-            url = "https://api.india.delta.exchange/v2/history/candles"
-            params = {"symbol": sym, "resolution": resolution, "start": start_ts, "end": end_ts}
-            resp = requests.get(url, params=params, timeout=5)
-            if resp.status_code == 200:
-                df = pd.DataFrame(resp.json().get('result', []))
-                if not df.empty:
-                    df = df.rename(columns={'o':'open','h':'high','l':'low','c':'close','t':'time'})
-                    return df.sort_values('time'), ""
-        except: continue
-    return pd.DataFrame(), "Fetch Failed"
 
-def get_delta_auth_headers(method, path, payload="", query_string=""):
-    api_key = db.get_param('delta_api_key', '')
-    api_secret = db.get_param('delta_api_secret', '')
-    timestamp = str(int(time.time()))
-    signature_data = method + timestamp + path + query_string + payload
-    signature = hmac.new(api_secret.encode('utf-8'), signature_data.encode('utf-8'), hashlib.sha256).hexdigest()
-    return {
-        'api-key': api_key, 'signature': signature, 'timestamp': timestamp,
-        'Content-Type': 'application/json', 'User-Agent': 'BHARAT-ALGO-V3'
-    }
-
-def fetch_delta_option_chain(asset="BTC"):
-    products = {}
+def fetch_wallet_balance():
+    """Fetch USDT balance for safety check."""
     try:
-        url = f"https://api.india.delta.exchange/v2/products?underlying_asset_symbols={asset}&contract_types=call_options,put_options"
-        resp = requests.get(url, timeout=10)
+        path = "/v2/wallet/balances"
+        headers = get_delta_auth_headers("GET", path)
+        resp = requests.get(f"https://api.india.delta.exchange{path}", headers=headers, timeout=10)
         if resp.status_code == 200:
-            for p in resp.json().get('result', []):
-                products[p['id']] = {'expiry': p.get('settlement_time', '').split('T')[0], 'strike': float(p.get('strike_price', 0)), 'symbol': p.get('symbol', ''), 'type': p.get('contract_type', '')}
+            for b in resp.json().get('result', []):
+                if b.get('asset_symbol') == 'USDT':
+                    return float(b.get('balance', 0))
     except: pass
-    
-    chain = []
-    try:
-        url = f"https://api.india.delta.exchange/v2/tickers?underlying_asset_symbols={asset}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            for ticker in resp.json().get('result', []):
-                pid = ticker.get('product_id')
-                if pid in products:
-                    ticker.update(products[pid])
-                    chain.append(ticker)
-    except: pass
-    return chain
-
-def find_atm_strike(spot_price, options_list, direction, strike_selection="ATM"):
-    options_list = sorted(options_list, key=lambda x: float(x.get('strike', 0)))
-    if not options_list: return None
-    
-    atm_idx = 0
-    min_diff = float('inf')
-    for i, opt in enumerate(options_list):
-        diff = abs(opt['strike'] - spot_price)
-        if diff < min_diff:
-            min_diff = diff
-            atm_idx = i
-            
-    # Offset logic for Option Selling
-    offset = 0
-    if direction == "SELL": # We are selling a CALL
-        if "ITM 4" in strike_selection: offset = -4
-        elif "ITM 3" in strike_selection: offset = -3
-        elif "ITM 2" in strike_selection: offset = -2
-        elif "ITM 1" in strike_selection: offset = -1
-        elif "OTM 1" in strike_selection: offset = 1
-        elif "OTM 2" in strike_selection: offset = 2
-    else: # We are selling a PUT (Signal BUY)
-        if "ITM 4" in strike_selection: offset = 4
-        elif "ITM 3" in strike_selection: offset = 3
-        elif "ITM 2" in strike_selection: offset = 2
-        elif "ITM 1" in strike_selection: offset = 1
-        elif "OTM 1" in strike_selection: offset = -1
-        elif "OTM 2" in strike_selection: offset = -2
-    
-    target_idx = max(0, min(len(options_list) - 1, atm_idx + offset))
-    return options_list[target_idx]
-
-def find_gill_crypto_option(asset, direction):
-    chain = fetch_delta_option_chain(asset)
-    if not chain: return None
-    
-    # SELL signal -> Bearish -> Sell Call | BUY signal -> Bullish -> Sell Put
-    target_type = 'call_options' if direction == "SELL" else 'put_options'
-    all_typed = [o for o in chain if o.get('type') == target_type and float(o.get('mark_price', 0)) > 0]
-    
-    today = datetime.date.today().strftime('%Y-%m-%d')
-    valid_expiries = sorted(list(set([o['expiry'] for o in all_typed if o['expiry'] > today])))
-    if not valid_expiries: return None
-    
-    best_expiry = valid_expiries[0]
-    near_options = [o for o in all_typed if o.get('expiry') == best_expiry]
-    
-    spot_price = 0
-    for o in near_options:
-        spot_price = float(o.get('spot_price') or 0)
-        if spot_price > 0: break
-    if spot_price == 0: return None
-    
-    strike_sel = db.get_param('strike_selection', 'ATM')
-    best_opt = find_atm_strike(spot_price, near_options, direction, strike_selection=strike_sel)
-    return best_opt
-
-def sync_delta_position():
-    try:
-        path = "/v2/positions"
-        query = "?underlying_asset_symbol=BTC"
-        headers = get_delta_auth_headers("GET", path, query_string=query)
-        resp = requests.get(f"https://api.india.delta.exchange{path}{query}", headers=headers, timeout=10)
-        if resp.status_code == 200:
-            positions = resp.json().get('result', [])
-            db.set_param("active_call_symbol", "NONE")
-            db.set_param("active_put_symbol", "NONE")
-            db.set_param("crypto_active_symbol", "NONE")
-            for p in positions:
-                size = abs(float(p.get('size', 0)))
-                if size > 0:
-                    sym = p.get('product', {}).get('symbol') or ""
-                    pid = str(p.get('product_id', ''))
-                    if "-P-" in sym.upper():
-                        db.set_param("active_put_symbol", sym); db.set_param("active_put_pid", pid)
-                    else:
-                        db.set_param("active_call_symbol", sym); db.set_param("active_call_pid", pid)
-                    db.set_param("crypto_active_symbol", sym)
-            return True
-    except: pass
-    return False
-
-def square_off_crypto(target_pid=None):
-    sync_delta_position()
-    pids = [target_pid] if target_pid else [db.get_param("active_call_pid"), db.get_param("active_put_pid")]
-    for pid in pids:
-        if not pid or pid == "NONE": continue
-        try:
-            path = "/v2/positions"
-            headers = get_delta_auth_headers("GET", path, query_string="?underlying_asset_symbol=BTC")
-            r = requests.get(f"https://api.india.delta.exchange{path}?underlying_asset_symbol=BTC", headers=headers, timeout=10)
-            if r.status_code == 200:
-                for p in r.json().get('result', []):
-                    if str(p.get('product_id')) == str(pid):
-                        size = float(p.get('size', 0))
-                        if size == 0: continue
-                        side = "buy" if size < 0 else "sell"
-                        payload = json.dumps({"product_id": int(pid), "size": int(abs(size)), "side": side, "order_type": "market_order", "reduce_only": True})
-                        requests.post("https://api.india.delta.exchange/v2/orders", headers=get_delta_auth_headers("POST", "/v2/orders", payload=payload), data=payload, timeout=10)
-        except: pass
-    db.set_param("active_call_symbol", "NONE"); db.set_param("active_put_symbol", "NONE"); db.set_param("crypto_active_symbol", "NONE")
+    return 0.0
 
 def execute_crypto_trade(asset, direction=None):
-    # Support for V3-style calls: execute_crypto_trade("SELL_CALL")
     if direction is None:
         direction = asset
         asset = "BTC"
     
+    # Balance Safety Guard
+    balance = fetch_wallet_balance()
+    if balance < 5.0: # $5 minimum safety
+        log_terminal(f"⚠️ SAFETY BLOCK: Balance too low (${balance:.2f}). Deposit USDT.", "ERROR")
+        return
+
     # Map V3 strings to V4 directions
-    if direction == "SELL_CALL": direction = "SELL"
-    elif direction == "SELL_PUT": direction = "BUY"
+    trade_dir = "SELL" if direction == "SELL_CALL" else "BUY"
 
     if db.get_param('trade_mode', 'PAPER') != "LIVE":
         log_terminal(f"PAPER ENTRY: {direction}", "TRADE"); return
     
-    opt = find_gill_crypto_option(asset, direction)
+    opt = find_gill_crypto_option(asset, trade_dir)
     if not opt:
         log_terminal(f"ERROR: No {direction} option found.", "ERROR"); return
     
@@ -251,6 +112,11 @@ def execute_crypto_trade(asset, direction=None):
         log_terminal(f"✅ LIVE SELL: {opt['symbol']}", "TRADE")
         sync_delta_position()
     else:
-        log_terminal(f"❌ FAILED: {resp.text}", "ERROR")
+        err_msg = resp.text.lower()
+        if "insufficientmargin" in err_msg:
+            log_terminal("🚨 MARGIN ERROR: Insufficient funds. Cooling down for 10 mins.", "ERROR")
+            config.set_param("last_trade_time", str(time.time() + 600)) # Force 10 min wait
+        else:
+            log_terminal(f"❌ FAILED: {resp.text}", "ERROR")
 
 def reconcile_bracket_orders(): pass
