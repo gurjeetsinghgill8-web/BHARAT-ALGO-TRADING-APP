@@ -113,35 +113,40 @@ def get_current_position():
         if not positions: 
             return None
             
-        # Filter only open, non-zero size positions
-        active = []
         for pos in positions:
-            size = abs(float(pos.get('size', 0) or 0))
-            if size > 0:
-                active.append(pos)
-                
-        if not active: return None
-        
-        # Take the most recent/first active option position
-        pos = active[0]
-        sym = str(pos.get('symbol') or pos.get('product', {}).get('symbol', '')).upper()
-        
-        if sym.startswith('P-') or '-P-' in sym:
-            return {
-                'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
-                'type': 'PUT',
-                'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                'quantity': int(abs(float(pos.get('size', 0) or 0)))
-            }
-        elif sym.startswith('C-') or '-C-' in sym:
-            return {
-                'symbol': pos.get('symbol') or pos.get('product', {}).get('symbol'),
-                'type': 'CALL',
-                'entry_price': float(pos.get('avg_entry_price', 0) or 0),
-                'quantity': int(abs(float(pos.get('size', 0) or 0)))
-            }
+            # Extract size safely
+            size_raw = pos.get('size') or pos.get('quantity') or pos.get('total_position') or 0
+            size = abs(float(size_raw))
+            if size <= 0.001: 
+                continue
+            
+            # Robust Symbol Extraction (Delta API varies)
+            raw_sym = (
+                pos.get('symbol') or 
+                pos.get('instrument_name') or 
+                pos.get('product', {}).get('symbol') or 
+                pos.get('underlying_symbol', '') + "-" + str(pos.get('strike_price', ''))
+            )
+            if not raw_sym: 
+                continue
+            sym = str(raw_sym).upper().strip()
+            
+            if sym.startswith('P-') or '-P-' in sym:
+                return {
+                    'symbol': raw_sym,
+                    'type': 'PUT',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': size
+                }
+            elif sym.startswith('C-') or '-C-' in sym:
+                return {
+                    'symbol': raw_sym,
+                    'type': 'CALL',
+                    'entry_price': float(pos.get('avg_entry_price', 0) or 0),
+                    'quantity': size
+                }
     except Exception as e:
-        print(f"[Pos Error] {e}")
+        print(f"[Pos Parse Error] {e}")
     return None
 
 def fetch_btc_spot():
@@ -650,7 +655,7 @@ def square_off_crypto(target_pid=None):
                 payload_dict = {
                     "product_id": int(pid),
                     "size": int(size),  # Must be int, not float!
-                    "side": "sell",
+                    "side": "buy",      # RESERVED FOR SQUARE-OFF (Buy to Close)
                     "order_type": "market_order",
                     "reduce_only": True
                 }
@@ -780,7 +785,7 @@ def execute_crypto_trade(asset, direction=None):
             payload_dict = {
                 "product_id": int(pid),
                 "size": int(qty),
-                "side": "buy",
+                "side": "sell",      # EXPLICIT SELL FOR ENTRIES (Sell to Open)
                 "order_type": "market_order"
             }
             import json

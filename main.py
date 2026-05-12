@@ -23,33 +23,16 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 # JANITOR: Syncs reality, enforces Clean Slate, guards quantity
 # ============================================================
 def run_janitor():
-    # 1. Sync Reality from Exchange
-    delta_executor.sync_delta_position()
-
-    # 2. Get Current Signal (from configured timeframe)
-    asset = "BTC"
-    timeframe = db.get_param("candle_timeframe", "5m")
-    signal = logic.get_supertrend_signal(asset, timeframe=timeframe)
-    db.set_param("signal_target", signal)
-
-    # 3. Get DB Reality
-    call_active = db.get_param("active_call_symbol", "NONE") != "NONE"
-    put_active  = db.get_param("active_put_symbol",  "NONE") != "NONE"
-
-    # CASE: SIGNAL SELL BUT CALL OPEN
-    if signal == "SELL" and call_active:
-        log_terminal("JANITOR FLIP: Closing CALL to prepare for SELL entry.", "ALERT")
-        delta_executor.square_off_crypto()
-
-    # CASE: SIGNAL BUY BUT PUT OPEN
-    elif signal == "BUY" and put_active:
-        log_terminal("JANITOR FLIP: Closing PUT to prepare for BUY entry.", "ALERT")
-        delta_executor.square_off_crypto()
-
-    # CASE: SIGNAL WAIT BUT ANYTHING OPEN
-    elif signal == "WAIT" and (call_active or put_active):
-        log_terminal("JANITOR: Signal is WAIT. Closing all trades.", "ALERT")
-        delta_executor.square_off_crypto()
+    """LEGACY JANITOR - NOW STRICTLY READ-ONLY SYNC"""
+    try:
+        delta_executor.sync_delta_position()
+        asset = "BTC"
+        timeframe = db.get_param("candle_timeframe", "5m")
+        signal = logic.get_supertrend_signal(asset, timeframe=timeframe) if hasattr(logic, 'get_supertrend_signal') else "WAIT"
+        db.set_param("signal_target", signal)
+        # NO TRADES. NO FLIPS. ONLY SYNC.
+    except Exception as e:
+        log_terminal(f"⚠️ Janitor Sync Warning: {str(e)}", "ERROR")
 
     # QUANTITY GUARD: Prevent over-trading
     try:
@@ -194,7 +177,7 @@ def run_crypto_sar():
 # ============================================================
 def main_loop():
     import time
-    log_terminal("🧱 BRICK #1.1: Cooldown & Sync Patch Loaded", "START")
+    log_terminal("🧱 BRICK #1.3: Final Override | SELL-ONLY & Strict Cooldown ACTIVE", "START")
     
     last_heartbeat = 0
     last_action_time = 0
@@ -204,55 +187,55 @@ def main_loop():
         try:
             now = time.time()
             
-            # 📡 VISION HEARTBEAT (Every 5 Mins)
-            if now - last_heartbeat >= 300:
-                ltp = delta_executor.fetch_btc_spot()
-                pos = delta_executor.get_current_position()
-                anchor = db.get_param("manual_magical_line", 0)
-                if anchor == 0 or anchor == "0": anchor = db.get_param("magical_line", 0)
-                status = pos['type'] if pos else "NO ACTIVE TRADE"
-                pulse = f"💓 VISION PULSE\nLTP: ${ltp} | Anchor: ${anchor} | Position: {status}"
-                log_terminal(pulse, "INFO")
-                send_telegram_msg(pulse)
-                last_heartbeat = now
-
-            # 🛑 STRICT COOLDOWN CHECK (BEFORE ANY JANITOR/TRADE ACTION)
+            # 🛑 COOLDOWN CHECK (FIRST IN LOOP - NO EXCEPTIONS)
             if now - last_action_time < COOLDOWN_SEC:
                 time.sleep(10)
                 continue
 
-            # 🧹 CLEAN SLATE SYNC
+            # 📡 VISION HEARTBEAT
+            if now - last_heartbeat >= 300:
+                ltp = delta_executor.fetch_btc_spot()
+                pos = delta_executor.get_current_position()
+                manual_ml = db.get_param("manual_magical_line", 0)
+                auto_ml = db.get_param("magical_line", 0)
+                anchor = float(manual_ml) if float(manual_ml or 0) > 0 else float(auto_ml or 0)
+                status = pos['type'] if pos else "NO ACTIVE TRADE"
+                pulse = f"💓 VISION PULSE\n📊 LTP: ${ltp}\n🎯 Anchor: ${anchor}\n📦 Position: {status}"
+                log_terminal(pulse, "INFO")
+                send_telegram_msg(pulse)
+                last_heartbeat = now
+
+            # 🧹 LIGHTWEIGHT SYNC
             run_janitor()
             pos = delta_executor.get_current_position()
             ltp = delta_executor.fetch_btc_spot()
-            anchor = db.get_param("manual_magical_line", 0)
-            if anchor == 0 or anchor == "0": anchor = db.get_param("magical_line", 0)
+            manual_ml = db.get_param("manual_magical_line", 0)
+            auto_ml = db.get_param("magical_line", 0)
+            anchor = float(manual_ml) if float(manual_ml or 0) > 0 else float(auto_ml or 0)
 
-            if float(anchor or 0) > 0 and float(ltp or 0) > 0:
-                anchor = float(anchor)
+            if anchor > 0 and float(ltp or 0) > 0:
                 ltp = float(ltp)
                 if pos:
-                    # 🛡️ HOLD RULE
-                    holding_put = pos['type'] == 'PUT'
-                    holding_call = pos['type'] == 'CALL'
+                    holding_put = (pos['type'] == 'PUT')
+                    holding_call = (pos['type'] == 'CALL')
                     is_bullish = ltp > anchor
                     is_bearish = ltp < anchor
 
                     if (holding_put and is_bullish) or (holding_call and is_bearish):
-                        log_terminal(f"🛡️ HOLD: {pos['type']} matches trend. Cooling down...", "DEBUG")
+                        log_terminal(f"🛡️ HOLD: {pos['type']} matches trend. Cooling down...", "INFO")
                     elif (holding_put and is_bearish) or (holding_call and is_bullish):
-                        log_terminal(f"🔄 FLIP: Closing {pos['type']} & waiting 5 min...", "ALERT")
+                        log_terminal(f"🔄 FLIP: Closing {pos['type']} to switch direction...", "ALERT")
                         delta_executor.square_off_crypto()
                         last_action_time = time.time()  # LOCK COOLDOWN
                         time.sleep(5)
                         continue
                 else:
-                    # 🚀 ENTRY LOGIC
+                    # 🚀 ENTRY LOGIC (SELL ONLY)
                     if ltp > anchor:
-                        log_terminal("📈 BULLISH: SELL PUT ENTRY", "TRADE")
+                        log_terminal("📈 BULLISH: SELL PUT ENTRY TRIGGERED", "TRADE")
                         delta_executor.execute_crypto_trade("SELL_PUT")
                     elif ltp < anchor:
-                        log_terminal("📉 BEARISH: SELL CALL ENTRY", "TRADE")
+                        log_terminal("📉 BEARISH: SELL CALL ENTRY TRIGGERED", "TRADE")
                         delta_executor.execute_crypto_trade("SELL_CALL")
                     last_action_time = time.time()  # LOCK COOLDOWN
 
