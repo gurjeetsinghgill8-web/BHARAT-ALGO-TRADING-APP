@@ -661,25 +661,27 @@ def get_dynamic_quantity(option_price):
 
 def execute_crypto_trade(direction=None):
     try:
-        log_terminal(f"🔍 STEP 1/5: Trade request received -> {direction}", "DEBUG")
+        log_terminal(f"🔍 EXEC START: Requesting {direction}", "TRADE")
         
         balance = fetch_wallet_balance()
-        log_terminal(f"💰 STEP 2/5: Wallet balance fetched -> ${balance:.2f}", "DEBUG")
+        log_terminal(f"💰 BALANCE CHECK: ${balance:.2f}", "DEBUG")
         if balance < 1.0:
             log_terminal("⚠️ BLOCKED: Balance below $1.0 threshold", "WARN")
             return
             
         if db.get_param('trade_mode', 'PAPER') != "LIVE":
-            log_terminal("📝 PAPER MODE: Execution skipped", "INFO")
+            log_terminal("📝 PAPER MODE: Trade skipped", "INFO")
             return
             
-        log_terminal("🔍 STEP 3/5: Fetching option chain & strike...", "DEBUG")
+        log_terminal("📦 FETCHING OPTION CHAIN...", "DEBUG")
         opt = find_gill_crypto_option("BTC", direction)
         if not opt:
-            log_terminal("❌ BLOCKED: No valid option found for current DTE/Strike", "ERROR")
+            msg = "❌ TRADE FAILED: No valid option found for current DTE/Strike"
+            log_terminal(msg, "ERROR")
+            try: send_telegram_msg(msg)
+            except: pass
             return
-        log_terminal(f"🎯 STEP 4/5: Option selected -> {opt['symbol']} (PID: {opt['product_id']})", "DEBUG")
-        
+            
         payload = json.dumps({
             "product_id": int(opt['product_id']),
             "size": int(db.get_param('crypto_trade_size', '1')),
@@ -688,28 +690,40 @@ def execute_crypto_trade(direction=None):
         })
         headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
         
-        log_terminal("📡 STEP 5/5: Sending API request to Delta Exchange...", "DEBUG")
+        log_terminal("📡 SENDING ORDER TO DELTA API...", "DEBUG")
         resp = requests.post(
             "https://api.india.delta.exchange/v2/orders",
             headers=headers,
             data=payload,
-            timeout=15  # PREVENTS INFINITE HANG
+            timeout=10
         )
         
         if resp.status_code in [200, 201]:
             log_terminal(f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}", "TRADE")
             sync_delta_position()
         else:
-            log_terminal(f"❌ API REJECTED ({resp.status_code}): {resp.text}", "ERROR")
+            err_msg = f"❌ DELTA API REJECTED ({resp.status_code}): {resp.text}"
+            log_terminal(err_msg, "ERROR")
+            try: send_telegram_msg(err_msg)
+            except: pass
             
     except requests.exceptions.Timeout:
-        log_terminal("❌ NETWORK TIMEOUT: Delta API did not respond in 15s", "ERROR")
+        msg = "❌ NETWORK TIMEOUT: Delta API did not respond in 10s"
+        log_terminal(msg, "ERROR")
+        try: send_telegram_msg(msg)
+        except: pass
     except requests.exceptions.ConnectionError:
-        log_terminal("❌ CONNECTION FAILED: Check internet/VPS network or Delta API status", "ERROR")
+        msg = "❌ CONNECTION FAILED: Check VPS internet or Delta API status"
+        log_terminal(msg, "ERROR")
+        try: send_telegram_msg(msg)
+        except: pass
     except Exception as e:
         import traceback
-        log_terminal(f"❌ EXECUTION CRASH: {str(e)}", "ERROR")
+        msg = f"❌ EXECUTION CRASH: {str(e)}"
+        log_terminal(msg, "ERROR")
         log_terminal(traceback.format_exc(), "ERROR")
+        try: send_telegram_msg(msg)
+        except: pass
 
 def fetch_wallet_balance():
     """Fetches USDT balance from Delta Exchange."""
