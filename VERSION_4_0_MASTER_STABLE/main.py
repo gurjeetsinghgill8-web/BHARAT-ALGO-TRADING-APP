@@ -44,28 +44,40 @@ def is_in_cooldown():
 # STEP 9 — LTP FETCHER (for heartbeat + reasoning alerts)
 # ============================================================
 def get_btc_ltp():
-    """Fetches live BTC spot price from Delta Exchange."""
-    try:
-        urls = [
-            "https://api.india.delta.exchange/v2/tickers/BTCUSDT",
-            "https://api.india.delta.exchange/v2/tickers/BTCUSD",
-        ]
-        for url in urls:
-            resp = requests.get(url, timeout=5)
+    """
+    Fetches live BTC spot price from Delta Exchange.
+    Uses the SAME working approach as fetch_delta_option_chain in delta_executor.py
+    — proven to work on this VPS.
+    """
+    base_urls = [
+        "https://api.india.delta.exchange",
+        "https://api.delta.exchange",
+    ]
+    for base in base_urls:
+        try:
+            # Method 1: BTC options tickers — spot_price is always in these (PROVEN WORKING)
+            resp = requests.get(
+                f"{base}/v2/tickers?underlying_asset_symbols=BTC",
+                timeout=5
+            )
             if resp.status_code == 200:
-                result = resp.json().get("result", {})
-                price = float(result.get("spot_price") or result.get("mark_price") or 0)
-                if price > 0:
-                    return price
-        # Fallback: try tickers list
-        resp = requests.get("https://api.india.delta.exchange/v2/tickers?underlying_asset_symbol=BTC", timeout=5)
-        if resp.status_code == 200:
-            for t in resp.json().get("result", []):
-                sp = float(t.get("spot_price") or t.get("underlying_price") or 0)
-                if sp > 0:
-                    return sp
-    except Exception as e:
-        print(f"[LTP FETCH ERROR] {e}")
+                for t in resp.json().get("result", []):
+                    sp = float(t.get("spot_price") or t.get("underlying_price") or 0)
+                    if sp > 0:
+                        return sp
+
+            # Method 2: Direct perpetual ticker
+            for sym in ["BTCUSDT", "BTCUSD", "BTC_USDT"]:
+                resp2 = requests.get(f"{base}/v2/tickers/{sym}", timeout=5)
+                if resp2.status_code == 200:
+                    result = resp2.json().get("result", {})
+                    sp = float(result.get("spot_price") or result.get("mark_price") or
+                               result.get("last_price") or 0)
+                    if sp > 0:
+                        return sp
+        except Exception as e:
+            print(f"[LTP FETCH ERROR] {base}: {e}")
+            continue
     return 0.0
 
 # ============================================================
