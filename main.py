@@ -13,6 +13,22 @@ import traceback
 import json
 from utils import log_terminal, send_telegram_msg
 
+# 🔐 SINGLE-INSTANCE GUARD
+import os, sys, socket
+LOCK_FILE = "/tmp/bharat_algo.lock"
+def acquire_lock():
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            os.kill(old_pid, 0)  # Check if process exists
+            print(f"[GUARD] Another instance (PID {old_pid}) is running. Exiting."); sys.exit(0)
+        except (ProcessLookupError, ValueError):
+            os.remove(LOCK_FILE)  # Stale lock
+    with open(LOCK_FILE, 'w') as f: f.write(str(os.getpid()))
+    import atexit; atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
+acquire_lock()
+
 # --- FORCE IPv4 GLOBALLY ---
 import requests.packages.urllib3.util.connection as urllib3_cn
 def allowed_gai_family():

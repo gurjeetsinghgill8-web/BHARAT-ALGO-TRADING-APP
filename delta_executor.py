@@ -660,30 +660,32 @@ def get_dynamic_quantity(option_price):
     return manual_lots
 
 def execute_crypto_trade(direction=None):
+    import time, signal, traceback
+    log_terminal(f"🔍 [EXEC] START: {direction}", "TRADE")
     try:
-        log_terminal(f"🔍 EXEC START: {direction}", "TRADE")
-        
-        # Balance check (V4.0 style, lowered threshold)
+        # Step 1: Balance
+        log_terminal("🔍 [EXEC] Step 1/6: Fetching balance...", "DEBUG")
         balance = fetch_wallet_balance()
+        log_terminal(f"💰 [EXEC] Balance: ${balance:.2f}", "DEBUG")
         if balance < 1.0:
-            log_terminal(f"⚠️ BLOCKED: Balance ${balance:.2f} < $1.0", "WARN")
-            return
-            
-        # Paper/Live mode check
+            msg = f"⚠️ BLOCKED: Balance ${balance:.2f} < $1.0"
+            log_terminal(msg, "WARN"); send_telegram_msg(msg); return
+
+        # Step 2: Mode check
+        log_terminal("🔍 [EXEC] Step 2/6: Checking trade mode...", "DEBUG")
         if db.get_param('trade_mode', 'PAPER') != "LIVE":
-            log_terminal(f"📝 PAPER MODE: Skipping {direction}", "INFO")
-            return
-        
-        # Find option (V4.0 logic)
+            log_terminal("📝 [EXEC] PAPER MODE: Skipping", "INFO"); return
+
+        # Step 3: Find option
+        log_terminal("🔍 [EXEC] Step 3/6: Fetching option chain...", "DEBUG")
         opt = find_gill_crypto_option("BTC", direction)
         if not opt:
-            msg = f"❌ NO OPTION FOUND for {direction}"
-            log_terminal(msg, "ERROR")
-            try: send_telegram_msg(msg)
-            except: pass
-            return
-        
-        # Build order payload (V4.0 exact structure)
+            msg = f"❌ BLOCKED: No valid option found for {direction}"
+            log_terminal(msg, "ERROR"); send_telegram_msg(msg); return
+        log_terminal(f"🎯 [EXEC] Option: {opt['symbol']} (PID:{opt['product_id']})", "DEBUG")
+
+        # Step 4: Build payload
+        log_terminal("🔍 [EXEC] Step 4/6: Building order payload...", "DEBUG")
         payload = json.dumps({
             "product_id": int(opt['product_id']),
             "size": int(db.get_param('crypto_trade_size', '1')),
@@ -691,35 +693,34 @@ def execute_crypto_trade(direction=None):
             "order_type": "market_order"
         })
         headers = get_delta_auth_headers("POST", "/v2/orders", payload=payload)
-        
-        # Execute API call (V4.0 timeout + error handling)
-        resp = requests.post(
-            "https://api.india.delta.exchange/v2/orders",
-            headers=headers,
-            data=payload,
-            timeout=10
-        )
-        
+
+        # Step 5: API call with timeout
+        log_terminal("🔍 [EXEC] Step 5/6: Sending API request (10s timeout)...", "DEBUG")
+        resp = requests.post("https://api.india.delta.exchange/v2/orders", headers=headers, data=payload, timeout=10)
+
+        # Step 6: Handle response
+        log_terminal(f"🔍 [EXEC] Step 6/6: API response code: {resp.status_code}", "DEBUG")
         if resp.status_code in [200, 201]:
-            log_terminal(f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}", "TRADE")
-            sync_delta_position()
+            msg = f"✅ LIVE ENTRY SUCCESS: {opt['symbol']}"
+            log_terminal(msg, "TRADE"); send_telegram_msg(msg); sync_delta_position()
         else:
             err = resp.text.lower()
             if "insufficientmargin" in err:
                 msg = f"🚨 MARGIN ERROR: Need ~$10-$15. Balance: ${balance:.2f}"
             else:
                 msg = f"❌ API REJECTED ({resp.status_code}): {resp.text}"
-            log_terminal(msg, "ERROR")
-            try: send_telegram_msg(msg)
-            except: pass
-            
+            log_terminal(msg, "ERROR"); send_telegram_msg(msg)
+
+    except requests.exceptions.Timeout:
+        msg = "❌ NETWORK TIMEOUT: Delta API did not respond in 10s"
+        log_terminal(msg, "ERROR"); send_telegram_msg(msg)
+    except requests.exceptions.ConnectionError:
+        msg = "❌ CONNECTION FAILED: Check VPS internet or Delta API status"
+        log_terminal(msg, "ERROR"); send_telegram_msg(msg)
     except Exception as e:
-        import traceback
         msg = f"❌ EXEC CRASH: {str(e)}"
-        log_terminal(msg, "ERROR")
-        log_terminal(traceback.format_exc(), "ERROR")
-        try: send_telegram_msg(msg)
-        except: pass
+        log_terminal(msg, "ERROR"); log_terminal(traceback.format_exc(), "ERROR"); send_telegram_msg(msg)
+    log_terminal("✅ [EXEC] Function completed", "DEBUG")
 
 def fetch_wallet_balance():
     """Fetches USDT balance from Delta Exchange."""
