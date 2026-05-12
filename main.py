@@ -334,11 +334,74 @@ def main():
             check_sl_tp()
             delta_executor.reconcile_bracket_orders()
 
+            # ── ZOMBIE LOCK DETECTOR ──────────────────────────────
+            # If exchange has 0 positions but DB thinks trade is active
+            # → clear the zombie lock so engine can re-enter
+            try:
+                lock_active = db.get_param("local_trade_active", "NO")
+                call_sym_chk = db.get_param("active_call_symbol", "NONE")
+                put_sym_chk  = db.get_param("active_put_symbol", "NONE")
+                if lock_active == "YES" or call_sym_chk != "NONE" or put_sym_chk != "NONE":
+                    # Verify against exchange
+                    real_count = 0
+                    for asset in ["BTC", "ETH"]:
+                        q = f"?underlying_asset_symbol={asset}"
+                        r = requests.get(
+                            f"https://api.india.delta.exchange/v2/positions{q}",
+                            headers=delta_executor.get_delta_auth_headers("GET", "/v2/positions", query_string=q),
+                            timeout=5
+                        )
+                        if r.status_code == 200:
+                            real_count += sum(1 for p in r.json().get('result', []) if abs(float(p.get('size', 0))) > 0)
+                    if real_count == 0:
+                        log_terminal("🧹 ZOMBIE CLEARED: Exchange=0 positions, DB reset.", "ALERT")
+                        db.set_param("local_trade_active", "NO")
+                        db.set_param("active_call_symbol", "NONE")
+                        db.set_param("active_put_symbol",  "NONE")
+                        db.set_param("crypto_active_symbol", "NONE")
+                        db.set_param("unrealized_pnl", "0")
+                        send_telegram_msg(
+                            "🧹 ZOMBIE LOCK CLEARED\n"
+                            "Exchange: 0 positions\n"
+                            "DB reset: Clean slate\n"
+                            "Engine will re-enter on next cycle."
+                        )
+            except Exception as ze:
+                print(f"[ZOMBIE CHECK] {ze}")
+
+            # ── DASHBOARD SETTINGS WATCHER ────────────────────────
+            # When Dr. Saab saves settings on dashboard → notify Telegram
+            try:
+                saved_at = db.get_param("settings_updated_at", "0") or "0"
+                last_notified = db.get_param("settings_notified_at", "0") or "0"
+                if saved_at != "0" and saved_at != last_notified:
+                    anchor_d  = float(db.get_param("manual_anchor", "0") or "0")
+                    lots_d    = db.get_param("crypto_trade_size", "1")
+                    sl_d      = db.get_param("sl_percent", "25")
+                    tp_d      = db.get_param("tp_percent", "100")
+                    expiry_d  = db.get_param("expiry_threshold", "1")
+                    offset_d  = db.get_param("strike_offset", "1")
+                    anchor_txt = f"{anchor_d:,.0f} (MANUAL)" if anchor_d > 0 else "AUTO (6PM)"
+                    send_telegram_msg(
+                        f"⚙️ DASHBOARD SETTINGS SAVED\n"
+                        f"Anchor    : {anchor_txt}\n"
+                        f"Lots      : {lots_d}\n"
+                        f"SL        : {sl_d}%\n"
+                        f"TP        : {tp_d}%\n"
+                        f"Expiry min: {expiry_d} days\n"
+                        f"OTM Level : +{offset_d}"
+                    )
+                    db.set_param("settings_notified_at", saved_at)
+            except Exception as se:
+                print(f"[SETTINGS WATCH] {se}")
+
             # 5-min Telegram heartbeat
             if time.time() - last_pulse > 300:
                 ltp_now    = get_btc_ltp()
                 anchor_now, anchor_type = get_magical_line()
-                signal_now = "BUY" if ltp_now > anchor_now else "SELL"
+                # CORRECT: SELL if LTP>anchor (sell PUT) | BUY if LTP<anchor (sell CALL)
+                signal_now = "SELL" if ltp_now > anchor_now else "BUY"
+                signal_label = "SELL PUT" if signal_now == "SELL" else "SELL CALL"
                 active     = db.get_param('crypto_active_symbol', 'NONE')
                 upnl_val   = db.get_param('unrealized_pnl', '0')
                 call_sym   = db.get_param('active_call_symbol', 'NONE')
@@ -365,7 +428,7 @@ def main():
                     f"BHARAT PULSE v5.2\n"
                     f"LTP     : {ltp_now:,.0f}\n"
                     f"Anchor  : {anchor_now:,.0f} ({anchor_type})\n"
-                    f"Signal  : {signal_now}\n"
+                    f"Signal  : {signal_label}\n"
                     f"Position: {pos_str}\n"
                     f"PnL     : ${upnl_val}\n"
                     f"Cooldown: {cd_str}\n"
@@ -373,7 +436,7 @@ def main():
                 )
                 last_pulse = time.time()
 
-            time.sleep(30)  # Sunday stable used 30s sleep
+            time.sleep(30)
 
         except KeyboardInterrupt:
             break

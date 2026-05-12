@@ -561,7 +561,10 @@ if page == "🚀 Crypto (BTC)":
                 db.set_param('strike_offset',     str(new_offset))
                 db.set_param('estimated_capital', str(s_capital))
                 db.set_param('manual_anchor',     str(s_anchor))
-                st.success("✅ All settings saved!")
+                # ⚡ SETTINGS WATCHER: Engine will pick this up in 30s and send Telegram
+                import time as _t
+                db.set_param('settings_updated_at', str(int(_t.time())))
+                st.success("✅ All settings saved! Telegram notification in ~30 seconds.")
                 if s_anchor > 0:
                     st.info(f"🎯 Manual Anchor = {s_anchor:,.0f} (Auto-anchor disabled)")
                 else:
