@@ -216,95 +216,125 @@ def find_atm_strike(spot_price, options_list, direction, offset=0):
 
 def find_gill_crypto_option(asset, direction):
     from main import send_telegram_msg
-    log_crypto(f"Scanning {direction} options for {asset} (Gill Supertrend Rule)...")
+    log_crypto(f"Scanning {direction} options for {asset}...")
     chain = fetch_delta_option_chain(asset)
     if not chain:
         log_crypto("Chain is empty!")
         return None
-    
-    target_type = 'call_options' if direction == "BUY" else 'put_options'
-    
-    # 1. Filter for type and liquidity
-    all_typed_options = [o for o in chain if o.get('contract_type') == target_type and float(o.get('mark_price', 0)) > 0]
-    
-    if not all_typed_options:
-        log_crypto(f"No liquid {target_type} found at all.")
+
+    # ── STEP 1: EXPIRY SELECTION ──────────────────────────────────────
+    selected_expiry = db.get_param('selected_expiry', '') or ''
+    today = datetime.date.today()
+    today_str = today.strftime('%Y-%m-%d')
+
+    all_future_expiries = sorted(set(
+        o['expiry_date'] for o in chain
+        if o.get('expiry_date', '') > today_str and float(o.get('mark_price', 0)) > 0
+    ))
+
+    if not all_future_expiries:
+        log_crypto("No future expiries found!")
         return None
 
-    # 2. Expiry Rule: Pick NEAREST available expiry (1-2 day options)
-    # User wants short expiry (next day / 2 days), NOT long expiry
-    today = datetime.date.today()
-    threshold = int(db.get_param('expiry_threshold', '1'))  # Default: 1 day min
-    min_expiry_dt = today + datetime.timedelta(days=threshold)
-    min_expiry_str = min_expiry_dt.strftime('%Y-%m-%d')
-    
-    valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] >= min_expiry_str])))
-    
-    if not valid_expiries:
-        log_crypto(f"No expiries found after {min_expiry_str}! Falling back to nearest available.")
-        valid_expiries = sorted(list(set([o['expiry_date'] for o in all_typed_options if o['expiry_date'] > today.strftime('%Y-%m-%d')])))
-    
-    if not valid_expiries:
-        log_crypto("No valid future expiries found!")
-        return None
-        
-    best_expiry = valid_expiries[0]  # NEAREST expiry always
-    log_crypto(f"Selected Expiry: {best_expiry} (Nearest Rule — {threshold}d min)")
-    
-    # 3. Filter for options with that specific expiry
-    near_options = [o for o in all_typed_options if o.get('expiry_date') == best_expiry]
-    
-    # 4. Get Spot Price
-    spot_price = 0
-    for o in near_options:
-        spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
-        if spot_price > 0: break
-    
-    if spot_price == 0:
-        log_crypto("Could not determine spot price.")
-        return None
-    
-    # 5. Strike Selection (STEP 0 — OTM ENFORCEMENT)
-    # offset=0 → BLOCKED (auto-upgraded to OTM-1 by find_atm_strike)
-    # offset=1 → 1-strike OTM (default safe minimum)
-    # offset=2 → 2-strikes OTM (more conservative)
-    offset = int(db.get_param('strike_offset', '1'))  # Default: OTM-1
-    best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
+    if selected_expiry and selected_expiry in all_future_expiries:
+        best_expiry = selected_expiry
+        log_crypto(f"📅 User-selected expiry: {best_expiry}")
+    else:
+        best_expiry = all_future_expiries[0]
+        log_crypto(f"📅 Nearest expiry: {best_expiry}")
+
+    # ── STEP 2: MANUAL STRIKE OVERRIDE (SIDE-SAFE, full-chain search) ─
+    manual_strike = float(db.get_param('manual_strike_price', '0') or '0')
+    manual_side   = db.get_param('manual_strike_side', 'AUTO') or 'AUTO'
+
+    if manual_strike > 0:
+        if manual_side == 'PUT':
+            ctype, slabel = 'put_options', 'PUT'
+        elif manual_side == 'CALL':
+            ctype, slabel = 'call_options', 'CALL'
+        else:
+            ctype  = 'put_options' if direction == 'SELL' else 'call_options'
+            slabel = 'PUT(auto)' if direction == 'SELL' else 'CALL(auto)'
+
+        full_pool = [o for o in chain if o.get('contract_type') == ctype
+                     and o.get('expiry_date') == best_expiry
+                     and float(o.get('mark_price', 0)) > 0]
+
+        exact = [o for o in full_pool if abs(float(o.get('strike_price', 0)) - manual_strike) < 1.0]
+        if exact:
+            best_opt = exact[0]
+            log_crypto(f"✏️ MANUAL: SELL {slabel} @ {manual_strike:,.0f} → {best_opt.get('symbol','?')}")
+            send_telegram_msg(
+                f"✏️ MANUAL STRIKE MODE\nSide: {slabel}\nStrike: {manual_strike:,.0f}\n"
+                f"Symbol: {best_opt.get('symbol','?')}\nPremium: {float(best_opt.get('mark_price',0)):.2f}\nExpiry: {best_expiry}"
+            )
+        elif full_pool:
+            full_pool.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - manual_strike))
+            best_opt = full_pool[0]
+            log_crypto(f"⚠️ Manual strike {manual_strike:,.0f} not found. Using nearest {slabel}.")
+            send_telegram_msg(f"⚠️ Strike {manual_strike:,.0f} not found. Nearest {slabel} fallback used.")
+        else:
+            log_crypto(f"No {slabel} options for expiry {best_expiry}!")
+            return None
+
+    else:
+        # ── STEP 3: AUTO OTM MODE ─────────────────────────────────────
+        target_type = 'call_options' if direction == "BUY" else 'put_options'
+        near_options = [o for o in chain if o.get('contract_type') == target_type
+                        and o.get('expiry_date') == best_expiry
+                        and float(o.get('mark_price', 0)) > 0]
+
+        if not near_options:
+            log_crypto(f"No {target_type} for expiry {best_expiry}!")
+            return None
+
+        spot_price = 0
+        for o in near_options:
+            spot_price = float(o.get('spot_price') or o.get('underlying_price') or 0)
+            if spot_price > 0: break
+
+        if spot_price == 0:
+            log_crypto("Spot price unavailable.")
+            return None
+
+        offset   = int(db.get_param('strike_offset', '1'))
+        best_opt = find_atm_strike(spot_price, near_options, direction, offset=offset)
 
     if not best_opt: return None
 
-    selected_strike = float(best_opt['strike_price'])
+    selected_strike  = float(best_opt['strike_price'])
     selected_premium = float(best_opt['mark_price'])
-    option_type = "PUT" if direction == "SELL" else "CALL"
+    # Derive option_type from actual contract, NOT from direction signal (fixes CALL/PUT label bug)
+    option_type = "PUT" if best_opt.get('contract_type') == 'put_options' else "CALL"
+    spot_ref = float(best_opt.get('spot_price') or best_opt.get('underlying_price') or 0)
     otm_status = "OTM" if (
-        (direction == "SELL" and selected_strike < spot_price) or
-        (direction == "BUY"  and selected_strike > spot_price)
+        (option_type == "PUT"  and selected_strike < spot_ref) or
+        (option_type == "CALL" and selected_strike > spot_ref)
     ) else "ATM/ITM"
+    offset_used = int(db.get_param('strike_offset', '1'))
 
-    # Log the strike selection diagnostic
     log_crypto(
-        f"STRIKE SELECTED: {best_opt['symbol']} | "
-        f"Type: {option_type} | Strike: {selected_strike} | "
-        f"Spot: {spot_price} | Status: {otm_status} | "
-        f"Premium: {selected_premium} | Offset: {offset}"
+        f"STRIKE: {best_opt['symbol']} | {option_type} | "
+        f"Strike:{selected_strike:,.0f} | Spot:{spot_ref:,.0f} | "
+        f"{otm_status} | Premium:{selected_premium}"
     )
     send_telegram_msg(
         f"🎯 STRIKE SCANNER\n"
         f"Option  : {option_type} ({otm_status})\n"
         f"Symbol  : {best_opt['symbol']}\n"
-        f"Strike  : {selected_strike:,.0f} (Spot: {spot_price:,.0f})\n"
+        f"Strike  : {selected_strike:,.0f} (Spot: {spot_ref:,.0f})\n"
         f"Premium : {selected_premium}\n"
-        f"Expiry  : {best_opt['expiry_date']}\n"
-        f"OTM Lvl : {offset}"
+        f"Expiry  : {best_opt.get('expiry_date','?')}"
     )
 
     return (
         best_opt['symbol'],
         selected_premium,
         selected_strike,
-        best_opt['expiry_date'],
+        best_opt.get('expiry_date', ''),
         best_opt['product_id']
     )
+
 
 def sync_delta_position():
     """Syncs local DB with actual Delta Exchange positions. Tracks CALL and PUT separately."""
@@ -729,6 +759,29 @@ def get_dynamic_quantity(option_price):
     manual_lots = int(db.get_param('crypto_trade_size', '1'))
     return manual_lots
 
+def set_leverage_on_delta(product_id, leverage=25):
+    """
+    Sets leverage for a specific product on Delta Exchange.
+    Must be called before placing a new order.
+    Uses POST /v2/products/{product_id}/set_leverage
+    """
+    try:
+        path = f"/v2/products/{product_id}/set_leverage"
+        url  = f"https://api.india.delta.exchange{path}"
+        payload_dict = {"leverage": str(leverage)}
+        payload = json.dumps(payload_dict)
+        headers = get_delta_auth_headers("POST", path, payload=payload)
+        resp = requests.post(url, headers=headers, data=payload, timeout=10)
+        if resp.status_code in [200, 201]:
+            log_crypto(f"\u26a1 Leverage SET: {leverage}x for product_id={product_id}")
+            return True
+        else:
+            log_crypto(f"\u26a0\ufe0f Leverage SET FAILED: {resp.status_code} - {resp.text[:100]}")
+            return False
+    except Exception as e:
+        log_crypto(f"\u26a0\ufe0f Leverage exception: {e}")
+        return False
+
 def execute_crypto_trade(asset, direction):
     """
     Executes a trade based on signal.
@@ -820,6 +873,10 @@ def execute_crypto_trade(asset, direction):
     # 4. Execute Entry
     if mode == "LIVE":
         try:
+            # ⚡ STEP 4a: Set Leverage BEFORE placing order
+            leverage = int(db.get_param('trading_leverage', '25') or '25')
+            set_leverage_on_delta(pid, leverage=leverage)
+
             url = "https://api.india.delta.exchange/v2/orders"
             payload_dict = {
                 "product_id": int(pid),

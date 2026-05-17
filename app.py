@@ -444,18 +444,36 @@ if page == "🚀 Crypto (BTC)":
         _sl_val      = int(float(db.get_param('sl_percent', '25') or '25'))
         _tp_val      = int(float(db.get_param('tp_percent', '100') or '100'))
         _offset_raw  = int(db.get_param('strike_offset', '1') or '1')
-        _capital_val = int(float(db.get_param('estimated_capital', '240') or '240'))
-        _anchor_val  = float(db.get_param('manual_anchor', '0') or '0')
-        _auto_anchor = float(db.get_param('auto_anchor', '0') or '0')
+        _capital_val       = int(float(db.get_param('estimated_capital', '240') or '240'))
+        _anchor_val        = float(db.get_param('manual_anchor', '0') or '0')
+        _auto_anchor       = float(db.get_param('auto_anchor', '0') or '0')
+        _manual_strike_val = float(db.get_param('manual_strike_price', '0') or '0')
+        _manual_side_val   = db.get_param('manual_strike_side', 'AUTO') or 'AUTO'
+        _saved_expiry      = db.get_param('selected_expiry', '') or ''
+        _leverage_opts = [10, 25, 50, 100, 200]
+        _leverage_val  = int(db.get_param('trading_leverage', '25') or '25')
+        _leverage_idx  = _leverage_opts.index(_leverage_val) if _leverage_val in _leverage_opts else 1
 
-        # STEP 1: Strike Selector (ITM/ATM/OTM full range)
+        # STEP 1: Strike Selector — Expanded to OTM+10 with step numbers clearly shown
         _strike_opts = [
-            "ITM-5 (Deep Inside)", "ITM-4", "ITM-3", "ITM-2", "ITM-1",
-            "ATM (At The Money)",
-            "OTM+1 (1 step out)", "OTM+2 (2 steps out)",
-            "OTM+3 (3 steps out)", "OTM+4", "OTM+5 (Deep Outside)",
+            "🔴 ITM-5  | Step -5  (Deep ITM — Avoid Selling)",
+            "🔴 ITM-4  | Step -4",
+            "🔴 ITM-3  | Step -3",
+            "🔴 ITM-2  | Step -2",
+            "🟡 ITM-1  | Step -1  (Barely ITM)",
+            "🟡 ATM    | Step  0  (At The Money)",
+            "🟢 OTM +1 | Step +1  (Safest — Recommended)",
+            "🟢 OTM +2 | Step +2",
+            "🟢 OTM +3 | Step +3",
+            "🟢 OTM +4 | Step +4",
+            "🟢 OTM +5 | Step +5",
+            "🟢 OTM +6 | Step +6",
+            "🟢 OTM +7 | Step +7",
+            "🟢 OTM +8 | Step +8",
+            "🟢 OTM +9 | Step +9",
+            "🟢 OTM+10 | Step +10 (Very Deep Outside)",
         ]
-        _offset_to_idx = {-5:0,-4:1,-3:2,-2:3,-1:4,0:5,1:6,2:7,3:8,4:9,5:10}
+        _offset_to_idx = {-5:0,-4:1,-3:2,-2:3,-1:4,0:5,1:6,2:7,3:8,4:9,5:10,6:11,7:12,8:13,9:14,10:15}
         _idx_to_offset = {v:k for k,v in _offset_to_idx.items()}
         _strike_idx = _offset_to_idx.get(_offset_raw, 6)
 
@@ -491,16 +509,59 @@ if page == "🚀 Crypto (BTC)":
         s_mode = st.selectbox("Execution Mode", ["PAPER", "LIVE"],
                               index=1 if _mode_val == "LIVE" else 0, key="s_mode")
 
-        # STEP 2: Lot Size as number_input
+        # ── LEVERAGE SELECTOR ─────────────────────────────────
+        st.markdown('<div class="section-title">⚡ Leverage Setting</div>', unsafe_allow_html=True)
+        s_leverage = st.select_slider(
+            "Leverage (applies to every new order)",
+            options=_leverage_opts,
+            value=_leverage_val,
+            key="s_leverage",
+            help="10x = Safer | 25x = Default | 100x+ = High Risk. Delta Exchange set karta hai ye value order pe."
+        )
+        _lev_color = '#10b981' if s_leverage <= 25 else ('#f59e0b' if s_leverage <= 100 else '#f43f5e')
+        _lev_label = '🟢 Conservative' if s_leverage <= 25 else ('🟡 Aggressive' if s_leverage <= 100 else '🔴 HIGH RISK')
+        st.markdown(
+            f'<span class="badge" style="background:rgba(99,102,241,0.15);color:{_lev_color};border:1px solid {_lev_color}44;">'
+            f'⚡ {s_leverage}x — {_lev_label}</span>',
+            unsafe_allow_html=True
+        )
+        st.divider()
+
+        # Lot Size
         s_lots = st.number_input(
             "Lot Size (Contracts)",
             min_value=1, max_value=100,
             value=max(1, _lots_val), step=1, key="s_lots"
         )
-        s_strikes = st.number_input("Number of Strike Prices", 1, 5,
-                                     max(1, _strikes_val), step=1, key="s_strikes")
-        s_expiry  = st.number_input("Min Expiry Days", 0, 14,
-                                     max(0, _expiry_val), step=1, key="s_expiry")
+        # num_strikes is ALWAYS 1 — removing this field prevented CALL/PUT blender
+
+        # ── EXPIRY CHOOSER (Live from Delta Chain) ─────────────────────
+        st.markdown('<div class="section-title">📅 Select Expiry Date</div>', unsafe_allow_html=True)
+        _avail_exp = []
+        if _has_delta:
+            try:
+                import datetime as _dte
+                _ec = delta_executor.fetch_delta_option_chain("BTC")
+                _td = _dte.date.today().strftime('%Y-%m-%d')
+                _avail_exp = sorted(set(
+                    o['expiry_date'] for o in _ec
+                    if o.get('expiry_date','') > _td and float(o.get('mark_price',0)) > 0
+                ))
+            except Exception:
+                pass
+        if not _avail_exp:
+            _avail_exp = ['Could not fetch — check API']
+        _exp_idx = _avail_exp.index(_saved_expiry) if _saved_expiry in _avail_exp else 0
+        s_expiry_sel = st.selectbox(
+            "Available expiries (live from Delta Exchange)",
+            _avail_exp, index=_exp_idx, key="s_expiry_sel",
+            help="Pehle expiry select karo — OTM chain table us expiry ke options dikhata hai."
+        )
+        if _avail_exp[0] != 'Could not fetch — check API':
+            st.markdown(
+                f'<span class="badge badge-blue">📅 Selected: {s_expiry_sel}</span>',
+                unsafe_allow_html=True
+            )
 
         # STEP 3: SL/TP
         col_sl, col_tp = st.columns(2)
@@ -518,11 +579,109 @@ if page == "🚀 Crypto (BTC)":
             )
 
         # Strike Selection
+        st.markdown('<div class="section-title">🎯 Auto Strike Selector (OTM Steps)</div>', unsafe_allow_html=True)
         s_strike_sel = st.selectbox(
-            "Strike Selection (OTM = Safer for Selling)",
+            "Step number dikhata hai — jitna zyada OTM, utna safer (for selling)",
             _strike_opts, index=_strike_idx, key="s_offset",
-            help="OTM+1 or OTM+2 recommended. NEVER ITM for selling."
+            help="OTM+1 ya +2 recommended. ITM pe kabhi sell mat karo. Step number = kitne strikes door ATM se."
         )
+        # Show current selection badge
+        _sel_offset = _idx_to_offset.get(_strike_opts.index(s_strike_sel), 1)
+        _sel_color  = '#f43f5e' if _sel_offset < 0 else ('#f59e0b' if _sel_offset == 0 else '#10b981')
+        _sel_label  = f"Step {_sel_offset:+d} — {'ITM ⚠️ Risky for selling' if _sel_offset < 0 else ('ATM — Use carefully' if _sel_offset == 0 else f'OTM +{_sel_offset} ✅')}"
+        st.markdown(
+            f'<span class="badge" style="background:rgba(0,0,0,0.2);color:{_sel_color};border:1px solid {_sel_color}66;">'
+            f'📍 Selected: {_sel_label}</span>',
+            unsafe_allow_html=True
+        )
+
+        # ── LIVE STRIKE CHAIN PREVIEW ────────────────────────────
+        with st.expander("📊 View Live Option Chain (OTM Step → Actual Strike Price)", expanded=False):
+            st.caption("Ye fetch karta hai live chain — dekhoge ki OTM+6 ka actual price kya hai.")
+            if _has_delta:
+                try:
+                    import datetime as _dt
+                    _chain_dir   = "SELL" if ltp_live > anchor_live else "BUY"
+                    _chain_type  = "put_options" if _chain_dir == "SELL" else "call_options"
+                    _chain_label = "PUT (Selling)" if _chain_dir == "SELL" else "CALL (Selling)"
+                    _full_chain  = delta_executor.fetch_delta_option_chain("BTC")
+                    _today       = _dt.date.today()
+                    _min_exp     = (_today + _dt.timedelta(days=1)).strftime('%Y-%m-%d')
+                    _typed       = [o for o in _full_chain if
+                                    o.get('contract_type') == _chain_type and
+                                    float(o.get('mark_price', 0)) > 0 and
+                                    o.get('expiry_date', '') >= _min_exp]
+                    if _typed:
+                        _expiries  = sorted(set(o['expiry_date'] for o in _typed))
+                        _near_exp  = _expiries[0]
+                        _near      = [o for o in _typed if o['expiry_date'] == _near_exp]
+                        _spot      = ltp_live if ltp_live > 0 else float(_near[0].get('spot_price') or 0)
+                        _near.sort(key=lambda x: abs(float(x.get('strike_price', 0)) - _spot))
+                        _otm_list  = ([o for o in _near if float(o['strike_price']) < _spot]
+                                      if _chain_dir == "SELL" else
+                                      [o for o in _near if float(o['strike_price']) > _spot])
+                        _rows = []
+                        for _step, _opt in enumerate(_otm_list[:12], start=1):
+                            _sk = float(_opt['strike_price'])
+                            _pr = float(_opt.get('mark_price', 0))
+                            _rows.append({
+                                "Step": f"OTM +{_step}",
+                                "Strike Price": f"{_sk:,.0f}",
+                                "Premium (USDT)": f"{_pr:.2f}",
+                                "Expiry": _opt.get('expiry_date', '?'),
+                                "Symbol": _opt.get('symbol', '?')
+                            })
+                        if _rows:
+                            st.markdown(f"**{_chain_label} | Expiry: {_near_exp} | Spot: {_spot:,.0f}**")
+                            st.dataframe(pd.DataFrame(_rows), use_container_width=True,
+                                         hide_index=True, key="live_chain_table")
+                        else:
+                            st.info("Chain data empty — market may be closed.")
+                    else:
+                        st.info("No options found. Check Delta API.")
+                except Exception as _chain_ex:
+                    st.warning(f"Chain fetch failed: {_chain_ex}")
+            else:
+                st.warning("delta_executor not available.")
+
+        # ── MANUAL STRIKE OVERRIDE ─────────────────────────────
+        st.markdown('<div class="section-title">✏️ Manual Strike Override (Optional)</div>', unsafe_allow_html=True)
+
+        # Two columns: Strike Price + Option Side
+        ms_col1, ms_col2 = st.columns([3, 2])
+        with ms_col1:
+            s_manual_strike = st.number_input(
+                "Strike Price (0 = Auto OTM)",
+                min_value=0.0, max_value=500000.0,
+                value=_manual_strike_val, step=100.0, key="s_manual_strike",
+                help="Type exact strike: 78400, 76800 etc. 0 = auto OTM selector active."
+            )
+        with ms_col2:
+            _side_opts  = ["AUTO", "PUT", "CALL"]
+            _side_idx   = _side_opts.index(_manual_side_val) if _manual_side_val in _side_opts else 0
+            s_manual_side = st.selectbox(
+                "Option Side",
+                _side_opts, index=_side_idx, key="s_manual_side",
+                help="PUT = SELL PUT option | CALL = SELL CALL option | AUTO = anchor decides"
+            )
+
+        # Preview badge — shows exactly what bot will do
+        if s_manual_strike > 0:
+            _ms_side_color = '#f43f5e' if s_manual_side == 'PUT' else ('#6366f1' if s_manual_side == 'CALL' else '#f59e0b')
+            _ms_side_label = f"SELL {s_manual_side} @ {s_manual_strike:,.0f}" if s_manual_side != 'AUTO' else f"Strike {s_manual_strike:,.0f} — Side decided by Anchor"
+            st.markdown(
+                f'<div style="background:rgba(0,0,0,0.3);border:1px solid {_ms_side_color}55;border-radius:10px;padding:10px 14px;margin:6px 0;">'
+                f'<span style="color:{_ms_side_color};font-weight:700;font-size:0.9rem;">✏️ MANUAL OVERRIDE ACTIVE</span><br>'
+                f'<span style="color:#e2e8f0;font-size:0.85rem;">Bot will: <b>{_ms_side_label}</b></span><br>'
+                f'<span style="color:#64748b;font-size:0.75rem;">⚠️ Auto OTM Step Selector is BYPASSED. On signal flip, this side stays fixed unless you change it.</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                '<span class="badge badge-blue">🤖 Auto Mode — OTM Selector + Anchor decide strike &amp; side</span>',
+                unsafe_allow_html=True
+            )
 
         s_capital = st.number_input("Est. Capital (USDT)", 50, 10000,
                                     max(50, min(10000, _capital_val)), step=10, key="s_cap")
@@ -552,23 +711,31 @@ if page == "🚀 Crypto (BTC)":
         if st.button("💾 SAVE & APPLY ALL SETTINGS", key="save_strategy"):
             try:
                 new_offset = _idx_to_offset.get(_strike_opts.index(s_strike_sel), 1)
-                db.set_param('trade_mode',        s_mode)
-                db.set_param('crypto_trade_size', str(s_lots))
-                db.set_param('num_strikes',       str(s_strikes))
-                db.set_param('expiry_threshold',  str(s_expiry))
-                db.set_param('sl_percent',        str(s_sl))
-                db.set_param('tp_percent',        str(s_tp))
-                db.set_param('strike_offset',     str(new_offset))
-                db.set_param('estimated_capital', str(s_capital))
-                db.set_param('manual_anchor',     str(s_anchor))
-                # ⚡ SETTINGS WATCHER: Engine will pick this up in 30s and send Telegram
+                db.set_param('trade_mode',          s_mode)
+                db.set_param('crypto_trade_size',   str(s_lots))
+                db.set_param('num_strikes',         '1')        # FORCED: prevents CALL/PUT blender
+                db.set_param('sl_percent',          str(s_sl))
+                db.set_param('tp_percent',          str(s_tp))
+                db.set_param('strike_offset',       str(new_offset))
+                db.set_param('estimated_capital',   str(s_capital))
+                db.set_param('manual_anchor',       str(s_anchor))
+                db.set_param('trading_leverage',    str(s_leverage))
+                db.set_param('manual_strike_price', str(s_manual_strike))
+                db.set_param('manual_strike_side',  s_manual_side)
+                _valid_exp = s_expiry_sel if s_expiry_sel != 'Could not fetch — check API' else ''
+                db.set_param('selected_expiry',     _valid_exp)
                 import time as _t
                 db.set_param('settings_updated_at', str(int(_t.time())))
-                st.success("✅ All settings saved! Telegram notification in ~30 seconds.")
-                if s_anchor > 0:
-                    st.info(f"🎯 Manual Anchor = {s_anchor:,.0f} (Auto-anchor disabled)")
+                if s_manual_strike > 0:
+                    _side_txt = s_manual_side if s_manual_side != 'AUTO' else 'AUTO (Anchor decides)'
+                    st.success(f"✅ Saved! SELL {_side_txt} @ {s_manual_strike:,.0f} | Expiry: {_valid_exp or 'Auto'} | Lev={s_leverage}x")
+                    st.warning(f"✏️ Manual Override active. Auto OTM bypassed.")
                 else:
-                    st.info("🤖 Auto Anchor active — will be set at 6:00 PM IST daily")
+                    st.success(f"✅ Saved! OTM Step {new_offset:+d} | Expiry: {_valid_exp or 'Auto-nearest'} | Lev={s_leverage}x")
+                if s_anchor > 0:
+                    st.info(f"🎯 Manual Anchor = {s_anchor:,.0f}")
+                else:
+                    st.info("🤖 Auto Anchor active — set at 6:00 PM IST daily")
             except Exception as e:
                 st.error(f"Save failed: {e}")
 

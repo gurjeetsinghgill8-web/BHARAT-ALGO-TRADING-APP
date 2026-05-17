@@ -2,6 +2,9 @@ import time
 import datetime
 import socket
 import sys
+import os
+import signal
+import atexit
 import traceback
 import requests
 import db
@@ -12,6 +15,46 @@ try:
 except ImportError:
     def send_telegram_msg(msg): print(f"TG: {msg}")
     def log_terminal(msg, typ="INFO"): print(f"[{typ}] {msg}")
+
+# ============================================================
+# SMART PID LOCK — Self-healing (replaces dumb socket lock)
+# ============================================================
+LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bot_running.lock')
+
+def _acquire_lock():
+    """Check if another instance is truly running. If stale lock found, auto-clear it."""
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            # Check if that PID is actually still alive
+            os.kill(old_pid, 0)  # Sends no signal — just checks if process exists
+            # If we reach here, process IS running
+            print(f"BOT ALREADY RUNNING (PID {old_pid}). EXITING.")
+            sys.exit(1)
+        except (ValueError, ProcessLookupError, PermissionError):
+            # Stale lock — old process is DEAD. Safe to clear and continue.
+            print(f"[LOCK] Stale lock found (PID dead). Auto-clearing and starting fresh.")
+            os.remove(LOCK_FILE)
+
+    # Write our PID
+    with open(LOCK_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+    print(f"[LOCK] Lock acquired (PID {os.getpid()})")
+
+def _release_lock():
+    """Remove lock file on clean exit."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            print("[LOCK] Lock released.")
+    except Exception:
+        pass
+
+def _signal_handler(sig, frame):
+    """Handle SIGTERM/SIGINT gracefully — release lock before dying."""
+    _release_lock()
+    sys.exit(0)
 
 # ============================================================
 # GLOBAL 5-MIN COOLDOWN (V5.2 Safety)
@@ -282,12 +325,11 @@ def check_sl_tp():
 # MAIN
 # ============================================================
 def main():
-    try:
-        lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        lock_socket.bind(('127.0.0.1', 47200))
-    except socket.error:
-        print("BOT ALREADY RUNNING. EXITING.")
-        sys.exit(1)
+    # — Smart PID Lock (self-healing) —
+    _acquire_lock()
+    atexit.register(_release_lock)        # Clean up on normal exit
+    signal.signal(signal.SIGTERM, _signal_handler)  # Clean up on systemd stop
+    signal.signal(signal.SIGINT,  _signal_handler)  # Clean up on Ctrl+C
 
     print("=" * 55)
     print("  BHARAT MAGICAL ENGINE v5.2")
