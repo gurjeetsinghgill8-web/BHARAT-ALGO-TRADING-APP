@@ -502,51 +502,68 @@ def main():
     lots          = int(db.get("lots", str(cfg.DEFAULT_LOTS)) or cfg.DEFAULT_LOTS)
     tg.send_msg(tg.msg_startup(st_period, st_multiplier, lots))
 
-    last_heartbeat = 0
+    # v4.2: Candle-Slot-ID based heartbeat (replaces floating time.time() timer)
+    # slot = (hour * 12) + (minute // 5)
+    # e.g. 09:15 → 111 | 09:20 → 112 | 15:00 → 180
+    # Each unique slot fires exactly ONE heartbeat — perfectly candle-aligned.
+    last_heartbeat_slot = -1
 
     while True:
         try:
             if _check_new_day():
                 utils.log(
-                    "New trading day. Resetting candle guard and ST health.",
+                    "New trading day. Resetting candle guard, ST health and heartbeat slot.",
                     "INFO"
                 )
                 db.set("last_candle_time", "")
                 db.set("st_health",        "OK")
                 db.set("st_last_update",   "")
+                last_heartbeat_slot = -1   # force first heartbeat of new day
 
             run_one_cycle()
 
-            # Heartbeat every 10 minutes — v4.1: ONLY when engine is actively ON
-            if utils.is_market_open() and db.get("algo_running", "ON") == "ON":
-                now_ts = time.time()
-                if now_ts - last_heartbeat >= 600:
-                    # v4.1 FIX: Use last CLOSED candle close (same data ST was computed on)
-                    # Not live ticker — for accuracy + stability
-                    ltp       = float(db.get("last_candle_close", "0") or "0")
+            # ── v4.2 HEARTBEAT — strict every 5-min candle boundary ──────────
+            # Window: 09:15 AM to 3:00 PM IST (is_heartbeat_window)
+            # Fires ONCE per slot — no drift, no 10-min gap, engine-restart safe
+            if utils.is_heartbeat_window():
+                now         = utils.ist_now()
+                curr_slot   = (now.hour * 12) + (now.minute // 5)
+                if curr_slot != last_heartbeat_slot:
+                    # Gather all values for heartbeat message
+                    ltp = float(db.get("last_candle_close", "0") or "0")
                     if ltp <= 0:
-                        ltp = float(db.get("current_ltp", "0") or "0")  # fallback
-                    st_val    = float(db.get("st_value",     "0") or "0")
-                    st_dir    = db.get("st_direction",  "NONE")
-                    sig       = db.get("signal",        "NONE")
-                    active_sym= db.get("active_symbol", "NONE")
-                    entry_prem= float(db.get("entry_premium",      "0") or "0")
-                    st_health = db.get("st_health", "OK")
-                    # Fresh option LTP if holding
+                        ltp = float(db.get("current_ltp", "0") or "0")   # fallback
+                    st_val     = float(db.get("st_value",       "0")    or "0")
+                    st_dir     = db.get("st_direction",  "NONE")
+                    sig        = db.get("signal",        "NONE")
+                    active_sym = db.get("active_symbol", "NONE")
+                    entry_prem = float(db.get("entry_premium",  "0")    or "0")
+                    st_health  = db.get("st_health", "OK")
+                    # Fresh option LTP if holding a position
                     if active_sym != "NONE" and db.get("trade_active") == "YES":
-                        opt_ltp = data.get_option_ltp(active_sym)  # fresh API call
+                        opt_ltp = data.get_option_ltp(active_sym)
                     else:
                         opt_ltp = 0.0
-                    pnl_pct = ((opt_ltp - entry_prem) / entry_prem * 100) if entry_prem > 0 and opt_ltp > 0 else 0.0
-                    # Update DB with fresh values
-                    db.set("current_ltp",       str(ltp))
-                    db.set("current_option_ltp", str(opt_ltp))
-                    db.set("unrealized_pnl_pct", str(round(pnl_pct, 2)))
+                    pnl_pct = (
+                        ((opt_ltp - entry_prem) / entry_prem * 100)
+                        if entry_prem > 0 and opt_ltp > 0 else 0.0
+                    )
+                    # Push fresh values to DB
+                    db.set("current_ltp",        str(ltp))
+                    db.set("current_option_ltp",  str(opt_ltp))
+                    db.set("unrealized_pnl_pct",  str(round(pnl_pct, 2)))
+                    # Fire Telegram heartbeat
                     tg.send_msg(tg.msg_heartbeat(
                         ltp, st_val, st_dir, sig,
                         active_sym, pnl_pct, entry_prem, opt_ltp, st_health
                     ))
-                    last_heartbeat = now_ts
+                    utils.log(
+                        f"HEARTBEAT sent | slot={curr_slot} "
+                        f"({now.hour:02d}:{(now.minute // 5) * 5:02d})",
+                        "INFO"
+                    )
+                    last_heartbeat_slot = curr_slot
+            # ─────────────────────────────────────────────────────────────────
 
             sleep_secs = utils.seconds_to_next_5min_candle()
             utils.log(f"Sleeping {sleep_secs}s until next candle...", "WAIT")

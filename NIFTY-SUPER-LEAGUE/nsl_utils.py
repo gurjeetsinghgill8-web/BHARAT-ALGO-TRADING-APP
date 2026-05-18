@@ -80,6 +80,25 @@ def is_squareoff_time() -> bool:
     )
 
 
+def is_heartbeat_window() -> bool:
+    """
+    True if current IST time is within the HEARTBEAT window:
+    09:15:00 AM → 15:00:00 PM on weekdays.
+
+    This is DIFFERENT from is_market_open() (which is 09:20–15:10).
+    Heartbeat starts at 9:15 (first candle of day) and ends at 3:00 PM
+    (force-close time). Every 5-min candle boundary in this window
+    gets exactly one heartbeat.
+    """
+    if not is_weekday():
+        return False
+    now      = ist_now()
+    # Window: 09:15:00 to 15:00:59
+    start_ok = (now.hour > 9) or (now.hour == 9 and now.minute >= 15)
+    end_ok   = (now.hour < 15) or (now.hour == 15 and now.minute == 0)
+    return start_ok and end_ok
+
+
 def seconds_to_next_5min_candle() -> int:
     """
     Returns seconds until the next candle boundary based on cfg.ST_CANDLE_MINUTES.
