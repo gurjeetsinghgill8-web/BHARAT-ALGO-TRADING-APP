@@ -121,6 +121,10 @@ def msg_heartbeat(ltp: float, st_value: float, st_direction: str,
                   signal: str, active_symbol: str, pnl_pct: float,
                   entry_premium: float, current_opt_ltp: float,
                   st_health: str) -> str:
+    from datetime import datetime
+    import pytz
+    ist       = pytz.timezone("Asia/Kolkata")
+    now_ist   = datetime.now(ist).strftime("%d-%b %I:%M:%S %p")
     dir_arrow   = "↑ BULLISH" if st_direction == "BULLISH" else "↓ BEARISH" if st_direction == "BEARISH" else "— NONE"
     health_icon = "✅" if st_health == "OK" else "⚠️" if st_health == "STALE" else "❌"
     # v4.1: show human-readable label if available
@@ -130,11 +134,16 @@ def msg_heartbeat(ltp: float, st_value: float, st_direction: str,
         pos_str = f"HOLDING {label}" if label else f"HOLDING {active_symbol}"
     else:
         pos_str = "FLAT (No Position)"
+    # LTP vs ST comparison — instant visual check
+    diff     = ltp - st_value
+    diff_str = f"+{diff:.2f} (LTP above ST ↑)" if diff > 0 else f"{diff:.2f} (LTP below ST ↓)"
     return (
         f"📊 <b>NIFTY SUPER LEAGUE — PULSE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Nifty LTP  : ₹{ltp:,.2f}\n"
+        f"🕐 Time       : {now_ist}\n"
+        f"Nifty LTP  : ₹{ltp:,.2f}  [LIVE]\n"
         f"SuperTrend : ₹{st_value:,.2f} {dir_arrow}\n"
+        f"LTP vs ST  : {diff_str}\n"
         f"ST Health  : {health_icon} {st_health}\n"
         f"Signal     : {signal}\n"
         f"Trade      : {pos_str}\n"

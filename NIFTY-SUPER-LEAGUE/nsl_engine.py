@@ -262,6 +262,9 @@ def run_one_cycle() -> None:
     new_st_direction = st_result["direction"]           # 'BULLISH' or 'BEARISH'
     new_signal       = st_mod.direction_to_signal(new_st_direction)  # 'CALL' or 'PUT'
 
+    # v4.1: store last closed candle close for heartbeat display
+    db.set("last_candle_close", str(prev_candle["close"]))
+
     # ── 8. ST Health watchdog ────────────────────────────────
     st_health = st_mod.check_health()
     if st_health == "STALE":
@@ -473,7 +476,7 @@ def main():
     lock = _acquire_lock()
 
     print("=" * 62)
-    print("  NIFTY SUPER LEAGUE  v4.0  —  SUPERTREND EDITION  ")
+    print("  NIFTY SUPER LEAGUE  v4.1  —  SUPERTREND EDITION  ")
     print("=" * 62)
     print("  Rule 1: Exchange-first — verify before every entry")
     print("  Rule 2: ONE lot max — lot guard every candle")
@@ -481,7 +484,7 @@ def main():
     print("  Rule 4: Previous closed candle only — never forming")
     print("  Rule 5: SuperTrend is the ONLY signal")
     print("  Rule 6: Hold until flip — no profit target")
-    print("  Rule 7: 9:20 AM start | 3:10 PM force close")
+    print("  Rule 7: 9:16 AM start | 3:00 PM force close")
     print("=" * 62)
 
     db.init_defaults()
@@ -518,15 +521,27 @@ def main():
             if utils.is_market_open() and db.get("algo_running", "ON") == "ON":
                 now_ts = time.time()
                 if now_ts - last_heartbeat >= 600:
-                    ltp       = float(db.get("current_ltp",        "0") or "0")
-                    st_val    = float(db.get("st_value",            "0") or "0")
+                    # v4.1 FIX: Use last CLOSED candle close (same data ST was computed on)
+                    # Not live ticker — for accuracy + stability
+                    ltp       = float(db.get("last_candle_close", "0") or "0")
+                    if ltp <= 0:
+                        ltp = float(db.get("current_ltp", "0") or "0")  # fallback
+                    st_val    = float(db.get("st_value",     "0") or "0")
                     st_dir    = db.get("st_direction",  "NONE")
                     sig       = db.get("signal",        "NONE")
                     active_sym= db.get("active_symbol", "NONE")
-                    entry_prem= float(db.get("entry_premium",       "0") or "0")
-                    opt_ltp   = float(db.get("current_option_ltp",  "0") or "0")
-                    pnl_pct   = float(db.get("unrealized_pnl_pct",  "0") or "0")
+                    entry_prem= float(db.get("entry_premium",      "0") or "0")
                     st_health = db.get("st_health", "OK")
+                    # Fresh option LTP if holding
+                    if active_sym != "NONE" and db.get("trade_active") == "YES":
+                        opt_ltp = data.get_option_ltp(active_sym)  # fresh API call
+                    else:
+                        opt_ltp = 0.0
+                    pnl_pct = ((opt_ltp - entry_prem) / entry_prem * 100) if entry_prem > 0 and opt_ltp > 0 else 0.0
+                    # Update DB with fresh values
+                    db.set("current_ltp",       str(ltp))
+                    db.set("current_option_ltp", str(opt_ltp))
+                    db.set("unrealized_pnl_pct", str(round(pnl_pct, 2)))
                     tg.send_msg(tg.msg_heartbeat(
                         ltp, st_val, st_dir, sig,
                         active_sym, pnl_pct, entry_prem, opt_ltp, st_health

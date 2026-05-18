@@ -187,6 +187,7 @@ def init_defaults() -> None:
         # v4.1: Self-Healing Agent state
         "active_trading_label":  "",   # human-readable: "23400 PE | Exp: 2026-05-19"
         "ltp_fetch_failed":      "NO", # YES when option LTP fetch fails 3 times
+        "last_candle_close":     "0",  # last closed 5-min candle close price
     }
     for k, v in defaults.items():
         if not get(k):
