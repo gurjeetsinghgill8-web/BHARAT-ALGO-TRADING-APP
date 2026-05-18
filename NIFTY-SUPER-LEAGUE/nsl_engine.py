@@ -530,7 +530,11 @@ def main():
                 curr_slot   = (now.hour * 12) + (now.minute // 5)
                 if curr_slot != last_heartbeat_slot:
                     # Gather all values for heartbeat message
-                    ltp = float(db.get("last_candle_close", "0") or "0")
+                    # v4.2 FIX: Always fetch LIVE Nifty spot LTP for heartbeat display.
+                    # last_candle_close was the previous candle's close (up to 5min stale).
+                    # ST line / direction / signal stay from DB — they are candle-locked
+                    # and only update on a new closed candle. Zero flip-flop risk.
+                    ltp = data.get_nifty_spot_ltp()   # ← LIVE API call
                     if ltp <= 0:
                         ltp = float(db.get("current_ltp", "0") or "0")   # fallback
                     st_val     = float(db.get("st_value",       "0")    or "0")
