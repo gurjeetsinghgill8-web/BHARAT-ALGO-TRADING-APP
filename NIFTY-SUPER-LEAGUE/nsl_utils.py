@@ -5,7 +5,7 @@ IST time helpers, market open check, timestamped logging,
 seconds-to-next-5-min-candle calculation.
 NO external dependencies beyond stdlib + pytz.
 
-MARKET HOURS: 9:20 AM open | 3:10 PM force close.
+MARKET HOURS: 9:16 AM open | 3:00 PM force close (3:10 PM market window end).
 """
 
 import sys
@@ -70,11 +70,13 @@ def is_market_open() -> bool:
 
 
 def is_squareoff_time() -> bool:
-    """True if it's time to force-close all positions (3:10 PM IST)."""
-    now = ist_now()
+    """True if it's time to force-close all positions (3:00 PM IST)."""
+    now  = ist_now()
+    sq_h = getattr(cfg, 'SQUAREOFF_H', cfg.MARKET_CLOSE_H)
+    sq_m = getattr(cfg, 'SQUAREOFF_M', cfg.MARKET_CLOSE_M)
     return (
-        now.hour > cfg.MARKET_CLOSE_H or
-        (now.hour == cfg.MARKET_CLOSE_H and now.minute >= cfg.MARKET_CLOSE_M)
+        now.hour > sq_h or
+        (now.hour == sq_h and now.minute >= sq_m)
     )
 
 

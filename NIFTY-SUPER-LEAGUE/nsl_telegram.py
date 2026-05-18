@@ -35,13 +35,14 @@ def send_msg(text: str) -> bool:
 
 def msg_startup(st_period: int, st_multiplier: float, lots: int) -> str:
     return (
-        f"🏆 <b>NIFTY SUPER LEAGUE v4 — STARTED</b>\n"
+        f"🏆 <b>NIFTY SUPER LEAGUE v4.1 — STARTED</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📐 SuperTrend : {st_period}/{st_multiplier} (5-min candles)\n"
         f"📦 Lots       : {lots} lot × 65 = {lots * 65} units\n"
         f"🔄 Exit Rule  : Hold until SuperTrend flips\n"
-        f"⏰ Window     : 09:20 – 15:10 IST\n"
+        f"⏰ Window     : 09:16 – 15:00 IST\n"
         f"🛡️ Lot Guard  : Max 1 lot enforced every candle\n"
+        f"🤖 Self-Heal  : Auto-monitors + auto-fixes every cycle\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ Engine LIVE | SuperTrend is the ONLY signal 🍀"
     )
@@ -121,8 +122,14 @@ def msg_heartbeat(ltp: float, st_value: float, st_direction: str,
                   entry_premium: float, current_opt_ltp: float,
                   st_health: str) -> str:
     dir_arrow   = "↑ BULLISH" if st_direction == "BULLISH" else "↓ BEARISH" if st_direction == "BEARISH" else "— NONE"
-    pos_str     = f"HOLDING {active_symbol}" if active_symbol != "NONE" else "FLAT (No Position)"
     health_icon = "✅" if st_health == "OK" else "⚠️" if st_health == "STALE" else "❌"
+    # v4.1: show human-readable label if available
+    import nsl_db as _db
+    label = _db.get("active_trading_label", "")
+    if active_symbol != "NONE":
+        pos_str = f"HOLDING {label}" if label else f"HOLDING {active_symbol}"
+    else:
+        pos_str = "FLAT (No Position)"
     return (
         f"📊 <b>NIFTY SUPER LEAGUE — PULSE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -165,4 +172,29 @@ def msg_error(context: str, detail: str) -> str:
         f"❌ <b>NSL ENGINE ERROR</b>\n"
         f"Context : {context}\n"
         f"Detail  : {detail[:200]}"
+    )
+
+
+# ─── v4.1 Self-Healing Alert Templates ───────────────────────
+
+def msg_auto_blocked(reason: str) -> str:
+    return (
+        f"🚨 <b>ENGINE AUTO-BLOCKED</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Reason : {reason}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Engine is paused. No new trades will be taken.\n"
+        f"Go to dashboard → click 🔓 Unblock Engine to resume."
+    )
+
+
+def msg_exit_market_close_v41(premium_entry: float, premium_exit: float, pnl_pct: float) -> str:
+    return (
+        f"🕒 <b>3:00 PM — FORCE SQUARE OFF</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Entry  : ₹{premium_entry:.2f}\n"
+        f"Exit   : ₹{premium_exit:.2f}\n"
+        f"P&L %  : {pnl_pct:+.1f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"All positions closed for the day. See you tomorrow! 🌙"
     )

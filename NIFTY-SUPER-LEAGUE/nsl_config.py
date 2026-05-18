@@ -21,9 +21,13 @@ APP_EMOJI   = "🏆"
 
 # ─── Market windows (IST 24h) ─────────────────────────────────
 MARKET_OPEN_H   = 9
-MARKET_OPEN_M   = 20   # Engine starts at 9:20 AM
+MARKET_OPEN_M   = 16   # Engine starts at 9:16 AM
 MARKET_CLOSE_H  = 15
-MARKET_CLOSE_M  = 10   # Force square-off at 3:10 PM
+MARKET_CLOSE_M  = 10   # Market window stays open till 3:10 (so squareoff can fire)
+
+# ─── Squareoff time (force close all positions) ───────────────
+SQUAREOFF_H = 15
+SQUAREOFF_M = 0    # Force close at 3:00 PM sharp
 
 # ─── Lot settings ─────────────────────────────────────────────
 DEFAULT_LOTS     = 1

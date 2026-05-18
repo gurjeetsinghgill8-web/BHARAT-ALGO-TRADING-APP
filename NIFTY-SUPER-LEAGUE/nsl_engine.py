@@ -85,6 +85,52 @@ _first_run = True
 
 
 # ─────────────────────────────────────────────────────────────
+# Self-Healing Agent v4.1
+# ─────────────────────────────────────────────────────────────
+_stale_ltp_cycles = 0
+
+def _self_healing_check() -> bool:
+    """
+    Runs safety checks every cycle. Auto-fixes what it can.
+    Returns True  = all OK, proceed with trading.
+    Returns False = problem detected + handled, skip this cycle.
+    """
+    global _stale_ltp_cycles
+
+    # ── Check 1: LTP unavailable while holding a position ────
+    if db.get("trade_active") == "YES":
+        if db.get("ltp_fetch_failed", "NO") == "YES":
+            _stale_ltp_cycles += 1
+            utils.log(
+                f"SELF-HEAL: LTP=0 for {_stale_ltp_cycles} consecutive cycle(s).",
+                "ALERT"
+            )
+            if _stale_ltp_cycles >= 2:
+                utils.log(
+                    "SELF-HEAL: LTP unavailable 2 cycles — auto-closing position for safety.",
+                    "ALERT"
+                )
+                tg.send_msg(
+                    f"🚨 <b>AUTO-HEAL: Position Closed</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"Option LTP fetch failed for {_stale_ltp_cycles} candle cycles.\n"
+                    f"Position closed for safety.\n"
+                    f"Engine is now FLAT — will re-enter on next valid signal."
+                )
+                executor.square_off_all_positions()
+                _stale_ltp_cycles = 0
+                db.set("ltp_fetch_failed", "NO")
+                return False
+        else:
+            _stale_ltp_cycles = 0
+    else:
+        _stale_ltp_cycles = 0
+        db.set("ltp_fetch_failed", "NO")
+
+    return True
+
+
+# ─────────────────────────────────────────────────────────────
 # New-day detection
 # ─────────────────────────────────────────────────────────────
 _last_run_date = None
@@ -144,9 +190,13 @@ def run_one_cycle() -> None:
     if not utils.is_market_open():
         return
 
-    # ── 1. Engine paused from dashboard? ─────────────────────
-    if db.get("algo_running", "ON") == "OFF":
+    # ── 1. Engine paused / auto-blocked from dashboard? ──────
+    algo_state = db.get("algo_running", "ON")
+    if algo_state == "OFF":
         utils.log("Engine paused from dashboard.", "WAIT")
+        return
+    if algo_state == "BLOCKED":
+        utils.log("Engine AUTO-BLOCKED. Check dashboard/Telegram for reason.", "ALERT")
         return
 
     # ── 2. First-run guard ───────────────────────────────────
@@ -227,6 +277,13 @@ def run_one_cycle() -> None:
         data.record_candle_time(prev_candle)
         return
 
+    # ── 9b. SELF-HEALING CHECK (v4.1) ────────────────────────
+    heal_ok = _self_healing_check()
+    if not heal_ok:
+        utils.log("SELF-HEAL: Action taken this cycle — skipping trade logic.", "ALERT")
+        data.record_candle_time(prev_candle)
+        return
+
     # ── 10. Update live option P&L ────────────────────────────
     trade_active = db.get("trade_active") == "YES"
     current_dir  = db.get("active_option_type", "NONE")
@@ -261,7 +318,23 @@ def run_one_cycle() -> None:
     if not trade_active:
         # ── FLAT → Enter on signal ────────────────────────
         utils.log(f"FLAT. SuperTrend={new_st_direction}. Entering {new_signal}...", "TRADE")
-        executor.execute_entry(new_signal)
+        entered = executor.execute_entry(new_signal)
+        if entered:
+            # v4.1: Verify entry actually landed on exchange (10s settlement)
+            time.sleep(10)
+            pos_check = executor.get_all_nse_fo_positions()
+            if not pos_check:
+                utils.log("ENTRY not confirmed on exchange. Retrying once...", "ALERT")
+                tg.send_msg(
+                    f"⚠️ <b>Entry Not Confirmed!</b>\n"
+                    f"Order placed but not found on exchange after 10s.\n"
+                    f"Retrying {new_signal} entry once..."
+                )
+                executor._clear_trade_db()
+                time.sleep(5)
+                executor.execute_entry(new_signal)
+            else:
+                utils.log(f"ENTRY confirmed: {len(pos_check)} position(s) on exchange.", "OK")
 
     else:
         # ── HOLDING a position ────────────────────────────
@@ -315,7 +388,29 @@ def run_one_cycle() -> None:
                     )
                 else:
                     utils.log(f"Exchange confirmed FLAT. Entering {new_signal}...", "TRADE")
-                    executor.execute_entry(new_signal)
+                    entered = executor.execute_entry(new_signal)
+                    if entered:
+                        # v4.1: Verify flip re-entry landed on exchange
+                        time.sleep(10)
+                        pos_check = executor.get_all_nse_fo_positions()
+                        if not pos_check:
+                            utils.log(
+                                "FLIP ENTRY not confirmed on exchange. Retrying once...",
+                                "ALERT"
+                            )
+                            tg.send_msg(
+                                f"⚠️ <b>Flip Entry Not Confirmed!</b>\n"
+                                f"Flip re-entry not found on exchange after 10s.\n"
+                                f"Retrying {new_signal}..."
+                            )
+                            executor._clear_trade_db()
+                            time.sleep(5)
+                            executor.execute_entry(new_signal)
+                        else:
+                            utils.log(
+                                f"FLIP ENTRY confirmed: {len(pos_check)} position(s) on exchange.",
+                                "OK"
+                            )
             else:
                 utils.log("Exit order failed! Not entering new trade. Will retry next candle.", "ERROR")
 
@@ -419,8 +514,8 @@ def main():
 
             run_one_cycle()
 
-            # Heartbeat every 10 minutes
-            if utils.is_market_open():
+            # Heartbeat every 10 minutes — v4.1: ONLY when engine is actively ON
+            if utils.is_market_open() and db.get("algo_running", "ON") == "ON":
                 now_ts = time.time()
                 if now_ts - last_heartbeat >= 600:
                     ltp       = float(db.get("current_ltp",        "0") or "0")

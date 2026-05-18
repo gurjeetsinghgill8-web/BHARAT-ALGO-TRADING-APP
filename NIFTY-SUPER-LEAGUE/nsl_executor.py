@@ -404,11 +404,13 @@ def _clear_trade_db() -> None:
     db.set("trade_active",          "NO")
     db.set("active_symbol",         "NONE")
     db.set("active_option_type",    "NONE")
+    db.set("active_trading_label",  "")      # v4.1: human-readable label
     db.set("entry_premium",         "0")
     db.set("entry_time",            "")
     db.set("entry_timestamp_epoch", "0")
     db.set("current_option_ltp",    "0")
     db.set("unrealized_pnl_pct",    "0")
+    db.set("ltp_fetch_failed",      "NO")    # v4.1: clear LTP error flag
 
 
 # ─────────────────────────────────────────────────────────────
@@ -480,12 +482,16 @@ def execute_entry(direction: str) -> bool:
     success = place_buy_order(best["instrument_key"], qty)
     if success:
         now_epoch = time.time()
+        # Build human-readable label for dashboard display
+        label = f"{best['strike']:.0f} {best['type']} | Exp: {expiry}"
         db.set("trade_active",          "YES")
         db.set("active_symbol",         best["instrument_key"])
         db.set("active_option_type",    direction)
+        db.set("active_trading_label",  label)          # v4.1
         db.set("entry_premium",         str(best["ltp"]))
         db.set("entry_time",            utils.fmt_time())
         db.set("entry_timestamp_epoch", str(now_epoch))
+        db.set("ltp_fetch_failed",      "NO")           # v4.1: clear on fresh entry
 
         ltp    = float(db.get("current_ltp", "0") or "0")
         st_val = float(db.get("st_value",    "0") or "0")

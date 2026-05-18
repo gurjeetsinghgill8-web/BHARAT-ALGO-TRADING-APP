@@ -28,8 +28,10 @@ st.markdown("""
 .card-label { color:#64748b; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:6px; }
 .card-value { font-size:1.8rem; font-weight:900; color:#0f172a; }
 .card-sub   { color:#64748b; font-size:0.78rem; margin-top:2px; }
-.badge-live { background:#dcfce7; color:#166534; border:2px solid #16a34a; padding:8px 24px; border-radius:30px; font-weight:700; display:inline-block; }
-.badge-stop { background:#fee2e2; color:#991b1b; border:2px solid #dc2626; padding:8px 24px; border-radius:30px; font-weight:700; display:inline-block; }
+.badge-live    { background:#dcfce7; color:#166534; border:2px solid #16a34a; padding:8px 24px; border-radius:30px; font-weight:700; display:inline-block; }
+.badge-stop    { background:#fee2e2; color:#991b1b; border:2px solid #dc2626; padding:8px 24px; border-radius:30px; font-weight:700; display:inline-block; }
+.badge-blocked { background:#fef3c7; color:#92400e; border:2px solid #f59e0b; padding:8px 24px; border-radius:30px; font-weight:700; display:inline-block; animation: pulse-warn 1.5s infinite; }
+@keyframes pulse-warn { 0%,100%{opacity:1} 50%{opacity:0.6} }
 .signal-call { background:#dcfce7; border:2px solid #16a34a; color:#14532d; padding:16px; border-radius:12px; font-weight:700; font-size:1.1rem; text-align:center; }
 .signal-put  { background:#fee2e2; border:2px solid #dc2626; color:#7f1d1d; padding:16px; border-radius:12px; font-weight:700; font-size:1.1rem; text-align:center; }
 .signal-none { background:#f1f5f9; border:2px solid #cbd5e1; color:#475569; padding:16px; border-radius:12px; font-weight:600; font-size:1rem; text-align:center; }
@@ -68,7 +70,9 @@ tab1, tab2, tab3 = st.tabs(["📊  Live Monitor", "⚙️  Settings", "🔌  Con
 
 # ═══════════════════ TAB 1: LIVE MONITOR ═══════════════════
 with tab1:
-    engine_on    = db.get("algo_running", "ON") == "ON"
+    algo_state   = db.get("algo_running", "ON")
+    engine_on    = algo_state == "ON"
+    auto_blocked = algo_state == "BLOCKED"
     trade_active = db.get("trade_active", "NO") == "YES"
     signal       = db.get("signal", "NONE")
     active_sym   = db.get("active_symbol", "NONE")
@@ -84,7 +88,12 @@ with tab1:
     st_period    = db.get("st_period",     str(cfg.DEFAULT_ST_PERIOD))
     st_mult      = db.get("st_multiplier", str(cfg.DEFAULT_ST_MULTIPLIER))
 
-    badge = '<span class="badge-live">🟢  ENGINE LIVE</span>' if engine_on else '<span class="badge-stop">🔴  ENGINE STOPPED</span>'
+    if engine_on:
+        badge = '<span class="badge-live">🟢&nbsp; ENGINE LIVE</span>'
+    elif auto_blocked:
+        badge = '<span class="badge-blocked">🚨&nbsp; ENGINE AUTO-BLOCKED</span>'
+    else:
+        badge = '<span class="badge-stop">🔴&nbsp; ENGINE STOPPED</span>'
     st.markdown(f'<div style="text-align:center;margin:8px 0 20px;">{badge}</div>', unsafe_allow_html=True)
 
     # KPI Row
@@ -130,17 +139,25 @@ with tab1:
 
     # Active Position Card
     if trade_active and active_sym != "NONE":
-        sl_pct    = float(db.get("stop_loss_pct", "0") or 0)
-        sl_text   = f"₹{entry_prem * (1 - sl_pct/100):.2f} (-{sl_pct:.0f}%)" if sl_pct > 0 else "Disabled"
-        p_col2    = "#166534" if pnl_pct >= 0 else "#991b1b"
+        sl_pct         = float(db.get("stop_loss_pct", "0") or 0)
+        sl_text        = f"₹{entry_prem * (1 - sl_pct/100):.2f} (-{sl_pct:.0f}%)" if sl_pct > 0 else "Disabled"
+        p_col2         = "#166534" if pnl_pct >= 0 else "#991b1b"
+        trading_label  = db.get("active_trading_label", "")   # v4.1: human-readable
+        label_display  = trading_label if trading_label else active_sym
         st.markdown(f"""<div class="pos-card">
-            <div style="font-weight:700;font-size:1rem;color:#92400e;margin-bottom:12px;">🟡  ACTIVE POSITION</div>
+            <div style="font-weight:700;font-size:1rem;color:#92400e;margin-bottom:12px;">🟡&nbsp; ACTIVE POSITION</div>
             <table style="width:100%;font-size:0.92rem;color:#0f172a;border-collapse:collapse;">
                 <tr>
                     <td style="padding:5px 10px 5px 0;color:#64748b;">Type</td>
-                    <td style="font-weight:700;color:#7c3aed;">BUY {opt_type}</td>
+                    <td style="font-weight:700;color:#7c3aed;font-size:1.1rem;">BUY {opt_type}</td>
                     <td style="padding:5px 10px;color:#64748b;">Entry Time</td>
                     <td style="font-weight:600;">{entry_time}</td>
+                </tr>
+                <tr>
+                    <td style="padding:5px 10px 5px 0;color:#64748b;">Strike / Expiry</td>
+                    <td style="font-weight:700;color:#0f172a;">{label_display}</td>
+                    <td style="padding:5px 10px;color:#64748b;">Symbol</td>
+                    <td style="font-size:0.75rem;color:#94a3b8;">{active_sym}</td>
                 </tr>
                 <tr>
                     <td style="padding:5px 10px 5px 0;color:#64748b;">Entry Premium</td>
@@ -153,11 +170,6 @@ with tab1:
                     <td style="font-weight:900;font-size:1.2rem;color:{p_col2};">{'+' if pnl_pct>=0 else ''}{pnl_pct:.1f}%</td>
                     <td style="padding:5px 10px;color:#64748b;">Stop Loss</td>
                     <td style="font-weight:700;color:#dc2626;">{sl_text}</td>
-                </tr>
-                <tr>
-                    <td colspan="4" style="padding:6px 0 0;color:#94a3b8;font-size:0.8rem;">
-                        Exit Rule: Hold until SuperTrend flips &nbsp;|&nbsp; Symbol: {active_sym}
-                    </td>
                 </tr>
             </table>
         </div>""", unsafe_allow_html=True)
@@ -182,6 +194,17 @@ with tab1:
             if st.button("⏹️  Stop Engine", key="btn_stop"):
                 db.set("algo_running", "OFF")
                 _notify("🔴 <b>ENGINE STOPPED</b>\nDashboard se band kiya gaya.\n⏰ " + __import__('datetime').datetime.now().strftime("%H:%M:%S"))
+                st.rerun()
+        elif auto_blocked:
+            st.markdown("""
+            <div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:10px;
+                        padding:10px 14px;color:#92400e;font-size:0.85rem;font-weight:600;">
+                🚨 Engine Auto-Blocked<br>
+                <span style="font-weight:400;font-size:0.8rem;">Self-Healing Agent ne block kiya.<br>Reason: Telegram check karo.</span>
+            </div>""", unsafe_allow_html=True)
+            if st.button("🔓  Unblock Engine", key="btn_unblock"):
+                db.set("algo_running", "ON")
+                _notify("🔓 <b>ENGINE UNBLOCKED</b>\nManually unblocked from dashboard.\n⏰ " + __import__('datetime').datetime.now().strftime("%H:%M:%S"))
                 st.rerun()
         else:
             if st.button("▶️  Start Engine", key="btn_start"):
