@@ -184,6 +184,9 @@ def init_defaults() -> None:
         "current_ltp":           "0",
         "current_option_ltp":    "0",
         "unrealized_pnl_pct":    "0",
+        # v4.1: Self-Healing Agent state
+        "active_trading_label":  "",   # human-readable: "23400 PE | Exp: 2026-05-19"
+        "ltp_fetch_failed":      "NO", # YES when option LTP fetch fails 3 times
     }
     for k, v in defaults.items():
         if not get(k):

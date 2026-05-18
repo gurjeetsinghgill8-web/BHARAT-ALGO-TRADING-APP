@@ -217,7 +217,7 @@ def run_one_cycle() -> None:
             active_sym = db.get("active_symbol", "NONE")
             opt_ltp    = data.get_option_ltp(active_sym) if active_sym != "NONE" else 0.0
             pnl_pct    = ((opt_ltp - entry_prem) / entry_prem * 100) if entry_prem > 0 else 0.0
-            utils.log("3:10 PM FORCE CLOSE — squaring off ALL positions!", "ALERT")
+            utils.log("3:00 PM FORCE CLOSE — squaring off ALL positions!", "ALERT")
             tg.send_msg(tg.msg_exit_market_close(entry_prem, opt_ltp, pnl_pct))
             executor.square_off_all_positions()
         return

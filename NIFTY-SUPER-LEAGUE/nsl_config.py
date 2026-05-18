@@ -10,13 +10,13 @@ RULES:
   • Paper trade:   FULLY REMOVED. Never add it back.
   • Profit target: REMOVED. Engine holds until SuperTrend flip.
   • Stop Loss:     Dashboard-only manual cut. Default = disabled.
-  • Market hours:  9:20 AM start | 3:10 PM force close.
+  • Market hours:  9:16 AM start | 3:00 PM force close.
   • Signal logic:  Price above ST line = BUY CALL | below = BUY PUT.
 """
 
 # ─── Identity ─────────────────────────────────────────────────
 APP_NAME    = "NIFTY SUPER LEAGUE"
-APP_VERSION = "v4.0"
+APP_VERSION = "v4.1"
 APP_EMOJI   = "🏆"
 
 # ─── Market windows (IST 24h) ─────────────────────────────────
